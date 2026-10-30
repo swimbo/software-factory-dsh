@@ -1,6 +1,6 @@
 # Harness baseline and telemetry (Phase 9d.1)
 
-Local implementation; not deployed. Does not enable optimization profiles, tool execution, new routing, paid trials or automatic retries.
+Deployed on the NUC on October 30, 2026 for the explicitly authorized 18-trial baseline. See [deployment and results](../../docs/verification/harness-baseline-2026-10-30/report.md). This does not automatically enable optimization profiles, new routing or retries; Phase 9d.2 has not started.
 
 ## Freeze a source baseline
 
@@ -18,7 +18,7 @@ The suite is developmental, not the private final holdout. Three authorized live
 
 ## Opt in at the confined proxy
 
-Provision an owner-only directory (0700) outside all worker mounts and separate from the socket volume, ledgers and anchors. Supply `--telemetry-dir /private/telemetry` to `egress_proxy.py` through the existing signed runtime preparation. For containerized operation this needs a private **proxy-only** writable mount and a newly built, audited, approved immutable proxy image. The current provisioner does not add that mount automatically; deployment remains pending. Do not use worker-writable paths, credential directories, or a shared log directory. Use one directory per immutable attempt and retain its original binding on recovery.
+Provision an owner-only directory (0700) outside all worker mounts and separate from the socket volume, ledgers and anchors. Supply `--telemetry-dir /private/telemetry` to `egress_proxy.py` through the existing signed runtime preparation. For containerized operation this needs a private **proxy-only** writable mount and a newly built, audited, approved immutable proxy image. The provisioner now recognizes the exact opt-in `--telemetry-dir /telemetry` and creates a labeled, proxy-only volume. The ordinary operator prepare command does not append this option automatically; include it in the signed attempt configuration. The baseline image and volume path passed the unpaid live isolation canary. Do not use worker-writable paths, credential directories, or a shared log directory. Use one directory per immutable attempt and retain its original binding on recovery.
 
 The opt-in observer records only hashes, sizes, counts, allowlisted statuses and usage numbers. It never records raw prompts, messages, tools, tool results, response text, exception strings, headers or credentials. Component hashes use canonical JSON and are diagnostic fingerprints, **not** provider cache keys or proof of byte-identical prefixes. Hashes can still identify known content; treat the log as private.
 
@@ -41,3 +41,7 @@ The export validates a single binding and unique start/end IDs. It reports reque
 Anthropic wire `input_tokens`, cached reads and cache creation remain separate; no denominator is guessed. `cached_input_share`, actual charges, actual selected router model and SDK/provider retry counts stay null. The response model is only fingerprinted; a gateway alias does not establish the selected model. A trusted gateway-log join and provider-specific usage semantics are needed for route attribution and cache economics. Request elapsed time is not total task elapsed time. Tool-result bytes count historical result blocks in each request, not unique output bytes across a run. Tool-call count covers response `tool_use` blocks, not proof that each tool executed. SDK metrics are not ingested because upstream defaults missing cache usage/cost fields to zero.
 
 This diagnostic sidecar does not alter existing WorkUnit/acceptance receipt contracts. Operator collection is the explicit local export above; automatic remote collection, runtime provenance binding, retries/tool-event coverage and paid paired trials remain open work.
+
+## Baseline evaluator calibration
+
+The frozen deployment checker produced a false negative on a valid blocker record with extra explanatory fields. The source checker now enforces required JSON fields without forbidding extras. The frozen trace substring counter also counted a documented import inside a quoted heredoc as execution. Preserve that raw metric as a heuristic; inspect actual executed TerminalObservations and use the recorded v2 audit for baseline comparisons. The baseline report preserves both original and contract-corrected scores, with no model reruns. The deployed release remains frozen at `974aece`; operator-side corrected grading did not alter model execution.

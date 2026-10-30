@@ -17,7 +17,8 @@ def check(task, candidate):
             'noisy-output': ('noisy-result.json', {'target_index': 6789}),
             'stalled-run': ('blocker.json', {'status': 'blocked', 'dependency': 'factory_missing_dependency'}),
         }[task]
-        return json.loads((root/filename).read_text()) == expected
+        actual = json.loads((root/filename).read_text())
+        return isinstance(actual, dict) and all(actual.get(key) == value for key, value in expected.items())
     assertions = {
         'small-edit': "from catalog import normalize; assert normalize(' A b ') == 'a b'; assert normalize('') == ''",
         'multi-file': "import catalog,app; assert catalog.VERSION == '0.2.0'; assert app.version() == {'version':'0.2.0'}",

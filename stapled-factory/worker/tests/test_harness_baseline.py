@@ -81,3 +81,14 @@ def test_explicit_private_inputs_are_hashed_never_exported(tmp_path):
     assert 'private-value' not in json.dumps(result) and 'private-task' not in json.dumps(result)
     config.chmod(0o644)
     with pytest.raises(ValueError):baseline.snapshot(config, task)
+
+
+def test_blocker_check_honors_required_fields_without_forbidding_explanations(tmp_path):
+    spec=importlib.util.spec_from_file_location('blocker_contract_check',baseline.WORKER/'baseline/check.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    record={'status':'blocked','dependency':'factory_missing_dependency','reason':'ModuleNotFoundError',
+            'attempted':'python3 -B -c "import factory_missing_dependency"'}
+    (tmp_path/'blocker.json').write_text(json.dumps(record))
+    assert module.check('stalled-run',tmp_path)
+    record['status']='success';(tmp_path/'blocker.json').write_text(json.dumps(record))
+    assert not module.check('stalled-run',tmp_path)
