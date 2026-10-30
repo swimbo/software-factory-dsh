@@ -12,7 +12,7 @@ import subprocess
 import uuid
 
 from egress_guard import inspect
-from provision_check import validate_identity, validate_volume, resource_arguments
+from provision_check import validate_identity, validate_volume, resource_arguments, telemetry_volume_name
 from netns_firewall import install_proxy_firewall, verify_proxy_firewall
 
 
@@ -31,6 +31,8 @@ def _run(args, *, timeout=30):
 
 def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_command,
               workspace, uid, worker_environment, gateway_key, allocation_id=None, before_credential=None, firewall=None):
+    # Validate telemetry opt-in before any Docker observation or mutation.
+    telemetry_volume_name(proxy_command, '')
     image_details = {}
     for image in (worker_image, proxy_image, helper_image):
         if not re.fullmatch(r'sha256:[0-9a-f]{64}', image):
@@ -75,11 +77,16 @@ def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_
         raise ProvisionError('invalid reserved allocation ID')
     prefix = 'factory-' + alloc
     sock, budget, anchor, network, worker, proxy = (prefix + '-' + x for x in ('socket', 'budget', 'anchor', 'network', 'worker', 'proxy'))
+    telemetry = telemetry_volume_name(proxy_command, alloc)
+    volume_roles = [(sock, 'socket'), (budget, 'budget'), (anchor, 'anchor')]
+    if telemetry:
+        volume_roles.append((telemetry, 'telemetry'))
+    telemetry_mount = ['--mount', 'type=volume,src=' + telemetry + ',dst=/telemetry'] if telemetry else []
     created = []
     process = None
     labels = ['--label', 'factory.allocation=' + alloc]
     try:
-        for name, role in ((sock, 'socket'), (budget, 'budget'), (anchor, 'anchor')):
+        for name, role in volume_roles:
             _run(['volume', 'create', *labels, '--label', 'factory.role=' + role, name])
             # Docker volume create is idempotent. Never mount or chown an
             # unexpected pre-existing or bind-backed volume.
@@ -92,13 +99,18 @@ def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_
               '--security-opt', 'no-new-privileges', '--user', '0:0',
               '--mount', 'type=volume,src=' + sock + ',dst=/gateway',
               '--mount', 'type=volume,src=' + budget + ',dst=/budget',
-              '--mount', 'type=volume,src=' + anchor + ',dst=/anchor',
-              '--entrypoint', '/bin/chown', helper_image, str(uid) + ':' + str(uid), '/gateway', '/budget', '/anchor'])
+              '--mount', 'type=volume,src=' + anchor + ',dst=/anchor', *telemetry_mount,
+              '--entrypoint', '/bin/chown', helper_image, str(uid) + ':' + str(uid), '/gateway', '/budget', '/anchor',
+              *(['/telemetry'] if telemetry else [])])
+        if telemetry:
+            _run(['run', '--rm', *resource_arguments('helper'), '--network', 'none', '--cap-drop', 'ALL',
+                  '--security-opt', 'no-new-privileges', '--user', f'{uid}:{uid}', *telemetry_mount,
+                  '--entrypoint', '/bin/chmod', helper_image, '0700', '/telemetry'])
         common = ['--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', f'{uid}:{uid}']
         _run(['create', '-i', '--name', proxy, *labels, '--label', 'factory.role=proxy', *common, *resource_arguments('proxy'),
               '--network', network, '--mount', 'type=volume,src=' + sock + ',dst=/gateway',
               '--mount', 'type=volume,src=' + budget + ',dst=/budget',
-              '--mount', 'type=volume,src=' + anchor + ',dst=/anchor',
+              '--mount', 'type=volume,src=' + anchor + ',dst=/anchor', *telemetry_mount,
               '--entrypoint', proxy_command[0], proxy_image, *proxy_command[1:]])
         created.append(('container', proxy))
         # docker start -ai keeps stdin connected; key is never in argv or env.
@@ -111,7 +123,7 @@ def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_
         created.append(('container', worker))
         _run(['start', worker])
         w, p = inspect('container', worker), inspect('container', proxy)
-        records = {name: inspect('volume', name) for name in (sock, budget, anchor)}
+        records = {name: inspect('volume', name) for name, _ in volume_roles}
         validate_identity(w, p, worker_image_id=worker_image, proxy_image_id=proxy_image,
                           worker_command=worker_command, proxy_command=proxy_command,
                           socket_volume=sock, budget_volume=budget, proxy_network=inspect('network', network)['Id'],
@@ -140,13 +152,13 @@ def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_
         if process is not None:
             process.terminate()
         for kind, name in reversed(created):
-            if kind == 'volume' and name in (budget, anchor):
+            if kind == 'volume' and name in (budget, anchor, telemetry):
                 continue
             try:
                 _run([kind, 'rm', *(['-f'] if kind == 'container' else []), name])
             except ProvisionError:
                 pass
-        raise ProvisionError('provisioning failed (' + failure_type + '); budget and anchor volumes retained if created') from None
+        raise ProvisionError('provisioning failed (' + failure_type + '); budget and anchor volumes retained if created; telemetry retained if created') from None
 
 
 def _check_baseline(workspace, baseline):
@@ -232,7 +244,9 @@ def inspect_bound_allocation(store, attempt_id, request_hash, conversation_id, *
         prefix = 'factory-' + allocation_id
         sock, budget, anchor, network, worker, proxy = (prefix + '-' + x for x in ('socket', 'budget', 'anchor', 'network', 'worker', 'proxy'))
         w, p, n = inspect('container', worker), inspect('container', proxy), inspect('network', network)
-        volumes = {name: inspect('volume', name) for name in (sock, budget, anchor)}
+        telemetry = telemetry_volume_name(configuration['proxy_command'], allocation_id)
+        volume_names = (sock, budget, anchor) + ((telemetry,) if telemetry else ())
+        volumes = {name: inspect('volume', name) for name in volume_names}
         actual = {'worker_id': w.get('Id'), 'proxy_id': p.get('Id'), 'network_id': n.get('Id'),
                   'worker_lifecycle': _running_lifecycle(w),
                   'workspace_baseline': workspace_baseline,

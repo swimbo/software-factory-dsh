@@ -148,16 +148,20 @@ def test_reconciliation_rejects_replaced_container(monkeypatch, tmp_path):
         runtime.inspect_bound_allocation(store, 'unit:0', 'request', 'conversation', workspace_baseline=baseline, **config)
 
 
-def test_reinspection_uses_real_topology_validator(monkeypatch, tmp_path):
+@pytest.mark.parametrize('telemetry', [False, True])
+def test_reinspection_uses_real_topology_validator(monkeypatch, tmp_path, telemetry):
     from types import SimpleNamespace
     from guarded_store import GuardedAttemptStore
-    from test_provision_check import fixture
+    from test_provision_check import fixture, telemetry_fixture
     ledger, anchor = tmp_path / 'ledger', tmp_path / 'anchor'
     ledger.mkdir(); anchor.mkdir()
     store = GuardedAttemptStore.initialize(ledger / 'db', anchor / 'watermark')
     store.reserve('unit:0', 'request', 'conversation')
     baseline = 'a' * 40
-    w, p, k = fixture(tmp_path)
+    if telemetry:
+        w, p, k, telemetry_name = telemetry_fixture(tmp_path)
+    else:
+        w, p, k = fixture(tmp_path)
     config = {'worker_image': w['Image'], 'proxy_image': p['Image'], 'helper_image': 'sha256:' + '3' * 64,
               'worker_command': k['worker_command'], 'proxy_command': k['proxy_command'],
               'workspace': str(tmp_path), 'uid': 1000, 'worker_environment': []}
@@ -166,6 +170,8 @@ def test_reinspection_uses_real_topology_validator(monkeypatch, tmp_path):
     def fake_provision(**kwargs):
         allocation = kwargs['allocation_id']; prefix = 'factory-' + allocation
         names = {k['socket_volume']: prefix + '-socket', k['budget_volume']: prefix + '-budget', 'anchor': prefix + '-anchor'}
+        if telemetry:
+            names[telemetry_name] = prefix + '-telemetry'
         for container in (w, p):
             container['Config']['Labels']['factory.allocation'] = allocation
             for mount in container['Mounts']:
@@ -185,6 +191,12 @@ def test_reinspection_uses_real_topology_validator(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime, 'inspect', lambda kind, name: resources[(kind, name)])
     allocation = runtime.provision_once(store, 'unit:0', 'request', 'conversation', workspace_baseline=baseline, gateway_key=b'secret', **config)
     assert runtime.inspect_bound_allocation(store, 'unit:0', 'request', 'conversation', workspace_baseline=baseline, **config)['allocation_id'] == allocation
+    if telemetry:
+        record = resources[('volume', 'factory-' + allocation + '-telemetry')]
+        record['CreatedAt'] = 'replaced-volume'
+        with pytest.raises(runtime.ProvisionError, match='unavailable or changed'):
+            runtime.inspect_bound_allocation(store, 'unit:0', 'request', 'conversation', workspace_baseline=baseline, **config)
+        record.pop('CreatedAt')
     w['HostConfig']['NetworkMode'] = 'bridge'
     with pytest.raises(runtime.ProvisionError):
         runtime.inspect_bound_allocation(store, 'unit:0', 'request', 'conversation', workspace_baseline=baseline, **config)
@@ -282,3 +294,70 @@ def test_rejects_bind_backed_volume_before_privileged_initializer(monkeypatch, t
                           uid=1000, worker_environment=[], gateway_key=b'secret')
     assert not any(call[0] == 'run' for call in calls)
     assert not any(call[:2] == ['volume', 'rm'] for call in calls)
+
+
+@pytest.mark.parametrize('option', [
+    ['--telemetry-dir'], ['--telemetry-dir','/budget'],
+    ['--telemetry-dir','/telemetry','--telemetry-dir','/telemetry'],
+    ['--telemetry-dir=/telemetry'],
+])
+def test_invalid_telemetry_refused_before_docker(monkeypatch, tmp_path, option):
+    monkeypatch.setattr(runtime, 'inspect', lambda *_: pytest.fail('Docker inspection before telemetry validation'))
+    monkeypatch.setattr(runtime, '_run', lambda *_: pytest.fail('Docker mutation before telemetry validation'))
+    image = 'sha256:'+'1'*64
+    with pytest.raises(ValueError, match='telemetry'):
+        runtime.provision(worker_image=image,proxy_image=image,helper_image=image,
+            worker_command=['worker'],proxy_command=['proxy',*option],workspace=str(tmp_path),
+            uid=1000,worker_environment=[],gateway_key=b'key')
+
+
+def test_telemetry_is_private_proxy_only_and_retained_after_failure(monkeypatch,tmp_path):
+    image='sha256:'+'1'*64
+    calls=[]
+    monkeypatch.setattr(runtime,'inspect',_inspect_volume)
+    def run(args,**kwargs):
+        calls.append(args)
+        if args[0]=='run':raise runtime.ProvisionError('initializer failure')
+        return ''
+    monkeypatch.setattr(runtime,'_run',run)
+    with pytest.raises(runtime.ProvisionError):
+        runtime.provision(worker_image=image,proxy_image=image,helper_image=image,
+            worker_command=['worker'],proxy_command=['proxy','--telemetry-dir','/telemetry'],
+            workspace=str(tmp_path),uid=1000,worker_environment=[],gateway_key=b'key',allocation_id='a'*32)
+    assert any(c[:2]==['volume','create'] and c[-1].endswith('-telemetry') for c in calls)
+    assert not any(c[:2]==['volume','rm'] and c[-1].endswith('-telemetry') for c in calls)
+
+
+def test_telemetry_mount_initialized_private_and_not_exposed_to_worker(monkeypatch,tmp_path):
+    import io
+    from test_provision_check import telemetry_fixture
+    w,p,k,old_telemetry=telemetry_fixture(tmp_path)
+    allocation='a'*32
+    names={k['socket_volume']:'factory-'+allocation+'-socket',
+           k['budget_volume']:'factory-'+allocation+'-budget',
+           k['anchor_volume']:'factory-'+allocation+'-anchor',old_telemetry:'factory-'+allocation+'-telemetry'}
+    for container in (w,p):
+        container['Config']['Labels']['factory.allocation']=allocation
+        for mount in container['Mounts']:
+            if mount.get('Name') in names:mount['Name']=names[mount['Name']]
+    class Process:
+        def __init__(self):self.stdin=io.BytesIO()
+        def terminate(self):pass
+    process=Process();calls=[]
+    def inspect(kind,name):
+        if kind=='container':return w if name.endswith('-worker') else p
+        if kind=='network':return {'Id':k['proxy_network']}
+        return _inspect_volume(kind,name)
+    monkeypatch.setattr(runtime,'inspect',inspect)
+    monkeypatch.setattr(runtime,'_run',lambda args,**kwargs:calls.append(args) or '')
+    monkeypatch.setattr(runtime.subprocess,'Popen',lambda *a,**kw:process)
+    runtime.provision(worker_image=w['Image'],proxy_image=p['Image'],helper_image='sha256:'+'3'*64,
+        worker_command=k['worker_command'],proxy_command=k['proxy_command'],workspace=str(tmp_path),
+        uid=1000,worker_environment=[],gateway_key=b'key',allocation_id=allocation)
+    assert process.stdin.getvalue()==b'key\n'
+    proxy_create=next(c for c in calls if c[0]=='create' and c[c.index('--name')+1].endswith('-proxy'))
+    worker_create=next(c for c in calls if c[0]=='create' and c[c.index('--name')+1].endswith('-worker'))
+    mount='type=volume,src=factory-'+allocation+'-telemetry,dst=/telemetry'
+    assert mount in proxy_create
+    assert not any(value.startswith('type=volume,src=') and value.endswith(',dst=/telemetry') for value in worker_create)
+    assert any(c[0]=='run' and '/bin/chmod' in c and c[-2:]==['0700','/telemetry'] for c in calls)

@@ -40,7 +40,7 @@ platform_args = ['--platform', build_platform] if build_platform else []
 base_env = ['PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin']
 scratch = tempfile.TemporaryDirectory(prefix='factory-egress-probe-')
 directory = Path(scratch.name)
-for name in ('egress_proxy.py', 'guarded_store.py', 'pinned_https.py', 'budget_authority.py'):
+for name in ('egress_proxy.py', 'harness_telemetry.py', 'guarded_store.py', 'pinned_https.py', 'budget_authority.py'):
     (directory/name).write_bytes((Path(ROOT)/name).read_bytes())
 for name in ('egress_bridge.py', 'agent_entrypoint.py'):
     (directory/name).write_bytes((Path(ROOT)/name).read_bytes())
@@ -100,7 +100,7 @@ try:
         firewall_image = docker('image', 'inspect', firewall_tag, '--format', '{{.Id}}')
         builder = docker('create', '--network', 'none', base, 'true')
         try:
-            for name in ('egress_proxy.py', 'guarded_store.py', 'pinned_https.py', 'budget_authority.py', 'fake_proxy.py'):
+            for name in ('egress_proxy.py', 'harness_telemetry.py', 'guarded_store.py', 'pinned_https.py', 'budget_authority.py', 'fake_proxy.py'):
                 docker('cp', str(directory/name), builder+':/tmp/'+name)
             docker('commit', builder, tag)
             exporter = subprocess.Popen(['docker','export',builder], stdout=subprocess.PIPE)
