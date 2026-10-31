@@ -71,6 +71,16 @@ def effective_environment(environment,profile):
         x for x in environment if x.partition('=')[0] not in ENVIRONMENT]
 
 
+def environment_matches(actual,expected,profile):
+    if not enabled(profile):return actual==expected
+    # Docker may reorder CLI overrides. Require the same unique names and values.
+    def valid(values):
+        return (isinstance(values,list) and
+                all(isinstance(v,str) and '=' in v for v in values) and
+                len({v.partition('=')[0] for v in values})==len(values))
+    return valid(actual) and valid(expected) and sorted(actual)==sorted(expected)
+
+
 def validate_worker(worker,profile,uid):
     if not enabled(profile):return
     host=worker.get('HostConfig') or {}

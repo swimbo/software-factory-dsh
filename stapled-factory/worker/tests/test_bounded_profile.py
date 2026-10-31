@@ -81,3 +81,15 @@ def test_docker_explicit_environment_precedes_remaining_image_environment():
         'OH_BASH_EVENTS_DIR=/workspace/.git/factory-home/bash_events',
         'OH_PERSISTENCE_DIR=/workspace/.git/factory-home/.openhands',
         'PATH=/bin','OH_EXTRA_PYTHON_PATH=/opt/factory']
+
+
+def test_environment_order_is_irrelevant_but_duplicate_or_changed_values_fail():
+    from bounded_profile import environment_matches
+    expected=['HOME=/workspace/.git/factory-home','PATH=/bin']
+    assert environment_matches(list(reversed(expected)),expected,PROFILE)
+    assert not environment_matches(expected+expected[:1],expected,PROFILE)
+    assert not environment_matches(expected+['BIFROST_API_KEY=secret'],expected,PROFILE)
+    assert not environment_matches(['HOME=/tmp','PATH=/bin'],expected,PROFILE)
+    assert not environment_matches(['PATH=/bin'],expected,PROFILE)
+    assert not environment_matches(expected,['HOME=/tmp','HOME=/workspace/.git/factory-home','PATH=/bin'],PROFILE)
+    assert not environment_matches(list(reversed(expected)),expected,None)

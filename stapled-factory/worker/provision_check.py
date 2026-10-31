@@ -95,7 +95,7 @@ def validate_identity(worker, proxy, *, worker_image_id, proxy_image_id,
         require((cfg.get('Labels') or {}).get('factory.role') == role, role + ' role mismatch')
     require(worker['Config']['User'] == proxy['Config']['User'], 'socket requires matching numeric users')
     require(isinstance(worker_environment, list), 'explicit worker environment required')
-    require((worker['Config'].get('Env') or []) == bounded.effective_environment(worker_environment,execution_profile), 'worker environment mismatch')
+    require(bounded.environment_matches(worker['Config'].get('Env') or [], bounded.effective_environment(worker_environment,execution_profile), execution_profile), 'worker environment mismatch')
     for env in worker_environment:
         name = env.partition('=')[0].upper()
         require(not any(s in name for s in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'CREDENTIAL')), 'credential-like worker environment forbidden')
