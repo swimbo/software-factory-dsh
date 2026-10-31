@@ -9,6 +9,7 @@ import os
 import re
 import stat
 import subprocess
+import time
 import uuid
 import bounded_profile as bounded
 
@@ -123,6 +124,16 @@ def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_
         # docker start -ai keeps stdin connected; key is never in argv or env.
         process = subprocess.Popen(['docker', 'start', '-ai', proxy], stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        startup_deadline = time.monotonic() + 5
+        while True:
+            if process.poll() is not None:
+                raise ProvisionError('proxy controller exited during startup')
+            state = inspect('container', proxy).get('State') or {}
+            if state.get('Running') is True:
+                break
+            if state.get('Restarting') is True or time.monotonic() >= startup_deadline:
+                raise ProvisionError('proxy did not start within the bounded wait')
+            time.sleep(0.1)
         _run(['create', '--name', worker, *labels, '--label', 'factory.role=worker', *common, *resource_arguments('worker'), *bounded.worker_arguments(execution_profile,uid),
               '--network', 'none', '--mount', 'type=volume,src=' + sock + ',dst=/gateway,readonly',
               '--mount', 'type=bind,src=' + workspace + ',dst=/workspace',

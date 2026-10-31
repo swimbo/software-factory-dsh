@@ -10,6 +10,7 @@ def _inspect_volume(kind, name):
         parts = name.split('-')
         return {'Name': name, 'Driver': 'local', 'Scope': 'local', 'Options': None,
                 'Labels': {'factory.allocation': parts[1], 'factory.role': parts[-1]}}
+    if kind=='container':return {'Id':name,'State':{'Running':True}}
     return {'Id': name, 'Config': {'Env': []}}
 
 
@@ -44,6 +45,7 @@ def test_credential_is_not_released_when_preflight_fails(monkeypatch, tmp_path):
     class FakeProcess:
         def __init__(self): self.stdin = io.BytesIO(); self.terminated = False
         def terminate(self): self.terminated = True
+        def poll(self): return None
     process = FakeProcess()
     monkeypatch.setattr(runtime, 'inspect', _inspect_volume)
     monkeypatch.setattr(runtime, '_run', lambda *args, **kwargs: '')
@@ -246,7 +248,7 @@ def test_opt_in_firewall_fails_before_credential(monkeypatch, tmp_path, failure)
         if kind == 'volume': return _inspect_volume(kind, name)
         if name.endswith('-proxy'):
             counter['proxy'] += 1
-            started = 'new' if failure == 'restart' and counter['proxy'] > 1 else 'old'
+            started = 'new' if failure == 'restart' and events else 'old'
             return {'Id': 'b'*64, 'State': {'Pid': 42, 'StartedAt': started, 'Running': True}}
         return {'Id': 'c'*64}
     def install(*args):
@@ -355,7 +357,8 @@ def test_telemetry_is_private_proxy_only_and_retained_after_failure(monkeypatch,
     assert not any(c[:2]==['volume','rm'] and c[-1].endswith('-telemetry') for c in calls)
 
 
-def test_telemetry_mount_initialized_private_and_not_exposed_to_worker(monkeypatch,tmp_path):
+@pytest.mark.parametrize('startup',['ready','delayed'])
+def test_telemetry_mount_initialized_private_and_not_exposed_to_worker(monkeypatch,tmp_path,startup):
     import io
     from test_provision_check import telemetry_fixture
     w,p,k,old_telemetry=telemetry_fixture(tmp_path)
@@ -370,9 +373,16 @@ def test_telemetry_mount_initialized_private_and_not_exposed_to_worker(monkeypat
     class Process:
         def __init__(self):self.stdin=io.BytesIO()
         def terminate(self):pass
-    process=Process();calls=[]
+        def poll(self):return None
+    process=Process();calls=[];proxy_reads=[0];clock=[0.]
+    from types import SimpleNamespace
+    monkeypatch.setattr(runtime,'time',SimpleNamespace(monotonic=lambda:clock[0],sleep=lambda n:clock.__setitem__(0,clock[0]+n)),raising=False)
     def inspect(kind,name):
-        if kind=='container':return w if name.endswith('-worker') else p
+        if kind=='container':
+            if name.endswith('-worker'):return w
+            proxy_reads[0]+=1
+            if startup=='delayed' and proxy_reads[0]<3:return {**p,'State':{'Running':False,'Restarting':False}}
+            return p
         if kind=='network':return {'Id':k['proxy_network']}
         return _inspect_volume(kind,name)
     monkeypatch.setattr(runtime,'inspect',inspect)
@@ -396,3 +406,24 @@ def test_bounded_profile_refuses_unquotaed_workspace_before_docker(monkeypatch,t
         runtime.provision(worker_image='sha256:'+'1'*64,proxy_image='sha256:'+'2'*64,
             helper_image='sha256:'+'3'*64,worker_command=['x'],proxy_command=['y'],workspace=str(tmp_path),
             uid=1000,worker_environment=[],gateway_key=b'dummy',execution_profile='bounded-native-v1')
+
+
+@pytest.mark.parametrize('exited',[False,True])
+def test_proxy_startup_never_releases_key_after_timeout_or_controller_exit(monkeypatch,tmp_path,exited):
+    import io
+    from types import SimpleNamespace
+    image='sha256:'+'1'*64;clock=[0.];stream=io.BytesIO();terminated=[]
+    process=SimpleNamespace(stdin=stream,poll=lambda:0 if exited else None,terminate=lambda:terminated.append(True))
+    def inspect(kind,name):
+        value=_inspect_volume(kind,name)
+        if kind=='container':value['State']={'Running':False,'Restarting':False}
+        return value
+    monkeypatch.setattr(runtime,'inspect',inspect)
+    monkeypatch.setattr(runtime,'time',SimpleNamespace(monotonic=lambda:clock[0],sleep=lambda n:clock.__setitem__(0,clock[0]+n)))
+    monkeypatch.setattr(runtime,'_run',lambda *a,**k:'')
+    monkeypatch.setattr(runtime.subprocess,'Popen',lambda *a,**k:process)
+    with pytest.raises(runtime.ProvisionError):
+        runtime.provision(worker_image=image,proxy_image=image,helper_image=image,worker_command=['worker'],
+            proxy_command=['proxy'],workspace=str(tmp_path),uid=1000,worker_environment=[],gateway_key=b'never-release')
+    assert stream.getvalue()==b'' and terminated
+    assert clock[0]==0 if exited else 5<=clock[0]<5.2
