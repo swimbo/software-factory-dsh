@@ -118,3 +118,18 @@ def test_bounded_profile_prepares_only_and_never_claims_filesystem_provisioning(
     assert config['provision']['execution_profile']=='bounded-native-v1'
     assert result['status']=='prepared_not_activated'
     assert config['payload']['agent_settings']['llm']['model']=='anthropic/auto'
+
+
+def test_stall_profile_is_opt_in_and_keeps_the_original_request_budget(tmp_path,monkeypatch):
+    args=fixture(tmp_path,monkeypatch)
+    result=prep.prepare(**args,context_profile='context-v1',execution_profile='bounded-native-v1',stall_profile='stall-v1')
+    path=Path(result['environment']['FACTORY_RUNTIME_CONFIG']);config=json.loads(path.read_text())
+    assert config['stall_profile']=='stall-v1' and config['payload']['max_iterations']==12
+    assert json.loads((path.parent/'stall-profile.json').read_text())['diagnostic_run'] is False
+    assert config['provision']['proxy_command'][config['provision']['proxy_command'].index('--max-requests')+1]=='12'
+
+
+def test_stall_profile_requires_bounded_context_before_preparing_anything(tmp_path,monkeypatch):
+    args=fixture(tmp_path,monkeypatch)
+    with pytest.raises(ValueError):prep.prepare(**args,stall_profile='stall-v1')
+    assert not args['root'].exists() and not args['attempt_db'].exists()

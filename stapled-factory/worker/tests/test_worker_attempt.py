@@ -69,3 +69,15 @@ def test_unregistered_exception_diagnostic_cannot_expose_arbitrary_text(tmp_path
         error=RuntimeError('private-fixture-never-log');error.diagnostic_code='private-fixture-never-log';raise error
     result=execute_attempt(AttemptStore(tmp_path/'attempts.db'),'safe:0',{},dispatch,lambda *_:None)
     assert result['status']=='unknown' and 'private-fixture' not in result['error']
+
+
+def test_stall_fencing_is_unknown_with_original_identity_and_no_result_publication(tmp_path):
+    from stall_runtime import StallIntervention
+    calls=[]
+    def dispatch(*_):calls.append('original');raise StallIntervention('stopped')
+    store=AttemptStore(tmp_path/'attempts.db')
+    result=execute_attempt(store,'stall:0',{'task':'x'},dispatch,lambda *_:None)
+    assert result['status']=='unknown' and result['intervention_status']=='stopped' and result['git_revision']==''
+    replay=execute_attempt(store,'stall:0',{'task':'x'},dispatch,lambda *_:None)
+    assert replay['status']=='unknown' and calls==['original']
+    assert replay['conversation_id']==result['conversation_id']

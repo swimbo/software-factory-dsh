@@ -46,6 +46,11 @@ def execute_attempt(store, attempt_id, request, dispatch, reconcile, *, reconcil
         store.complete(attempt_id, json.dumps(result, sort_keys=True))
         return result
     except Exception as error:
+        from stall_runtime import StallIntervention
+        if isinstance(error,StallIntervention):
+            return {'status':'unknown','git_revision':'','conversation_id':conversation_id,
+                    'error':'Stall intervention requires reconciliation',
+                    'intervention_status':error.intervention_status}
         message="Attempt could not be safely dispatched or reconciled"
         code=getattr(error,'diagnostic_code',None)
         if isinstance(code,str):

@@ -139,3 +139,13 @@ def test_bounded_execution_refuses_unquotaed_workspace_before_credential(tmp_pat
     config['provision']['execution_profile']='bounded-native-v1';path.write_text(json.dumps(config))
     monkeypatch.setattr(operator_cli,'_credential',lambda:pytest.fail('credential read before quota preflight'))
     with pytest.raises(ValueError):operator_cli.run(args)
+
+
+def test_stall_capability_options_fail_before_credentials_or_dispatch(tmp_path,monkeypatch):
+    args,config,path=configured(tmp_path,monkeypatch)
+    config['stall_profile']='stall-v1';config['provision']['execution_profile']='bounded-native-v1'
+    config['payload']['agent_settings']['llm']['reasoning_effort']='high'
+    path.write_text(json.dumps(config))
+    monkeypatch.setattr(operator_cli,'_credential',lambda:pytest.fail('no credential before capability validation'))
+    assert worker.run_task(args)['status']=='blocked'
+    assert not Path(args.attempt_db).exists()

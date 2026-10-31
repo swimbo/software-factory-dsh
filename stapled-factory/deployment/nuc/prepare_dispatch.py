@@ -55,7 +55,10 @@ def git(*args):
 
 
 def prepare(*, root, unit, manifest, release, approval, signature, trust_root,
-            attempt_db, attempt_anchor, task_text, context_profile='baseline', execution_profile=None):
+            attempt_db, attempt_anchor, task_text, context_profile='baseline', execution_profile=None, stall_profile=None):
+    from stall_runtime import PROFILE as STALL, manifest as stall_manifest
+    if stall_profile is not None and (stall_profile!=STALL or execution_profile!='bounded-native-v1' or context_profile!='context-v1'):
+        raise ValueError('stall profile requires bounded context-v1')
     bounded_enabled(execution_profile)
     profile = profile_manifest(context_profile)  # validate before any effect
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', unit):
@@ -123,6 +126,9 @@ def prepare(*, root, unit, manifest, release, approval, signature, trust_root,
     if execution_profile is not None:
         config['provision']['execution_profile']=execution_profile
     config['payload'] = apply_profile(config['payload'], context_profile)
+    if stall_profile is not None:
+        config['stall_profile']=stall_profile
+        write(task_root/'stall-profile.json',json.dumps(stall_manifest(),indent=2)+'\n')
     write(task_root/'context-profile.json', json.dumps(profile, indent=2)+'\n')
     config_path = task_root/'runtime.json'; write(config_path,json.dumps(config,indent=2)+'\n')
     invocation = {'status':'prepared_not_activated','unit':unit,'environment':{
@@ -137,6 +143,7 @@ def prepare(*, root, unit, manifest, release, approval, signature, trust_root,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument('--stall-profile',choices=('stall-v1',))
     parser.add_argument('--execution-profile', choices=('bounded-native-v1',))
     parser.add_argument('--context-profile', choices=('baseline', 'context-v1'), default='baseline')
     for name in ('root','unit','manifest','release','approval','signature','trust-root','attempt-db','attempt-anchor','task-file'):
