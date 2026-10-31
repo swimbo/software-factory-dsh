@@ -89,6 +89,7 @@ def test_original_deadline_fences_after_one_message_without_resetting_ledger(tmp
     class Transport:
         def request(self,method,path,payload=None):
             if method=='POST':counts['message']+=1;assert payload['run'] is False;return {'success':True}
+            if '/events/search' not in path:return {'id':args[3],'execution_status':'running'}
             events=[]
             for n in range(counts['reads']):
                 events += [{'id':str(n),'kind':'ActionEvent','tool_name':'terminal','tool_call_id':str(n),'action':{'command':'false'}},
@@ -150,3 +151,28 @@ def test_failed_fence_retains_uncertainty_and_restart_never_resends_diagnostic(t
     with pytest.raises(StallIntervention,match='stopped'):
         run_session(path,{'attempt':'original'},**ops)
     assert calls['send']==[DIAGNOSTIC] and calls['stop']==2
+
+
+def test_terminal_sdk_state_is_not_messaged_or_automatically_resumed(tmp_path):
+    tmp_path.chmod(0o700);calls,ops=callbacks();ops['ready']=lambda:False
+    with pytest.raises(StallIntervention,match='stopped'):
+        run_session(tmp_path/'state.json',{'attempt':'original'},**ops)
+    assert not calls['send'] and calls['stop']==1
+    assert json.loads((tmp_path/'state.json').read_text())['delivery_status']=='not_sent'
+
+
+def test_inactive_loop_after_delivery_is_fenced_without_new_run_or_message(tmp_path):
+    tmp_path.chmod(0o700);calls,ops=callbacks();ops['ready']=lambda:not calls['send']
+    with pytest.raises(StallIntervention,match='stopped'):
+        run_session(tmp_path/'state.json',{'attempt':'original'},**ops)
+    assert calls['send']==[DIAGNOSTIC] and calls['stop']==1
+
+
+def test_verified_completion_at_terminal_boundary_is_preserved_without_message(tmp_path):
+    tmp_path.chmod(0o700);calls,ops=callbacks();ops['ready']=lambda:False
+    def read():
+        calls['read']+=1
+        return {'status':'completed','git_revision':'a'*40} if calls['read']>=5 else None
+    ops['read']=read
+    result=run_session(tmp_path/'state.json',{'attempt':'original'},**ops)
+    assert result['status']=='completed' and not calls['send'] and calls['stop']==0

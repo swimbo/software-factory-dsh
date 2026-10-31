@@ -13,6 +13,7 @@ from stall_detection import observe
 
 PROFILE='stall-v1'
 CAPABILITIES='auto-common-v1'
+PROFILE_POLICY={'window':3,'min_span_seconds':4,'post_intervention_window':3,'history_limit':12}
 LLM_FIELDS=frozenset(('model','api_key','base_url','usage_id','max_output_tokens'))
 DIAGNOSTIC=('Repeated tool failures or an edit loop produced no new evidence. '
             'Stop repeating the same action. Inspect one relevant source or diagnostic, '
@@ -39,7 +40,8 @@ def validate_profile(config,profile):
 def manifest():
     return {'schema':'factory.stall-profile/v1','profile':PROFILE,'model_capabilities':CAPABILITIES,
             'llm_fields':sorted(LLM_FIELDS),'diagnostic_sha256':hashlib.sha256(DIAGNOSTIC.encode()).hexdigest(),
-            'poll_seconds':2,'max_polls':120,'diagnostic_run':False}
+            'poll_seconds':2,'max_polls':120,'diagnostic_run':False,
+            'policy':PROFILE_POLICY,'requires_running_sdk':True}
 
 
 def _private(info,directory=False):
@@ -72,7 +74,7 @@ def _load(path,identity):
     if len(raw)>1024*1024:raise ValueError('stall state exceeds bound')
     value=json.loads(raw)
     if (set(value)!={'schema','identity','detector','effect','delivery_status','seen_observations'} or value['schema']!='factory.stall-session/v1'
-            or value['delivery_status'] not in (None,'claimed','sent','uncertain')
+            or value['delivery_status'] not in (None,'claimed','sent','uncertain','not_sent')
             or value['identity']!=identity or value['effect'] not in
             ('observing','intervention_claimed','intervention_sent','stop_claimed','stopped','fencing_uncertain')):
         raise ValueError('stall state identity or phase differs')
@@ -93,7 +95,7 @@ def _halt(path,state,stop):
     raise StallIntervention('stopped')
 
 
-def run_session(path,identity,*,sample,read,send,stop,validate,sleep=None):
+def run_session(path,identity,*,sample,read,send,stop,validate,sleep=None,ready=None,policy=None):
     """Serialize observations, save an intent before delivery, never retry delivery.
 
     A lost/uncertain delivery is contained using the original allocation deadline
@@ -115,6 +117,10 @@ def run_session(path,identity,*,sample,read,send,stop,validate,sleep=None):
             validate()
             result=read()
             if result is not None:return result
+            if state['effect']=='intervention_sent' and ready is not None and not ready():
+                result=read()
+                if result is not None:return result
+                _halt(path,state,stop)
             value=sample(state)
             if value is not None:
                 value=dict(value);source=value.pop('_source_id',None)
@@ -129,8 +135,13 @@ def run_session(path,identity,*,sample,read,send,stop,validate,sleep=None):
                     value['seq']=previous['seq']+1 if previous else 1
                 if progress and state['detector'] is not None:
                     state['detector']['history']=[]
-                state['detector'],decision=observe(state['detector'],value)
+                state['detector'],decision=observe(state['detector'],value,policy)
                 if decision=='intervene':
+                    validate()
+                    if ready is not None and not ready():
+                        result=read()
+                        if result is not None:return result
+                        state['delivery_status']='not_sent';_halt(path,state,stop)
                     state['effect']='intervention_claimed';state['delivery_status']='claimed'
                 _save(path,state)
                 if decision=='stop':_halt(path,state,stop)
@@ -199,9 +210,14 @@ class StallAdapter:
             value=self.base.transport.request('POST','/api/conversations/'+cid+'/events',
                 {'role':'user','content':[{'type':'text','text':text}],'run':False})
             if value.get('success') is not True:raise ValueError('diagnostic delivery uncertain')
+        def ready():
+            value=self.base.transport.request('GET','/api/conversations/'+cid)
+            if value.get('id')!=cid:raise ValueError('original conversation differs')
+            return value.get('execution_status')=='running'
         return run_session(self.path,self.identity,sample=lambda state:self._sample(cid,state),
             read=lambda:self.base.read(cid,None),send=send,
-            stop=lambda:deadline.expire(self.deadline_path,cancel=True),validate=self._validate)
+            stop=lambda:deadline.expire(self.deadline_path,cancel=True),validate=self._validate,
+            ready=ready,policy=PROFILE_POLICY)
 
     def create(self,cid,payload):
         result=self.base.create(cid,payload)
