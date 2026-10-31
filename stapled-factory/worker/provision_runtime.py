@@ -22,13 +22,29 @@ class ProvisionError(RuntimeError):
     pass
 
 
+_DIAGNOSTIC_OPERATIONS=('volume','network','run','create','start','kill','container')
+SAFE_DIAGNOSTIC_CODES=frozenset(
+    ['provision.preflight.failed','docker.network.address_pool_exhausted']+
+    ['docker.'+op+'.'+kind for op in _DIAGNOSTIC_OPERATIONS for kind in ('failed','timeout','permission_denied','resource_unavailable')])
+
+
 def _run(args, *, timeout=30):
     # stderr may include sensitive arguments from Docker, so never expose it.
     try:
         return subprocess.run(['docker', *args], check=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, text=True, timeout=timeout).stdout.strip()
+                              stderr=subprocess.PIPE, text=True, timeout=timeout).stdout.strip()
     except (OSError, subprocess.SubprocessError) as exc:
-        raise ProvisionError('Docker operation failed: ' + args[0]) from exc
+        error=ProvisionError('Docker operation failed: ' + args[0])
+        operation=args[0] if args[0] in _DIAGNOSTIC_OPERATIONS else None
+        text=(getattr(exc,'stderr',None) or '')
+        if not isinstance(text,str):text=''
+        kind='timeout' if isinstance(exc,subprocess.TimeoutExpired) else 'failed'
+        if 'permission denied' in text.lower() or 'operation not permitted' in text.lower():kind='permission_denied'
+        if 'resource temporarily unavailable' in text.lower():kind='resource_unavailable'
+        error.diagnostic_code='docker.'+operation+'.'+kind if operation else None
+        if operation=='network' and 'all predefined address pools have been fully subnetted' in text:
+            error.diagnostic_code='docker.network.address_pool_exhausted'
+        raise error from exc
 
 
 def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_command,
@@ -176,7 +192,9 @@ def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_
                 _run([kind, 'rm', *(['-f'] if kind == 'container' else []), name])
             except ProvisionError:
                 pass
-        raise ProvisionError('provisioning failed (' + failure_type + '); budget and anchor volumes retained if created; telemetry retained if created') from None
+        error=ProvisionError('provisioning failed (' + failure_type + '); budget and anchor volumes retained if created; telemetry retained if created')
+        error.diagnostic_code=getattr(exc,'diagnostic_code','provision.preflight.failed')
+        raise error from None
 
 
 def _check_baseline(workspace, baseline):
