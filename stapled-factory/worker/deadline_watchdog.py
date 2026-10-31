@@ -220,19 +220,21 @@ def expire(record_path, *, cancel=False):
     store=GuardedAttemptStore(Path(record['db']),Path(record['anchor']))
     if _path(store,record['allocation_id'])!=Path(record_path):
         raise DeadlineError('deadline record location differs')
-    status=_bound(store,record)
-    # Verify both objects before any effect, and again immediately before kills.
+    # Private timer identity authorizes containment even if the ledger is locked
+    # or quarantined. Durable fencing is separate and may remain uncertain.
     _container(record,'worker');_container(record,'proxy')
     try:
+        _stop(record,'worker')
+    finally:
+        _stop(record,'proxy')
+    try:
+        status=_bound(store,record)
         if status=='reserved':
             from crash_fence import fence_bound_worker
             fence_bound_worker(store,record['attempt_id'],record['request_hash'],
                 record['conversation_id'],record['specification_hash'])
-        else:_stop(record,'worker')
     except Exception as error:
         raise DeadlineError('deadline fencing incomplete; original effects remain uncertain') from error
-    finally:
-        _stop(record,'proxy')
     _container(record,'worker')
     return {'status':'fenced' if status=='reserved' else 'stopped-'+status,
         'allocation_id':record['allocation_id'],'worker_id':record['binding']['worker_id'],

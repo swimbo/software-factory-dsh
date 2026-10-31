@@ -144,3 +144,24 @@ def test_boot_change_does_not_rearm_or_adopt_old_record(tmp_path,monkeypatch):
     with pytest.raises(watch.DeadlineError,match='boot changed'):watch.validate_deadline(*args)
     with pytest.raises(watch.DeadlineError,match='boot changed'):watch.expire(path)
     assert not [c for c in calls if c[0]=='kill']
+
+
+def test_deadline_stops_namespaces_before_potentially_blocking_ledger_access(tmp_path,monkeypatch):
+    args,containers,calls=fixture(tmp_path,monkeypatch);path=arm(args)
+    def blocked(*args):
+        assert all(not c['State']['Running'] for c in containers.values())
+        raise StoreQuarantined('ledger unavailable')
+    monkeypatch.setattr(watch,'_bound',blocked)
+    monkeypatch.setattr(watch.time,'monotonic',lambda:10003.)
+    with pytest.raises(watch.DeadlineError,match='fencing incomplete'):
+        watch.expire(path)
+    assert len([c for c in calls if c[0]=='kill'])==2
+
+
+def test_quarantined_ledger_does_not_disable_namespace_deadline(tmp_path,monkeypatch):
+    args,containers,_=fixture(tmp_path,monkeypatch);path=arm(args)
+    args[0].anchor_path.write_text('{}')
+    monkeypatch.setattr(watch.time,'monotonic',lambda:10003.)
+    with pytest.raises(watch.DeadlineError,match='fencing incomplete'):
+        watch.expire(path)
+    assert all(not c['State']['Running'] for c in containers.values())
