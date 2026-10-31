@@ -35,7 +35,10 @@ def test_bounded_worker_requires_readonly_root_and_exact_temporary_limit():
     assert 'size=536870912' in args[args.index('--tmpfs')+1]
     env=['HOME=/tmp/old','PATH=/bin']
     expected=effective_environment(env,PROFILE)
-    assert expected==['HOME=/workspace/.git/factory-home','PATH=/bin'] and env[0]=='HOME=/tmp/old'
+    assert expected==['HOME=/workspace/.git/factory-home','PATH=/bin',
+        'OH_CONVERSATIONS_PATH=/workspace/.git/factory-home/conversations',
+        'OH_BASH_EVENTS_DIR=/workspace/.git/factory-home/bash_events',
+        'OH_PERSISTENCE_DIR=/workspace/.git/factory-home/.openhands'] and env[0]=='HOME=/tmp/old'
     worker={'HostConfig':{'ReadonlyRootfs':True,'Tmpfs':{'/tmp':args[args.index('--tmpfs')+1].partition(':')[2]},'ShmSize':67108864},'Mounts':[]}
     validate_worker(worker,PROFILE,1000)
     worker['HostConfig']['ReadonlyRootfs']=False
@@ -53,3 +56,18 @@ def test_descendant_mount_cannot_bypass_workspace_capacity(tmp_path,monkeypatch)
     monkeypatch.setattr('bounded_profile.mounts',lambda:{str(tmp_path):{'id':'12','type':'tmpfs'},str(tmp_path/'nested'):{'id':'13','type':'ext4'}})
     with pytest.raises(ValueError,match='descendant'):
         validate_workspace(str(tmp_path),PROFILE)
+
+
+def test_sdk_conversation_and_event_checkpoints_use_retained_workspace():
+    expected={'HOME':'/workspace/.git/factory-home',
+              'OH_CONVERSATIONS_PATH':'/workspace/.git/factory-home/conversations',
+              'OH_BASH_EVENTS_DIR':'/workspace/.git/factory-home/bash_events',
+              'OH_PERSISTENCE_DIR':'/workspace/.git/factory-home/.openhands'}
+    args=worker_arguments(PROFILE,1000)
+    actual=dict(args[i+1].split('=',1) for i,v in enumerate(args) if v=='--env')
+    assert actual==expected
+    original=['PATH=/bin','HOME=/old','OH_CONVERSATIONS_PATH=/ephemeral']
+    environment=dict(x.split('=',1) for x in effective_environment(original,PROFILE))
+    assert all(environment[k]==v for k,v in expected.items())
+    assert original==['PATH=/bin','HOME=/old','OH_CONVERSATIONS_PATH=/ephemeral']
+    assert effective_environment(original,None)==original

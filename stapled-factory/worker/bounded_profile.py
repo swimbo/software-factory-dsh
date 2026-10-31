@@ -12,6 +12,8 @@ PROFILE = 'bounded-native-v1'
 MAX_WORKSPACE_BYTES = 1024**3
 TMP_BYTES = 512*1024**2
 HOME = '/workspace/.git/factory-home'
+ENVIRONMENT = {'HOME':HOME,'OH_CONVERSATIONS_PATH':HOME+'/conversations',
+               'OH_BASH_EVENTS_DIR':HOME+'/bash_events','OH_PERSISTENCE_DIR':HOME+'/.openhands'}
 
 
 def enabled(profile):
@@ -59,16 +61,15 @@ def temporary_option(uid):
 
 def worker_arguments(profile,uid):
     if not enabled(profile):return []
-    return ['--read-only','--tmpfs','/tmp:'+temporary_option(uid),'--env','HOME='+HOME]
+    return ['--read-only','--tmpfs','/tmp:'+temporary_option(uid)]+[
+        part for key,value in ENVIRONMENT.items() for part in ('--env',key+'='+value)]
 
 
 def effective_environment(environment,profile):
     if not enabled(profile):return environment
-    result=[x for x in environment if not x.startswith('HOME=')]
-    # Docker replaces an existing image ENV in place.
-    if any(x.startswith('HOME=') for x in environment):
-        return ['HOME='+HOME if x.startswith('HOME=') else x for x in environment]
-    return result+['HOME='+HOME]
+    present={x.partition('=')[0] for x in environment}
+    return [key+'='+ENVIRONMENT[key] if (key:=x.partition('=')[0]) in ENVIRONMENT else x
+            for x in environment]+[key+'='+value for key,value in ENVIRONMENT.items() if key not in present]
 
 
 def validate_worker(worker,profile,uid):
