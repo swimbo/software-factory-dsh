@@ -13,6 +13,7 @@ import time
 
 WORKER = Path(__file__).resolve().parents[2] / 'worker'
 sys.path.insert(0, str(WORKER))
+from context_profile import apply_profile, profile_manifest
 from guarded_store import GuardedAttemptStore, StoreQuarantined
 from image_approval import verify_approval
 from pricing_policy import policy_id, reservation_microdollars, request_limit
@@ -53,7 +54,8 @@ def git(*args):
 
 
 def prepare(*, root, unit, manifest, release, approval, signature, trust_root,
-            attempt_db, attempt_anchor, task_text):
+            attempt_db, attempt_anchor, task_text, context_profile='baseline'):
+    profile = profile_manifest(context_profile)  # validate before any effect
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', unit):
         raise ValueError('invalid unit identifier')
     release = Path(release)
@@ -116,6 +118,8 @@ def prepare(*, root, unit, manifest, release, approval, signature, trust_root,
         'payload':{'agent_settings':{'llm':{'usage_id':attempt,'model':'anthropic/'+MODEL,
             'base_url':'http://127.0.0.1:8123','api_key':'dummy','max_output_tokens':1024}},
             'workspace':{'working_dir':'/workspace'},'max_iterations':request_limit(MODEL)}}
+    config['payload'] = apply_profile(config['payload'], context_profile)
+    write(task_root/'context-profile.json', json.dumps(profile, indent=2)+'\n')
     config_path = task_root/'runtime.json'; write(config_path,json.dumps(config,indent=2)+'\n')
     invocation = {'status':'prepared_not_activated','unit':unit,'environment':{
         'FACTORY_RUNTIME_CONFIG':str(config_path),'FACTORY_IMAGE_APPROVAL_KEY':str(trust_root)},
@@ -128,7 +132,8 @@ def prepare(*, root, unit, manifest, release, approval, signature, trust_root,
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument('--context-profile', choices=('baseline', 'context-v1'), default='baseline')
     for name in ('root','unit','manifest','release','approval','signature','trust-root','attempt-db','attempt-anchor','task-file'):
         parser.add_argument('--'+name,required=True)
     args = vars(parser.parse_args())
