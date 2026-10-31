@@ -15,3 +15,5 @@ On the first qualifying stall, the host checks that the original SDK loop is sti
 If a qualifying loop continues after the intervention, existing deadline cancellation stops the original worker and proxy and fences its unresolved attempt. Failure to complete fencing retains uncertainty. The result remains `unknown` with intervention/reconciliation status; it is not successful completion, rollback, a new allocation, a retry authorization, or a budget refund. Restart/reconciliation preserves the original identity and one-shot claim.
 
 The sandbox and original allocation deadline remain the security boundary. Host/operator trust and worker-reported observation limitations still apply. Offline regressions precede any canary; a live SDK message-consumption canary and broader held-out evaluation are separate gates.
+
+The [October 31 qualification report](../../docs/verification/harness-stall-2026-10-31/report.md) records offline coverage, both immutable canary candidates and final gateway reconciliation. The profile remains opt-in.
