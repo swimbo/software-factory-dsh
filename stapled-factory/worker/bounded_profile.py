@@ -67,9 +67,8 @@ def worker_arguments(profile,uid):
 
 def effective_environment(environment,profile):
     if not enabled(profile):return environment
-    present={x.partition('=')[0] for x in environment}
-    return [key+'='+ENVIRONMENT[key] if (key:=x.partition('=')[0]) in ENVIRONMENT else x
-            for x in environment]+[key+'='+value for key,value in ENVIRONMENT.items() if key not in present]
+    return [key+'='+value for key,value in ENVIRONMENT.items()]+[
+        x for x in environment if x.partition('=')[0] not in ENVIRONMENT]
 
 
 def validate_worker(worker,profile,uid):

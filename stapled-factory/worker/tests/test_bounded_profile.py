@@ -35,10 +35,10 @@ def test_bounded_worker_requires_readonly_root_and_exact_temporary_limit():
     assert 'size=536870912' in args[args.index('--tmpfs')+1]
     env=['HOME=/tmp/old','PATH=/bin']
     expected=effective_environment(env,PROFILE)
-    assert expected==['HOME=/workspace/.git/factory-home','PATH=/bin',
+    assert expected==['HOME=/workspace/.git/factory-home',
         'OH_CONVERSATIONS_PATH=/workspace/.git/factory-home/conversations',
         'OH_BASH_EVENTS_DIR=/workspace/.git/factory-home/bash_events',
-        'OH_PERSISTENCE_DIR=/workspace/.git/factory-home/.openhands'] and env[0]=='HOME=/tmp/old'
+        'OH_PERSISTENCE_DIR=/workspace/.git/factory-home/.openhands','PATH=/bin'] and env[0]=='HOME=/tmp/old'
     worker={'HostConfig':{'ReadonlyRootfs':True,'Tmpfs':{'/tmp':args[args.index('--tmpfs')+1].partition(':')[2]},'ShmSize':67108864},'Mounts':[]}
     validate_worker(worker,PROFILE,1000)
     worker['HostConfig']['ReadonlyRootfs']=False
@@ -71,3 +71,13 @@ def test_sdk_conversation_and_event_checkpoints_use_retained_workspace():
     assert all(environment[k]==v for k,v in expected.items())
     assert original==['PATH=/bin','HOME=/old','OH_CONVERSATIONS_PATH=/ephemeral']
     assert effective_environment(original,None)==original
+
+
+def test_docker_explicit_environment_precedes_remaining_image_environment():
+    image=['PATH=/bin','HOME=/tmp/old','OH_EXTRA_PYTHON_PATH=/opt/factory']
+    assert effective_environment(image,PROFILE)==[
+        'HOME=/workspace/.git/factory-home',
+        'OH_CONVERSATIONS_PATH=/workspace/.git/factory-home/conversations',
+        'OH_BASH_EVENTS_DIR=/workspace/.git/factory-home/bash_events',
+        'OH_PERSISTENCE_DIR=/workspace/.git/factory-home/.openhands',
+        'PATH=/bin','OH_EXTRA_PYTHON_PATH=/opt/factory']
