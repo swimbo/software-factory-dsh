@@ -178,13 +178,15 @@ class CaptureStore:
                 raise
         process.wait(timeout=2)
 
-    def capture(self, argv, timeout=60):
+    def capture(self, argv, timeout=60, *, cancelled=None):
         if (not isinstance(argv, list) or not argv or len(argv) > 256
                 or any(not isinstance(x, str) or '\0' in x for x in argv)
                 or sum(len(x.encode()) for x in argv) > 32768
                 or isinstance(timeout, bool) or not isinstance(timeout, (int, float))
                 or not 0 < timeout <= 60):
             raise ValueError('bounded argv and timeout required')
+        if cancelled is not None and not callable(cancelled):
+            raise ValueError('cancellation predicate must be callable')
         if self.workspace.resolve() != self.workspace or not self.workspace.is_dir():
             raise ValueError('workspace changed')
         info = self.workspace.stat()
@@ -196,40 +198,45 @@ class CaptureStore:
                 fcntl.flock(lock, fcntl.LOCK_EX)
                 if self._clean_and_size(folder) + self.limit + _METADATA_RESERVE > self.quota:
                     raise ValueError('artifact quota exhausted; command not executed')
-                process = subprocess.Popen(argv, cwd=self.workspace, stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
                 raw = bytearray()
-                reason = None
-                deadline = time.monotonic() + timeout
-                selector = selectors.DefaultSelector()
-                try:
-                    os.set_blocking(process.stdout.fileno(), False)
-                    selector.register(process.stdout, selectors.EVENT_READ)
-                    while True:
-                        remaining = deadline - time.monotonic()
-                        if remaining <= 0:
-                            reason = 'timeout'
-                            break
-                        if not selector.select(min(remaining, .1)):
-                            continue
-                        chunk = os.read(process.stdout.fileno(), min(65536, self.limit + 1 - len(raw)))
-                        if not chunk:
-                            # Preserve the real exit status before cleaning descendants.
-                            try:
-                                process.wait(timeout=min(.1, max(.001, remaining)))
-                            except subprocess.TimeoutExpired:
-                                reason = 'output_closed_while_running'
-                            break
-                        raw.extend(chunk)
-                        if len(raw) > self.limit:
-                            raw = raw[:self.limit]
-                            reason = 'output_limit'
-                            break
-                finally:
-                    # Also kill descendants that closed inherited output but keep running.
-                    self._stop(process)
-                    selector.close()
-                    process.stdout.close()
+                process = None
+                reason = 'cancelled' if cancelled is not None and cancelled() else None
+                if reason is None:
+                    process = subprocess.Popen(argv, cwd=self.workspace, stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+                    deadline = time.monotonic() + timeout
+                    selector = selectors.DefaultSelector()
+                    try:
+                        os.set_blocking(process.stdout.fileno(), False)
+                        selector.register(process.stdout, selectors.EVENT_READ)
+                        while True:
+                            if cancelled is not None and cancelled():
+                                reason = 'cancelled'
+                                break
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                reason = 'timeout'
+                                break
+                            if not selector.select(min(remaining, .1)):
+                                continue
+                            chunk = os.read(process.stdout.fileno(), min(65536, self.limit + 1 - len(raw)))
+                            if not chunk:
+                                # Preserve the real exit status before cleaning descendants.
+                                try:
+                                    process.wait(timeout=min(.1, max(.001, remaining)))
+                                except subprocess.TimeoutExpired:
+                                    reason = 'output_closed_while_running'
+                                break
+                            raw.extend(chunk)
+                            if len(raw) > self.limit:
+                                raw = raw[:self.limit]
+                                reason = 'output_limit'
+                                break
+                    finally:
+                        # Also kill descendants that closed inherited output but keep running.
+                        self._stop(process)
+                        selector.close()
+                        process.stdout.close()
                 data = self._redact(bytes(raw), reason is not None)
                 if len(data) > self.limit:
                     data = _prefix(data, self.limit)
@@ -237,7 +244,7 @@ class CaptureStore:
                 artifact_id = uuid.uuid4().hex
                 metadata = {'artifact_id': artifact_id, 'digest': hashlib.sha256(data).hexdigest(),
                     'total_bytes': len(data), 'capture_complete': reason is None,
-                    'reason': reason, 'exit_code': process.returncode,
+                    'reason': reason, 'exit_code': process.returncode if process is not None else None,
                     'encoding': 'utf-8-replacement', 'streams': 'stdout+stderr',
                     'trust': 'untrusted_tool_output'}
                 self._save(folder, artifact_id+'.data', data)

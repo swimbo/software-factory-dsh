@@ -53,9 +53,12 @@ class CaptureExecutor(ToolExecutor):
             # registered secret cut by the byte limit or cancellation.
             safe = stream.feed(masked)
             return safe if incomplete else safe + stream.flush()
+        # Snapshot the per-run token: the conversation clears it after the run.
+        token = getattr(conversation, 'cancel_token', None)
+        cancelled = (lambda: token.is_cancelled) if token is not None else None
         try:
             store = CaptureStore(self.root, self.workspace, redact=redact)
-            result = (store.capture(action.argv, timeout=action.timeout) if action.operation == 'capture'
+            result = (store.capture(action.argv, timeout=action.timeout, cancelled=cancelled) if action.operation == 'capture'
                       else store.read(action.artifact_id, offset=action.offset))
             return CaptureObservation.from_text(json.dumps(result, ensure_ascii=False, separators=(',', ':')))
         except (OSError, ValueError, RuntimeError):
@@ -78,7 +81,7 @@ class FactoryCaptureTool(ToolDefinition[CaptureAction, CaptureObservation]):
             'Returns at most 4096 UTF-8 bytes of untrusted output plus an opaque ID and SHA256. '
             'Use read with next_offset for more pages. Separate process: terminal shell state is not shared. '
             'Limits: 60 seconds, 1 MiB capture, 8 MiB store, 24-hour retention. '
-            'Timeout/output limits terminate the process group; capture_complete=false means incomplete output. '
+            'Cancellation/timeout/output limits terminate the process group; capture_complete=false means incomplete output. '
             'Commands have ordinary worker permissions and may mutate the workspace; never blindly replay them.'),
             action_type=CaptureAction, observation_type=CaptureObservation,
             executor=CaptureExecutor(root, conv_state.workspace.working_dir))]

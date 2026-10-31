@@ -177,3 +177,41 @@ def test_closed_output_does_not_leave_running_parent_or_descendant(tmp_path):
     assert result['reason'] == 'output_closed_while_running'
     time.sleep(.6)
     assert not (tmp_path/'workspace'/'late-effect').exists()
+
+
+def test_already_cancelled_capture_never_launches_command(tmp_path):
+    capture = store(tmp_path)
+    result = capture.capture(py("from pathlib import Path; Path('effect').write_text('bad')"), cancelled=lambda: True)
+    assert result['reason'] == 'cancelled' and result['capture_complete'] is False
+    assert result['exit_code'] is None and result['preview'] == ''
+    assert not (tmp_path/'workspace'/'effect').exists()
+    assert capture.read(result['artifact_id'])['reason'] == 'cancelled'
+
+
+def test_inflight_cancellation_kills_command_group_and_retains_redacted_output(tmp_path):
+    import threading
+    capture = store(tmp_path, secrets=['private-fixture-value'])
+    cancel = threading.Event()
+    marker = tmp_path/'workspace'/'started'
+    child = "import time; from pathlib import Path; time.sleep(.7); Path('late-effect').write_text('bad')"
+    code = ("import subprocess,sys,time; from pathlib import Path; subprocess.Popen([sys.executable,'-c'," + repr(child) + "]); "
+            "print('private-fixture-value',flush=True); Path('started').write_text('yes'); time.sleep(10)")
+    def signal_after_mutation():
+        deadline = time.monotonic()+3
+        while not marker.exists() and time.monotonic()<deadline:
+            time.sleep(.01)
+        cancel.set()
+    thread = threading.Thread(target=signal_after_mutation)
+    thread.start()
+    started = time.monotonic()
+    try:
+        result = capture.capture(py(code), timeout=5, cancelled=cancel.is_set)
+    finally:
+        cancel.set(); thread.join(timeout=4)
+    assert time.monotonic()-started < 2
+    assert marker.exists()
+    assert result['reason'] == 'cancelled' and result['capture_complete'] is False
+    assert 'private-fixture-value' not in result['preview']
+    assert '[REDACTED]' in result['preview']
+    time.sleep(.8)
+    assert not (tmp_path/'workspace'/'late-effect').exists()
