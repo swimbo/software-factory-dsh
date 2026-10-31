@@ -109,3 +109,12 @@ def test_unknown_context_profile_has_no_preparation_effects(tmp_path, monkeypatc
         prep.prepare(**args, context_profile='typo')
     assert not args['root'].exists()
     assert not args['attempt_db'].exists()
+
+
+def test_bounded_profile_prepares_only_and_never_claims_filesystem_provisioning(tmp_path,monkeypatch):
+    args=fixture(tmp_path,monkeypatch)
+    result=prep.prepare(**args,execution_profile='bounded-native-v1')
+    path=Path(result['environment']['FACTORY_RUNTIME_CONFIG']);config=json.loads(path.read_text())
+    assert config['provision']['execution_profile']=='bounded-native-v1'
+    assert result['status']=='prepared_not_activated'
+    assert config['payload']['agent_settings']['llm']['model']=='anthropic/auto'

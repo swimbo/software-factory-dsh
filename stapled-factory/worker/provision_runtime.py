@@ -10,6 +10,7 @@ import re
 import stat
 import subprocess
 import uuid
+import bounded_profile as bounded
 
 from egress_guard import inspect
 from provision_check import validate_identity, validate_volume, resource_arguments, telemetry_volume_name
@@ -30,7 +31,13 @@ def _run(args, *, timeout=30):
 
 
 def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_command,
-              workspace, uid, worker_environment, gateway_key, allocation_id=None, before_credential=None, firewall=None):
+              workspace, uid, worker_environment, gateway_key, allocation_id=None, before_credential=None, firewall=None, execution_profile=None):
+    try:
+        bounded.validate_workspace(workspace,execution_profile)
+        if bounded.enabled(execution_profile) and (before_credential is None or firewall is None):
+            raise ValueError('bounded execution requires the durable deadline coordinator')
+    except (ValueError,OSError):
+        raise ProvisionError('bounded workspace or deadline preflight unavailable') from None
     # Validate telemetry opt-in before any Docker observation or mutation.
     telemetry_volume_name(proxy_command, '')
     image_details = {}
@@ -116,7 +123,7 @@ def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_
         # docker start -ai keeps stdin connected; key is never in argv or env.
         process = subprocess.Popen(['docker', 'start', '-ai', proxy], stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        _run(['create', '--name', worker, *labels, '--label', 'factory.role=worker', *common, *resource_arguments('worker'),
+        _run(['create', '--name', worker, *labels, '--label', 'factory.role=worker', *common, *resource_arguments('worker'), *bounded.worker_arguments(execution_profile,uid),
               '--network', 'none', '--mount', 'type=volume,src=' + sock + ',dst=/gateway,readonly',
               '--mount', 'type=bind,src=' + workspace + ',dst=/workspace',
               '--entrypoint', worker_command[0], worker_image, *worker_command[1:]])
@@ -128,7 +135,7 @@ def provision(*, worker_image, proxy_image, helper_image, worker_command, proxy_
                           worker_command=worker_command, proxy_command=proxy_command,
                           socket_volume=sock, budget_volume=budget, proxy_network=inspect('network', network)['Id'],
                           workspace_source=workspace, volume_records=records, allocation_id=alloc,
-                          worker_environment=worker_environment, anchor_volume=anchor)
+                          worker_environment=worker_environment, anchor_volume=anchor, execution_profile=execution_profile)
         network_record = inspect('network', network)
         if firewall is not None:
             install_proxy_firewall(p['Id'], alloc, network_record['Id'], firewall['helper_image'], firewall['gateway_ip'])
@@ -202,6 +209,7 @@ def provision_once(store, attempt_id, request_hash, conversation_id, *, workspac
         raise ProvisionError('allocation ID must come from the guarded store')
     if not isinstance(workspace_baseline, str) or not re.fullmatch(r'[0-9a-f]{40}([0-9a-f]{24})?', workspace_baseline):
         raise ProvisionError('verified workspace baseline required')
+    bounded.validate_workspace(configuration.get('workspace'),configuration.get('execution_profile'))
     _check_baseline(configuration.get('workspace'), workspace_baseline)
     specification = {**{k: v for k, v in configuration.items() if k != 'gateway_key'}, 'workspace_baseline': workspace_baseline}
     try:
@@ -225,7 +233,13 @@ def provision_once(store, attempt_id, request_hash, conversation_id, *, workspac
                                for name, record in volumes.items()}}
         if configuration.get('firewall') is not None:
             binding['proxy_lifecycle'] = _running_lifecycle(proxy)
+        if bounded.enabled(configuration.get('execution_profile')):
+            binding['bounded_workspace']=bounded.validate_workspace(configuration['workspace'],configuration['execution_profile'])
         store.bind_allocation(attempt_id, request_hash, conversation_id, digest, allocation_id, binding)
+        if bounded.enabled(configuration.get('execution_profile')):
+            from deadline_watchdog import arm_deadline, validate_deadline
+            arm_deadline(store,attempt_id,request_hash,conversation_id,digest,allocation_id,binding,configuration['worker_image'],configuration['proxy_image'])
+            validate_deadline(store,attempt_id,request_hash,conversation_id,digest,allocation_id,binding)
     return provision(**configuration, allocation_id=allocation_id, before_credential=bind)
 
 
@@ -254,16 +268,21 @@ def inspect_bound_allocation(store, attempt_id, request_hash, conversation_id, *
                               for name, record in volumes.items()}}
         if configuration.get('firewall') is not None:
             actual['proxy_lifecycle'] = _running_lifecycle(p)
+        if bounded.enabled(configuration.get('execution_profile')):
+            actual['bounded_workspace']=bounded.validate_workspace(configuration['workspace'],configuration['execution_profile'])
         if actual != binding:
             raise ProvisionError('bound Docker resources changed')
         validate_identity(w, p, worker_image_id=configuration['worker_image'], proxy_image_id=configuration['proxy_image'],
                           worker_command=configuration['worker_command'], proxy_command=configuration['proxy_command'],
                           socket_volume=sock, budget_volume=budget, anchor_volume=anchor, proxy_network=n['Id'],
                           workspace_source=configuration['workspace'], volume_records=volumes, allocation_id=allocation_id,
-                          worker_environment=configuration['worker_environment'])
+                          worker_environment=configuration['worker_environment'], execution_profile=configuration.get('execution_profile'))
         if configuration.get('firewall') is not None:
             firewall = configuration['firewall']
             verify_proxy_firewall(p['Id'], allocation_id, n['Id'], firewall['helper_image'], firewall['gateway_ip'])
+        if bounded.enabled(configuration.get('execution_profile')):
+            from deadline_watchdog import validate_deadline
+            validate_deadline(store,attempt_id,request_hash,conversation_id,digest,allocation_id,binding)
         return {'allocation_id': allocation_id, 'worker_id': binding['worker_id'], 'proxy_id': binding['proxy_id']}
     except Exception as exc:
         raise ProvisionError('bound allocation unavailable or changed') from exc

@@ -149,7 +149,8 @@ def test_reconciliation_rejects_replaced_container(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize('telemetry', [False, True])
-def test_reinspection_uses_real_topology_validator(monkeypatch, tmp_path, telemetry):
+@pytest.mark.parametrize('bounded', [False, True])
+def test_reinspection_uses_real_topology_validator(monkeypatch, tmp_path, telemetry, bounded):
     from types import SimpleNamespace
     from guarded_store import GuardedAttemptStore
     from test_provision_check import fixture, telemetry_fixture
@@ -166,6 +167,22 @@ def test_reinspection_uses_real_topology_validator(monkeypatch, tmp_path, teleme
               'worker_command': k['worker_command'], 'proxy_command': k['proxy_command'],
               'workspace': str(tmp_path), 'uid': 1000, 'worker_environment': []}
     monkeypatch.setattr(runtime.subprocess, 'run', lambda args, **kwargs: SimpleNamespace(stdout=(str(tmp_path) + '\n') if '--show-toplevel' in args else (baseline + '\n') if '--verify' in args else ''))
+    events=[]
+    if bounded:
+        import bounded_profile as profile
+        import deadline_watchdog
+        config['execution_profile']=profile.PROFILE
+        config['firewall']={'helper_image':'sha256:'+'4'*64,'gateway_ip':'192.0.2.1'}
+        monkeypatch.setattr(runtime,'verify_proxy_firewall',lambda *a:None)
+        quota={'device':1,'inode':2,'mount_id':'3','filesystem':'tmpfs','capacity_bytes':67108864}
+        monkeypatch.setattr(profile,'validate_workspace',lambda *args:dict(quota))
+        w['HostConfig'].update(ReadonlyRootfs=True,Tmpfs={'/tmp':profile.temporary_option(1000)},ShmSize=67108864)
+        w['Config']['Env']=profile.effective_environment([],profile.PROFILE)
+        def arm(current,attempt,request,cid,spec,allocation,binding,*images):
+            assert current.lookup_allocation(attempt,request,cid,spec)==(allocation,binding)
+            events.append('armed')
+        monkeypatch.setattr(deadline_watchdog,'arm_deadline',arm)
+        monkeypatch.setattr(deadline_watchdog,'validate_deadline',lambda *args:events.append('validated'))
     resources = {}
     def fake_provision(**kwargs):
         allocation = kwargs['allocation_id']; prefix = 'factory-' + allocation
@@ -185,12 +202,22 @@ def test_reinspection_uses_real_topology_validator(monkeypatch, tmp_path, teleme
         p['NetworkSettings']['Networks'] = {'factory': {'NetworkID': network['Id']}}
         resources.update({('container', prefix + '-worker'): w, ('container', prefix + '-proxy'): p,
                           ('network', prefix + '-network'): network, **{('volume', name): value for name, value in volumes.items()}})
+        if bounded:
+            p['State'].update(Running=True,Pid=456,StartedAt='proxy-first')
+            # Normal bound operation requires the firewall; the fake provisioner
+            # exercises the binding/deadline seam while firewall execution is elsewhere.
         kwargs['before_credential'](w, p, volumes, network)
+        events.append('credential-release')
         return allocation
     monkeypatch.setattr(runtime, 'provision', fake_provision)
     monkeypatch.setattr(runtime, 'inspect', lambda kind, name: resources[(kind, name)])
     allocation = runtime.provision_once(store, 'unit:0', 'request', 'conversation', workspace_baseline=baseline, gateway_key=b'secret', **config)
     assert runtime.inspect_bound_allocation(store, 'unit:0', 'request', 'conversation', workspace_baseline=baseline, **config)['allocation_id'] == allocation
+    if bounded:
+        assert events[:4]==['armed','validated','credential-release','validated']
+        quota['mount_id']='replaced-mount'
+        with pytest.raises(runtime.ProvisionError):runtime.inspect_bound_allocation(store,'unit:0','request','conversation',workspace_baseline=baseline,**config)
+        quota['mount_id']='3'
     if telemetry:
         record = resources[('volume', 'factory-' + allocation + '-telemetry')]
         record['CreatedAt'] = 'replaced-volume'
@@ -361,3 +388,11 @@ def test_telemetry_mount_initialized_private_and_not_exposed_to_worker(monkeypat
     assert mount in proxy_create
     assert not any(value.startswith('type=volume,src=') and value.endswith(',dst=/telemetry') for value in worker_create)
     assert any(c[0]=='run' and '/bin/chmod' in c and c[-2:]==['0700','/telemetry'] for c in calls)
+
+
+def test_bounded_profile_refuses_unquotaed_workspace_before_docker(monkeypatch,tmp_path):
+    monkeypatch.setattr(runtime,'inspect',lambda *_:pytest.fail('Docker reached before bounded preflight'))
+    with pytest.raises(runtime.ProvisionError):
+        runtime.provision(worker_image='sha256:'+'1'*64,proxy_image='sha256:'+'2'*64,
+            helper_image='sha256:'+'3'*64,worker_command=['x'],proxy_command=['y'],workspace=str(tmp_path),
+            uid=1000,worker_environment=[],gateway_key=b'dummy',execution_profile='bounded-native-v1')

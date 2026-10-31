@@ -6,6 +6,7 @@ protect against a privileged Docker operator or prove an image's provenance.
 import os
 import re
 import stat
+import bounded_profile as bounded
 
 from egress_guard import UnsafeTopology, validate_networkless
 
@@ -58,7 +59,7 @@ def telemetry_volume_name(proxy_command, allocation_id):
 
 def validate_identity(worker, proxy, *, worker_image_id, proxy_image_id,
                       worker_command, proxy_command, socket_volume, budget_volume,
-                      proxy_network, workspace_source, volume_records, allocation_id, worker_environment, anchor_volume):
+                      proxy_network, workspace_source, volume_records, allocation_id, worker_environment, anchor_volume, execution_profile=None):
     def require(ok, message):
         if not ok:
             raise UnsafeTopology(message)
@@ -74,7 +75,15 @@ def validate_identity(worker, proxy, *, worker_image_id, proxy_image_id,
     require(stat.S_ISDIR(st.st_mode) and st.st_uid == os.geteuid(), 'workspace must be an owned directory')
     require(not (st.st_mode & 0o022), 'workspace must not be group or world writable')
     telemetry = telemetry_volume_name(proxy_command, allocation_id)
-    validate_networkless(worker, proxy, socket_volume, budget_volume, proxy_network, workspace_source, anchor_volume, telemetry)
+    try:
+        bounded.validate_workspace(workspace_source,execution_profile)
+        bounded.validate_worker(worker,execution_profile,int(worker['Config']['User'].split(':')[0]))
+    except (ValueError,OSError):
+        raise UnsafeTopology('bounded execution storage validation failed') from None
+    structural = worker
+    if bounded.enabled(execution_profile):
+        structural = dict(worker,Mounts=[m for m in worker.get('Mounts',[]) if not (m.get('Type')=='tmpfs' and m.get('Destination')=='/tmp')])
+    validate_networkless(structural, proxy, socket_volume, budget_volume, proxy_network, workspace_source, anchor_volume, telemetry)
     for container, image, command, role in ((worker, worker_image_id, worker_command, 'worker'),
                                              (proxy, proxy_image_id, proxy_command, 'proxy')):
         validate_resources(container, role)
@@ -86,7 +95,7 @@ def validate_identity(worker, proxy, *, worker_image_id, proxy_image_id,
         require((cfg.get('Labels') or {}).get('factory.role') == role, role + ' role mismatch')
     require(worker['Config']['User'] == proxy['Config']['User'], 'socket requires matching numeric users')
     require(isinstance(worker_environment, list), 'explicit worker environment required')
-    require((worker['Config'].get('Env') or []) == worker_environment, 'worker environment mismatch')
+    require((worker['Config'].get('Env') or []) == bounded.effective_environment(worker_environment,execution_profile), 'worker environment mismatch')
     for env in worker_environment:
         name = env.partition('=')[0].upper()
         require(not any(s in name for s in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'CREDENTIAL')), 'credential-like worker environment forbidden')

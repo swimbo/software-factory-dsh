@@ -12,6 +12,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import bounded_profile as bounded
 from docker_transport import DockerTransport
 from guarded_store import GuardedAttemptStore
 from openhands_adapter import OpenHandsAdapter
@@ -69,6 +70,7 @@ def load_config(args):
         # Trust root comes from operator service environment, never the request.
         verify_approval(_private_file(approval['document']), _private_file(approval['signature']),
                         _private_file(os.environ.get('FACTORY_IMAGE_APPROVAL_KEY', '')), data['provision'])
+    bounded.validate_workspace(data['repo'],data['provision'].get('execution_profile'))
     command = data['provision']['proxy_command']
     model = _option(command, '--model')
     if (_option(command, '--attempt-id') != args.attempt_id or
@@ -115,6 +117,8 @@ def run(args):
     config, request = load_config(args)
     provision = config['provision']
     baseline = config['baseline']
+    if bounded.enabled(provision.get('execution_profile')) and (args.successor_preflight_only or args.successor_only or args.successor_reconcile_only):
+        raise ValueError('bounded execution cannot restart an uncertain batch')
     if args.successor_preflight_only:
         _check_baseline(config['successor_workspace'], baseline)
         if not Path(args.attempt_db).is_file() or not Path(args.attempt_anchor).is_file():

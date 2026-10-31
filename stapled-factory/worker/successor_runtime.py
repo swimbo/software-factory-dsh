@@ -48,6 +48,8 @@ def _arg(command, flag, expected):
 
 
 def _source(store, attempt_id, request_hash, conversation_id, configuration, baseline):
+    if configuration.get('execution_profile') is not None:
+        raise ProvisionError('bounded execution does not replay uncertain batches through successors')
     firewall = configuration.get('firewall')
     if not isinstance(firewall, dict) or set(firewall) != {'gateway_ip', 'helper_image'}:
         raise ProvisionError('gateway firewall required')

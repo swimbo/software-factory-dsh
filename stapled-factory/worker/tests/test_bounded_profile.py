@@ -1,0 +1,55 @@
+import os
+from pathlib import Path
+from types import SimpleNamespace
+import pytest
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from bounded_profile import PROFILE, validate_workspace, worker_arguments, effective_environment, validate_worker
+
+
+def mounted(tmp_path, monkeypatch):
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr('bounded_profile.mounts',lambda: {str(tmp_path): {'id':'12','type':'tmpfs'}})
+    monkeypatch.setattr('bounded_profile.os.statvfs',lambda _:SimpleNamespace(f_blocks=16384,f_frsize=4096))
+    return tmp_path
+
+
+def test_small_owned_mount_is_bound_and_shared_filesystem_refused(tmp_path,monkeypatch):
+    mounted(tmp_path,monkeypatch)
+    x=validate_workspace(str(tmp_path),PROFILE)
+    assert x['capacity_bytes']==67108864 and x['inode']==tmp_path.stat().st_ino
+    monkeypatch.setattr('bounded_profile.os.statvfs',lambda _:SimpleNamespace(f_blocks=2**30,f_frsize=4096))
+    with pytest.raises(ValueError,match='capacity'):validate_workspace(str(tmp_path),PROFILE)
+
+
+def test_ordinary_directory_or_symlink_cannot_claim_quota(tmp_path,monkeypatch):
+    tmp_path.chmod(0o700);monkeypatch.setattr('bounded_profile.mounts',lambda:{})
+    with pytest.raises(ValueError,match='mount'):validate_workspace(str(tmp_path),PROFILE)
+    child=tmp_path/'link';child.symlink_to(tmp_path,target_is_directory=True)
+    with pytest.raises(ValueError):validate_workspace(str(child),PROFILE)
+
+
+def test_bounded_worker_requires_readonly_root_and_exact_temporary_limit():
+    args=worker_arguments(PROFILE,1000)
+    assert '--read-only' in args
+    assert 'size=536870912' in args[args.index('--tmpfs')+1]
+    env=['HOME=/tmp/old','PATH=/bin']
+    expected=effective_environment(env,PROFILE)
+    assert expected==['HOME=/workspace/.git/factory-home','PATH=/bin'] and env[0]=='HOME=/tmp/old'
+    worker={'HostConfig':{'ReadonlyRootfs':True,'Tmpfs':{'/tmp':args[args.index('--tmpfs')+1].partition(':')[2]},'ShmSize':67108864},'Mounts':[]}
+    validate_worker(worker,PROFILE,1000)
+    worker['HostConfig']['ReadonlyRootfs']=False
+    with pytest.raises(ValueError):validate_worker(worker,PROFILE,1000)
+
+
+def test_unknown_profile_fails_and_default_does_not_change_runtime():
+    with pytest.raises(ValueError):worker_arguments('unknown',1000)
+    assert worker_arguments(None,1000)==[]
+    assert validate_workspace('/unavailable',None) is None
+
+
+def test_descendant_mount_cannot_bypass_workspace_capacity(tmp_path,monkeypatch):
+    mounted(tmp_path,monkeypatch)
+    monkeypatch.setattr('bounded_profile.mounts',lambda:{str(tmp_path):{'id':'12','type':'tmpfs'},str(tmp_path/'nested'):{'id':'13','type':'ext4'}})
+    with pytest.raises(ValueError,match='descendant'):
+        validate_workspace(str(tmp_path),PROFILE)
