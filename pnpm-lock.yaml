@@ -50,6 +50,9 @@ importers:
       '@factory/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@factory/credential-proxy':
+        specifier: workspace:*
+        version: link:../../packages/credential-proxy
       '@factory/dsh-adapter':
         specifier: workspace:*
         version: link:../../packages/dsh-adapter
@@ -107,6 +110,12 @@ importers:
         specifier: workspace:*
         version: link:../store
 
+  packages/credential-proxy:
+    dependencies:
+      '@factory/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/dsh-adapter:
     dependencies:
       '@factory/contracts':
@@ -123,6 +132,12 @@ importers:
         version: link:../store
 
   packages/gates:
+    dependencies:
+      '@factory/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
+  packages/proxy:
     dependencies:
       '@factory/contracts':
         specifier: workspace:*

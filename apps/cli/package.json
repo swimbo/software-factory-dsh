@@ -7,11 +7,12 @@
   "dependencies": {
     "@factory/contracts": "workspace:*",
     "@factory/core": "workspace:*",
-    "@factory/store": "workspace:*",
-    "@factory/qualifier": "workspace:*",
-    "@factory/gates": "workspace:*",
-    "@factory/wall": "workspace:*",
+    "@factory/credential-proxy": "workspace:*",
+    "@factory/dsh-adapter": "workspace:*",
     "@factory/effects": "workspace:*",
-    "@factory/dsh-adapter": "workspace:*"
+    "@factory/gates": "workspace:*",
+    "@factory/qualifier": "workspace:*",
+    "@factory/store": "workspace:*",
+    "@factory/wall": "workspace:*"
   }
 }

@@ -72,14 +72,14 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
 - **No off-host anchor** (ND4), **no verdict-store split by uid** (ND2), **no proxy metering**
   (ND3), **no certification operating point** (ND1). These are open human decisions, recorded in
   `architecture.md §11` as NEEDS_HUMAN_DECISION rather than quietly defaulted.
-- **The live layer is opt-in and it forwards one credential name to `dsh`.** `@live` specs skip
-  unless `BIFROST_API_KEY` **and** `DSH_BIN` are set; the `live-model` gate stage runs only with
-  `FACTORY_VERIFY_LIVE=1`, because each run makes real, paid model calls. The `@live` specs
-  skip unless `BIFROST_API_KEY` **and** `DSH_BIN` are set, so the offline gate stays free. When they
-  do run they forward exactly one credential name to the child (`FACTORY_LIVE_MODEL=1`, recorded as
-  `credentialsForwarded: ['BIFROST_API_KEY']` in `launch.json`), because v1 has no credential proxy
-  container — every offline and container path keeps the original "worker never holds the key"
-  guarantee, the live path does not. ADR-006 records the amendment.
+- **The live layer is opt-in, and the worker gets a scoped token, not the gateway key.** `@live`
+  specs skip unless `BIFROST_API_KEY` **and** `DSH_BIN` are set; the `live-model` gate stage runs only
+  with `FACTORY_VERIFY_LIVE=1`, because each run makes real, paid model calls. When a live run happens,
+  a per-attempt **credential proxy** on `127.0.0.1` holds the key and hands the worker a token bounded
+  to that socket, that lease, one upstream path prefix, and revoked before the verdict is written
+  (ADR-007). The launch record says `credentialsForwarded: []` and `credentialProxy: { token: 'scoped' }`.
+  **What this does not buy:** a root-level attacker on the host, or a second OS uid — the container path
+  (E2E-44) is still the shape that adds real isolation.
 - **No model-call budget of its own.** Spend is bounded by the operator's gateway route, not by the
   factory; the factory's `budget` reserves an _estimate_ per attempt and never measures tokens.
 - **No container isolation on this host.** The 4 `@docker` specs are tagged and skipped; the local

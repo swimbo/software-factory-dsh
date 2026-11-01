@@ -12,6 +12,7 @@ import { join } from 'node:path';
 
 import { FactoryError, type ErrorCode } from '@factory/contracts';
 
+import { openAttemptCredential, type AttemptCredential } from './credential.ts';
 import type { VerbInput } from './verbs/types.ts';
 
 /** The effect payload `engine.runUnit` commits: everything a launch needs. */
@@ -239,6 +240,24 @@ export async function launchAttempt(
       detail: 'the @factory/dsh-adapter package could not be imported',
     };
 
+  // The consent switch, and now *only* a consent switch: `FACTORY_LIVE_MODEL=1` says this run
+  // may spend, and the credential is opened below as a scoped token behind a localhost proxy.
+  // Before ADR-007 the same flag copied `BIFROST_API_KEY` into the child's environment — the
+  // one place where "the worker never holds the gateway key" was false.
+  const liveConsent = (ctx.env.FACTORY_LIVE_MODEL ?? '').trim() === '1';
+  let credential: AttemptCredential | null = null;
+  if (liveConsent) {
+    const lease = ctx.store.getLiveLease(launch.unitId);
+    const opened = await openAttemptCredential({
+      env: ctx.env,
+      nowIso: ctx.nowIso,
+      attemptId: launch.attemptId,
+      leaseExpiresAt: lease === null ? null : lease.expiresAt,
+    });
+    if (!opened.ok) return { ok: false, code: opened.code, detail: opened.detail };
+    credential = opened.credential;
+  }
+
   const modelApi = modelApiOf((ctx.env.FACTORY_MODEL_API ?? '').trim());
   try {
     const executor = adapter.createDshExecutor({
@@ -257,7 +276,24 @@ export async function launchAttempt(
           ctx.ui.err(`ERROR ${message ?? JSON.stringify(fields)}`),
       },
     });
-    const receipt = await executor.run(launch, { effectId, attempt: attemptNo - 1 });
+    const receipt = await executor.run(
+      {
+        ...launch,
+        // The door and the token, not the key: the adapter writes the token into the child
+        // environment and the proxy's URL into the overlay, and records the fact that the
+        // credential was scoped in `launch.json`.
+        ...(credential === null
+          ? {}
+          : {
+              credentialProxy: {
+                baseUrl: credential.baseUrl,
+                token: credential.token,
+                expiresAt: credential.expiresAt,
+              },
+            }),
+      },
+      { effectId, attempt: attemptNo - 1 },
+    );
     return { ok: true, receipt };
   } catch (error) {
     if (error instanceof FactoryError)
@@ -267,5 +303,16 @@ export async function launchAttempt(
       code: 'EXECUTOR_UNAVAILABLE',
       detail: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    // Revoke before the verdict exists. The caller writes the receipt and the verdict after
+    // this returns, so a token that outlived its attempt would be a credential alive while the
+    // factory had already recorded the attempt as over. `settle()` is idempotent and runs on
+    // the failure path too: a launch that threw must not leave a live token behind.
+    if (credential !== null) {
+      await credential.settle();
+      // The door is bookkeeping and the token is the property, but neither should outlive the
+      // attempt: the proxy is per-invocation and this is the last moment it can be of use.
+      await credential.close();
+    }
   }
 }

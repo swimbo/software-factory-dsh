@@ -63,6 +63,7 @@ import {
   WORKTREE_READ_PROVENANCE,
   fingerprintEnv,
   forwardedCredentials,
+  PROXY_TOKEN_ENV,
   hashOverlay,
   writeLaunchRecord,
 } from './launch-record.ts';
@@ -133,6 +134,22 @@ export interface LaunchPayload {
   unitId: string;
   /** The clone. Created by `createAttemptClone`; must be self-contained. */
   attemptDir: string;
+  /**
+   * The scoped credential for this attempt, minted by the launcher from its credential proxy.
+   *
+   * Present means "this attempt may call the model, through this door, with this token"; absent
+   * means "no model call is authorised" and the child is given no credential at all. The token
+   * is not the gateway key: the proxy holds that, and this payload never sees it. The launcher
+   * revokes the token when the attempt settles — before any verdict is written — so the window
+   * in which it works is exactly the attempt.
+   */
+  credentialProxy?: {
+    /** `http://127.0.0.1:<port><prefix>` — the overlay's `baseURL`, never the gateway's. */
+    readonly baseUrl: string;
+    readonly token: string;
+    /** The attempt lease's expiry: the token cannot outlive the authority it borrows. */
+    readonly expiresAt: string;
+  };
 }
 
 export interface LaunchContext {
@@ -323,10 +340,16 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
       // configuring attempt N+1 through the home patch layer.
       const home = seedAttemptHome({ root: factoryHome, attemptId: payload.attemptId, profile });
 
+      const credential = payload.credentialProxy;
       const dropped: string[] = [];
-      const env = buildChildEnv(home, parentEnv, (name) => {
-        dropped.push(name);
-      });
+      const env = buildChildEnv(
+        home,
+        parentEnv,
+        (name) => {
+          dropped.push(name);
+        },
+        credential === undefined ? {} : { proxyToken: credential.token },
+      );
 
       // Refuse to dispatch to an unverified harness, before the base revision is
       // read: a mismatched binary must leave no trace of an attempt.
@@ -366,8 +389,11 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
 
       const overlay = buildOverlay({
         attemptDir,
-        proxyBaseUrl,
+        // The proxy's base URL, not the gateway's: `dsh` must knock on the door the factory
+        // controls, or the key would have to travel with the worker.
+        proxyBaseUrl: credential === undefined ? proxyBaseUrl : credential.baseUrl,
         modelId,
+        ...(credential === undefined ? {} : { apiKeyEnv: PROXY_TOKEN_ENV }),
         ...(options.modelApi === undefined ? {} : { api: options.modelApi }),
       });
       const overlayPath = join(recordDir, 'dsh-overlay.yml');
@@ -405,6 +431,9 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
         overlay: { path: overlayPath, sha256: hashOverlay(overlay) },
         env: fingerprintEnv(env, dropped),
         credentialsForwarded: forwardedCredentials(parentEnv),
+        // The fact and the expiry, never the token: this file is evidence and gets copied.
+        credentialProxy:
+          credential === undefined ? null : { token: 'scoped', expiresAt: credential.expiresAt },
       });
       // Read back rather than re-serialise: the receipt's artifact hash must describe the
       // bytes on disk, and two independent serialisations could drift apart silently.

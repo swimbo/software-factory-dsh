@@ -128,6 +128,7 @@ describe('the composed overlay identity', () => {
       overlay: { path: overlayPath, sha256: sha },
       env: fingerprintEnv({ PATH: '/usr/bin' }),
       credentialsForwarded: [],
+      credentialProxy: null,
     });
 
     const written = JSON.parse(readFileSync(path, 'utf8')) as {
@@ -172,7 +173,12 @@ describe('the live-model credential opt-in', () => {
     expect(liveModelEnabled({ FACTORY_LIVE_MODEL: 'true' })).toBe(false);
   });
 
-  it('forwards exactly one name under FACTORY_LIVE_MODEL=1 and never a second', () => {
+  it('forwards no credential even with the consent flag set (ADR-007 retired the exception)', () => {
+    // This spec used to assert the opposite — that `FACTORY_LIVE_MODEL=1` handed the child
+    // `BIFROST_API_KEY` by name. That was the one false sentence in the README: the worker
+    // held the gateway key on the live path. The proxy retires it, so the spec now pins the
+    // retirement: the flag is consent to *spend*, and the only credential the child may hold
+    // is the scoped token the launcher passes as an argument.
     const env = buildChildEnv('/h', {
       PATH: '/usr/bin',
       BIFROST_API_KEY: 'sk-live',
@@ -180,13 +186,33 @@ describe('the live-model credential opt-in', () => {
       OPENAI_API_KEY: 'sk-openai',
       FACTORY_LIVE_MODEL: '1',
     });
-    // The one documented exception, by name; nothing else rides along with it.
-    expect(env['BIFROST_API_KEY']).toBe('sk-live');
+    expect(env['BIFROST_API_KEY']).toBeUndefined();
     expect(env['DEEPSEEK_API_KEY']).toBeUndefined();
     expect(env['OPENAI_API_KEY']).toBeUndefined();
+    // The flag still means "this run may spend" — it just no longer means "copy a key".
+    expect(liveModelEnabled({ FACTORY_LIVE_MODEL: '1' })).toBe(true);
     expect(
       forwardedCredentials({ FACTORY_LIVE_MODEL: '1', BIFROST_API_KEY: 'sk-live' }),
-    ).toStrictEqual(['BIFROST_API_KEY']);
+    ).toStrictEqual([]);
+    // The key is in the operator's environment, not the child's: no `FACTORY_` copy of it either.
+    expect(Object.keys(env).filter((name) => CREDENTIAL_NAME.test(name))).toStrictEqual([]);
+  });
+
+  it('hands the child the scoped token the launcher minted, and only that one', () => {
+    const env = buildChildEnv('/h', { PATH: '/usr/bin', BIFROST_API_KEY: 'sk-live' }, undefined, {
+      proxyToken: 'scoped-token-value',
+    });
+    // The token is passed in, never copied from the parent: an explicit argument is a decision
+    // the caller makes, and `parentEnv` cannot smuggle one in.
+    expect(env['FACTORY_PROXY_TOKEN']).toBe('scoped-token-value');
+    expect(env['BIFROST_API_KEY']).toBeUndefined();
+    // The fingerprint keeps credential-shaped names out of the record entirely, so the token
+    // is not in `launch.json` under any name — `credentialProxy` records *that* it was scoped.
+    const print = fingerprintEnv(env);
+    expect(Object.keys(print.valueHashes)).not.toContain('FACTORY_PROXY_TOKEN');
+    expect(JSON.stringify(print)).not.toContain('scoped-token-value');
+    // And without the argument there is no credential at all: absence is the default.
+    expect(buildChildEnv('/h', { PATH: '/usr/bin' })['FACTORY_PROXY_TOKEN']).toBeUndefined();
   });
 
   it('records the forwarded name and never the value', () => {

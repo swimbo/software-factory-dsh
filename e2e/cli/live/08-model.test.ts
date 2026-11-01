@@ -158,6 +158,7 @@ describe.skipIf(!READY)(
           profile: { requested: string; effective: string | null };
           overlay: { sha256: string | null };
           credentialsForwarded: string[];
+          credentialProxy: { token: string; expiresAt: string } | null;
         };
 
         // Printed so the evidence file can cite the real model, the real spend and the outcome.
@@ -241,10 +242,16 @@ describe.skipIf(!READY)(
           expect(read.replaySkipReason).toMatch(/untracked|ignored/iu);
         }
 
-        // 6. the overlay is the factory's, and the credential reached the child by name only
+        // 6. the overlay is the factory's, and the worker held a **scoped** credential rather
+        //    than the gateway key. This assertion used to read `['BIFROST_API_KEY']`: the live
+        //    path forwarded the key, which is the one sentence of the README that was false.
+        //    ADR-007's credential proxy retires it, so the record now shows the opposite — no
+        //    forwarded credential, and a scoped token that expires with the attempt's lease.
         expect(launch.profile.effective).not.toBeNull();
         expect(launch.overlay.sha256).toMatch(/^sha256:[0-9a-f]{64}$/u);
-        expect(launch.credentialsForwarded).toStrictEqual(['BIFROST_API_KEY']);
+        expect(launch.credentialsForwarded).toStrictEqual([]);
+        expect(launch.credentialProxy?.token).toBe('scoped');
+        expect(launch.credentialProxy?.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
         expect(JSON.stringify(launch)).not.toContain(KEY);
 
         // 7. the suite the receipt names still passes when re-run by hand — selected structurally,

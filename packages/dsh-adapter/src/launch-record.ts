@@ -47,15 +47,29 @@ export const CREDENTIAL_NAME = /(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENT
  * dropped, including `FACTORY_TEST_ROOT`, `FACTORY_PRISTINE_REPO` and `FACTORY_HOME`.
  */
 /**
- * The one documented opt-in for a credential in the worker environment.
+ * The operator's consent to spend money on a model call — and nothing else.
  *
- * v1 has no credential proxy: the gateway key must reach `dsh` itself, so a live run needs
- * exactly one credential name forwarded to the child — `BIFROST_API_KEY` — and nothing else.
- * The flag is the operator saying "this run may spend money"; without it the allowlist is
- * unchanged and a live run cannot authenticate, which is the offline-safe default.
+ * It used to be worse than that: while v1 had no credential proxy, the flag also meant "copy
+ * `BIFROST_API_KEY` into the child's environment", because `dsh` had to authenticate somewhere
+ * and there was nowhere else for the key to go (ADR-006's amendment). `packages/credential-proxy`
+ * retires that: the worker is handed a **scoped token** for a localhost proxy, so this flag now
+ * only says "this run may spend". It is still the default-off switch, because a run that
+ * cannot authenticate is the offline-safe default and a live run is a deliberate act.
  */
 export const LIVE_MODEL_FLAG = 'FACTORY_LIVE_MODEL';
+
+/** The old name the flag used to forward. Kept exported for readers of the retirement. */
 export const LIVE_MODEL_CREDENTIAL = 'BIFROST_API_KEY';
+
+/**
+ * The environment variable the *scoped* credential travels in.
+ *
+ * This is the only credential-shaped name the child is given, and it is given deliberately:
+ * the overlay names it (`apiKeyEnv`), and its value is a token that this process can revoke,
+ * that expires with the attempt's lease, and that is worthless anywhere but the factory's own
+ * proxy. It is never the gateway key.
+ */
+export const PROXY_TOKEN_ENV = 'FACTORY_PROXY_TOKEN';
 
 /** Whether the operator opted this process into a live, billable model call. */
 export function liveModelEnabled(parentEnv: NodeJS.ProcessEnv): boolean {
@@ -63,15 +77,17 @@ export function liveModelEnabled(parentEnv: NodeJS.ProcessEnv): boolean {
 }
 
 /**
- * The credential names forwarded to the child: the named key under the flag, nothing else.
+ * The credential names forwarded from the operator's environment to the worker: **none**.
  *
- * Returns names so the launch record can say *that* a credential was forwarded without the
- * value ever reaching the record, a log, or a diff.
+ * This function is kept, and kept named this way, because it is the auditable answer to
+ * "what did we hand over?" — and since ADR-007 the answer is a constant. When it returned
+ * `['BIFROST_API_KEY']` the README was false on the live path; a function that says "nothing,
+ * ever" is harder to quietly regress than a deleted one. The scoped proxy token is *not*
+ * forwarded from the parent environment at all: it is minted per attempt by the launcher and
+ * handed in explicitly (see {@link PROXY_TOKEN_ENV}), which is why it cannot appear here.
  */
-export function forwardedCredentials(parentEnv: NodeJS.ProcessEnv): readonly string[] {
-  if (!liveModelEnabled(parentEnv)) return [];
-  const value = parentEnv[LIVE_MODEL_CREDENTIAL];
-  return value === undefined || value === '' ? [] : [LIVE_MODEL_CREDENTIAL];
+export function forwardedCredentials(_parentEnv: NodeJS.ProcessEnv): readonly string[] {
+  return [];
 }
 
 export const PATH_LIKE_NAME =
@@ -95,6 +111,17 @@ export function buildChildEnv(
   dshHome: string,
   parentEnv: NodeJS.ProcessEnv,
   onDropped?: (name: string) => void,
+  options: {
+    /**
+     * The scoped proxy token this attempt may use, minted by the launcher.
+     *
+     * Passed as a value rather than read from `parentEnv` on purpose: forwarding a credential
+     * that happens to be in the operator's shell is the pattern ADR-007 removed, and an
+     * argument the caller must produce is a decision the caller must make. `undefined` means
+     * "no model call is authorised for this attempt" and the child gets no credential at all.
+     */
+    readonly proxyToken?: string | undefined;
+  } = {},
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     DSH_HOME: dshHome,
@@ -103,15 +130,13 @@ export function buildChildEnv(
     DSH_TELEMETRY_DISABLED: '1',
     PATH: parentEnv['PATH'] ?? '/usr/local/bin:/usr/bin:/bin',
   };
-  const liveCredential = forwardedCredentials(parentEnv);
+  if (options.proxyToken !== undefined && options.proxyToken !== '') {
+    env[PROXY_TOKEN_ENV] = options.proxyToken;
+  }
   for (const [name, value] of Object.entries(parentEnv)) {
     if (value === undefined) continue;
-    if (liveCredential.includes(name)) {
-      // The single documented exception, and it is never silent: the record says which name
-      // was forwarded (`credentialsForwarded`), never the value.
-      env[name] = value;
-      continue;
-    }
+    // No credential-shaped name is ever copied from the parent, including under
+    // `FACTORY_LIVE_MODEL=1`: the scoped token above is the only credential in this env.
     if (!name.startsWith('FACTORY_')) continue;
     if (forbiddenForWorker(name)) {
       onDropped?.(name);
@@ -249,10 +274,18 @@ export interface LaunchRecord {
   readonly overlay: { readonly path: string | null; readonly sha256: string | null };
   readonly env: EnvFingerprint;
   /**
-   * Credential variable *names* the child was given. Empty unless the operator set
-   * `FACTORY_LIVE_MODEL=1`; a name here is a fact an auditor may want and a value never is.
+   * Credential variable *names* forwarded from the operator's environment. Always empty since
+   * ADR-007: a name here would mean the worker held something the factory did not mint.
    */
   readonly credentialsForwarded: readonly string[];
+  /**
+   * The scoped credential the attempt was given, or `null` when it was given none.
+   *
+   * The *fact* and the expiry, never the token: a launch record is copied, attached and
+   * pasted, and a token in it would be a credential in a document. `state: 'scoped'` says
+   * what the reader needs — this was not the gateway key, and it dies at `expiresAt`.
+   */
+  readonly credentialProxy: { readonly token: 'scoped'; readonly expiresAt: string } | null;
 }
 
 /** Write the launch record and return its path. Mode 0600: it names the worker's world. */

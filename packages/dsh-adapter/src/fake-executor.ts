@@ -319,6 +319,8 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
         // The scripted worker spends nothing, so it forwards nothing: the flag is a
         // permission, not an instruction, and recording it here would overstate the run.
         credentialsForwarded: forwardedCredentials(process.env),
+        // The scripted worker calls no model, so it is handed no scoped credential either.
+        credentialProxy: null,
       });
 
       const events: string[] = [];

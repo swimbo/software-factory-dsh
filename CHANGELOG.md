@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **The live path no longer hands the worker the gateway key.** `packages/credential-proxy` mints a
+  per-attempt token — bounded to a localhost socket, the attempt's lease, one upstream prefix, and
+  revoked before the verdict is written — and writes the `Authorization` header itself. The launch
+  record now says `credentialsForwarded: []` with `credentialProxy: { token: 'scoped' }` (ADR-007).
+  `FACTORY_LIVE_MODEL=1` is only a consent switch now. 23 specs cover it (14 proxy, 9 wiring).
+
 What changed for someone using this repository, in order. Not a file-by-file diff — the commits say
 that. Releases are tagged; entries below them are the commits that carried them.
 
