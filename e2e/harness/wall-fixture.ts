@@ -15,11 +15,7 @@
  * wants a different story passes `candidate`, `holdoutScenario` or `scenario`.
  */
 import { execFileSync } from 'node:child_process';
-import {
-  createPrivateKey,
-  generateKeyPairSync,
-  sign,
-} from 'node:crypto';
+import { createPrivateKey, generateKeyPairSync, sign } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,15 +27,15 @@ import { hashableScenarios, type HoldoutScenario } from '../../packages/wall/src
 import { jsonOf, newFactoryHome, runFactory, type FactoryRun } from './factory.ts';
 
 export const SUITE_SOURCE = `import assert from 'node:assert/strict';
-import { slugify, uniqueSlug } from '../src/slug.js';
+import { slugify } from '../src/slug.js';
 
 assert.equal(slugify('ABC'), 'abc');
 assert.equal(slugify(' a '), 'a');
 assert.equal(slugify('a.b!c'), 'a-b-c');
-assert.equal(uniqueSlug(['taken'], 'fresh one'), 'fresh-one');
-console.log('FACTORY_SUMMARY {"passed":4,"failed":0,"unknown":0,"exitCode":0}');
+console.log('FACTORY_SUMMARY {"passed":3,"failed":0,"unknown":0,"exitCode":0}');
 `;
 
+/** Base: `slugify` only. The holdout needs `uniqueSlug`, so it fails here — that is the Δ. */
 export const SLUG_BASE = `export function slugify(input) {
   return String(input)
     .trim()
@@ -47,7 +43,10 @@ export const SLUG_BASE = `export function slugify(input) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
+`;
 
+/** Candidate: adds the uniqueness check the unit asked for. */
+export const SLUG_CANDIDATE = `${SLUG_BASE}
 export function uniqueSlug(existing, candidate) {
   const slug = slugify(candidate);
   if (existing.includes(slug)) return null;
@@ -73,7 +72,7 @@ export interface ScenarioSpec {
 }
 
 export interface WallFixtureOptions {
-  /** The source the scripted worker writes. Defaults to the correct implementation. */
+  /** The source the scripted worker writes. Defaults to `SLUG_CANDIDATE`. */
   readonly candidate?: string;
   /** Replace the default worker scenario entirely (steps + optional receipt claims). */
   readonly scenario?: ScenarioSpec;
@@ -165,7 +164,7 @@ export function createWallFixture(options: WallFixtureOptions = {}): WallFixture
   const home = newFactoryHome();
 
   const stepList: unknown[] = [
-    { kind: 'write', path: 'src/slug.js', content: options.candidate ?? SLUG_BASE },
+    { kind: 'write', path: 'src/slug.js', content: options.candidate ?? SLUG_CANDIDATE },
     ...(options.extraFiles ?? []).map((file) => ({
       kind: 'write',
       path: file.path,
@@ -303,36 +302,4 @@ export function createWallFixture(options: WallFixtureOptions = {}): WallFixture
   };
 
   return fixture;
-}
-
-/** The verdict row a unit ended with, read straight from the store the CLI wrote. */
-export function verdictRow(
-  home: string,
-  unitId: string,
-): {
-  outcome: string;
-  reasons: readonly string[];
-  scenarios: readonly { id: string; source: string; outcome: string }[];
-  delta: { checked: boolean; baseRate: number; candidateRate: number };
-  receiptSha: string;
-} | null {
-  const store = openStore({ dir: join(home, 'state') });
-  try {
-    const row = store.latestVerdictForUnit(unitId);
-    return row === null
-      ? null
-      : {
-          outcome: row.verdict.outcome,
-          reasons: row.verdict.reasons,
-          scenarios: row.verdict.scenarios,
-          delta: {
-            checked: row.verdict.delta.checked,
-            baseRate: row.verdict.delta.baseRate,
-            candidateRate: row.verdict.delta.candidateRate,
-          },
-          receiptSha: row.receiptSha,
-        };
-  } finally {
-    store.close();
-  }
 }

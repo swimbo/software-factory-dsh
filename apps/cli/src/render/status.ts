@@ -14,6 +14,7 @@ import { currentPolicyVersion } from '@factory/qualifier';
 import type { UnitRow, VerdictRow } from '@factory/store';
 
 import { DEFAULT_PER_DAY_USD, type FactoryContext } from '../context.ts';
+import { outboxCounts } from '../effects.ts';
 import { field, pill, record, sep, usd, wrap } from './format.ts';
 
 export const STATUS_SCHEMA_VERSION = 'status.v1';
@@ -448,18 +449,7 @@ export function buildStatus(
         detail: ctx.wall.available ? null : ctx.wall.detail,
         since: null,
       },
-      outbox: {
-        // The store exposes no read-only outbox count: claiming 0 would be a
-        // measurement we did not take (L3), so the counts stay null. `unavailable`
-        // is the health state for "not observable" — `unknown` is the vocabulary for
-        // unmeasured values, not for a subsystem, and the contract keeps them apart.
-        state: 'unavailable',
-        pending: null,
-        retrying: null,
-        dead: null,
-        detail: 'the store exposes no read-only outbox count',
-        since: null,
-      },
+      outbox: outboxHealth(ctx),
       dshVersion: {
         // Three health states, not four: a version we could not read leaves the
         // subsystem `unavailable` (the page shows it), and a version that differs
@@ -510,6 +500,52 @@ export function buildStatus(
       state: unknownSpendRows > 0 ? 'unknown' : 'ok',
     },
   };
+}
+
+/**
+ * The outbox, counted rather than assumed.
+ *
+ * `claimPendingEffects` is a plain `SELECT ... WHERE state = 'pending'` — no claim, no
+ * write, no lock — so a read-only command may use it, and the earlier claim that "the
+ * store exposes no read-only outbox count" was simply false. What *is* still unreadable
+ * is the `failed` count: there is no public read for exhausted effects, so `dead` stays
+ * `null` and the detail names exactly that gap instead of implying zero.
+ *
+ * A pending effect is not itself a fault — `--no-wait` and a crash between commit and
+ * launch both leave one — but a pending effect with attempts > 0 is a launch that was
+ * refused and is waiting for `recover`, which is why `retrying` is separated out.
+ */
+function outboxHealth(ctx: FactoryContext): StatusModel['health']['outbox'] {
+  try {
+    const counts = outboxCounts(ctx.store);
+    const leaked = counts.pending - counts.retrying;
+    return {
+      // Any pending effect means an intent to launch that has not been performed, which is
+      // never `ok` — work the operator asked for is not running. `retrying` sharpens the
+      // detail, not the state.
+      state: counts.pending === 0 ? 'ok' : 'degraded',
+      pending: counts.pending,
+      retrying: counts.retrying,
+      dead: counts.dead,
+      detail:
+        counts.pending === 0
+          ? 'no launch effect is pending; every intent to launch has been settled'
+          : `${String(leaked)} launch effect(s) pending for work not yet performed, ` +
+            `${String(counts.retrying)} awaiting a retry by factory recover; ` +
+            'the count of exhausted effects is not readable through the store API',
+      since: null,
+    };
+  } catch (error) {
+    // The read itself failed: only here is "not observable" true.
+    return {
+      state: 'unavailable',
+      pending: null,
+      retrying: null,
+      dead: null,
+      detail: `the outbox could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      since: null,
+    };
+  }
 }
 
 /**

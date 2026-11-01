@@ -32,14 +32,15 @@ import { UsageError } from '../exit.ts';
 import { dispatched, running, transitionLine, verifying } from '../render/dispatch.ts';
 import { field } from '../render/format.ts';
 import { join } from 'node:path';
+import { claimLaunchEffect, settleApplied, settleFailure } from '../effects.ts';
+import {
+  cloneAttempt,
+  launchAttempt,
+  type LaunchOutcome,
+  type LaunchPayloadLike,
+} from '../launch.ts';
 import { evaluateReceipt, wallPolicyFrom } from '../wall.ts';
 import { boolOption, textOption, type VerbInput, type VerbSpec } from './types.ts';
-
-interface LaunchPayloadLike {
-  readonly attemptId: string;
-  readonly unitId: string;
-  readonly attemptDir: string;
-}
 
 /**
  * The pristine mirror the attempt clone is cut from.
@@ -119,7 +120,12 @@ export async function runRun(input: VerbInput): Promise<number> {
   const verifyOnly = boolOption(input.options, 'verifyOnly');
   const retry = boolOption(input.options, 'retry');
   const reason = textOption(input.options, 'reason');
-  const noWait = boolOption(input.options, 'noWait');
+  // Declared as `.option('--no-wait')`, so commander sets `wait: false`. Reading
+  // `options.noWait` (as this did) is always `undefined`: the flag was documented and
+  // dead, and a documented flag that silently does the opposite is worse than a missing
+  // one — it teaches the operator that the factory cannot be trusted about its own
+  // surface.
+  const noWait = input.options['wait'] === false;
 
   if (retry) {
     if (reason === undefined) {
@@ -286,15 +292,36 @@ export async function runRun(input: VerbInput): Promise<number> {
     launchKey: result.attempt.launchKey,
     reservation: { amountUsd: result.reservation.amountUsd, kind: result.reservation.kind },
     effectId: result.effect.effectId,
-    state: result.attempt.state,
+    // The *unit's* state: "dispatched" is the phase the operator cares about after a
+    // dispatch. The attempt's own state (`launching`) is reported separately, because a
+    // caller that wants to know whether a worker was started should not have to infer it
+    // from a phase whose name it has to look up.
+    state: result.unit.state,
+    attemptState: result.attempt.state,
     traceId: ctx.traceId,
   };
 
+  // The idempotency assert, before anything happens: the row `runUnit` committed is the
+  // row this invocation is about to perform, and it must still be pending. A queue would
+  // pop "some work"; this pops *this* work or refuses.
+  const effect = claimLaunchEffect(ctx.store, result.attempt.launchKey, result.effect.effectId);
+
   if (noWait) {
+    // `--no-wait` deliberately does not launch. The effect stays pending, and `recover`
+    // is what performs it — once the lease has expired, because a live lease is the only
+    // evidence the factory has that some process might already own this attempt.
+    ctx.ui.err(
+      field(
+        'launch',
+        `deferred: effect ${effect.effectId} stays pending. This build has no daemon; ` +
+          `factory recover launches it once the lease expires.`,
+      ),
+    );
     input.emit(dispatchPayload);
-    // `--no-wait` is the one place a payload goes to stdout without `--json`: the
-    // attempt id is what the caller needs to observe it later.
-    ctx.ui.out(result.attempt.attemptId);
+    // The attempt id is the human-readable answer to "what do I observe?" — printed only
+    // when nothing else already owns stdout, because `--json` promises exactly one object
+    // and a second line would break every caller that parses it.
+    if (!ctx.ui.json) ctx.ui.out(result.attempt.attemptId);
     ctx.ui.err(field('observe', `factory status ${unitId} --attempt ${result.attempt.attemptId}`));
     return 0;
   }
@@ -306,11 +333,16 @@ export async function runRun(input: VerbInput): Promise<number> {
     unit.spec.baseRev,
   );
   if (!cloned.ok) {
+    // Nothing started, and the cause is the environment: leave the effect pending so
+    // `recover` can perform it after the mirror is fixed. Exhausting it here would make
+    // the outbox say "never" about a launch that is merely blocked.
+    settleFailure(ctx.store, effect.effectId, 'EXECUTOR_UNAVAILABLE', cloned.detail, ctx.nowIso());
     throw new FactoryError(
       'EXECUTOR_UNAVAILABLE',
-      `EXECUTOR_UNAVAILABLE: ${cloned.detail}. The attempt stays recorded and its lease will be reconciled by ` +
-        'factory recover; nothing was launched.',
-      { unitId, attemptId: result.attempt.attemptId },
+      `EXECUTOR_UNAVAILABLE: ${cloned.detail}. Attempt ${result.attempt.attemptId} stays recorded and launch ` +
+        `effect ${effect.effectId} stays pending (retryable): factory recover performs it once the lease ` +
+        'expires. Nothing was launched.',
+      { unitId, attemptId: result.attempt.attemptId, effectId: effect.effectId, retryable: true },
     );
   }
 
@@ -318,6 +350,12 @@ export async function runRun(input: VerbInput): Promise<number> {
   // state an operator is *in* while the turn happens, and printing it afterwards would
   // report a history rather than a status.
   ctx.ui.err(transitionLine(running(result.attempt.attemptId, ctx.executor.kind)));
+
+  // Record "a process may exist from this instant" *before* spawning it. This is the fact
+  // `recover` reads to decide whether a pending launch may be performed: an attempt still
+  // `launching` never started a worker, while a `running` one may have — and retrying the
+  // latter is the double launch the lease alone cannot rule out once the lease expires.
+  ctx.store.setAttemptState(result.attempt.attemptId, 'running', {});
 
   const launched = await launchAttempt(
     ctx,
@@ -331,15 +369,38 @@ export async function runRun(input: VerbInput): Promise<number> {
     // about a measurement ("the turn never ended"), not about the environment, and
     // collapsing it into EXECUTOR_UNAVAILABLE (exit 8) would tell the operator to
     // install software when the truth is that a worker has to be looked at. The
-    // code is passed through verbatim and the exit code follows from it.
+    // code is passed through verbatim and the exit code follows from it; the effect is
+    // settled by the same distinction (applied / retryable / exhausted).
+    const settlement = settleFailure(
+      ctx.store,
+      effect.effectId,
+      launched.code,
+      launched.detail,
+      ctx.nowIso(),
+    );
+    // The launcher refused before spawning anything, so the attempt is not running: put it
+    // back to `launching` and a later `recover` may retry it. Leaving it `running` would
+    // make the store claim a process that never existed.
+    if (settlement === 'retryable') {
+      ctx.store.setAttemptState(result.attempt.attemptId, 'launching', {});
+    }
     throw new FactoryError(
       launched.code,
-      `${launched.code}: ${launched.detail}. The launch effect stays pending: nothing is retried here, ` +
-        'and recovery reconciles the attempt from its lease.',
-      { unitId, attemptId: result.attempt.attemptId, effectId: result.effect.effectId },
+      `${launched.code}: ${launched.detail}. Launch effect ${effect.effectId} is ${settlement}`,
+      {
+        unitId,
+        attemptId: result.attempt.attemptId,
+        effectId: effect.effectId,
+        effectSettlement: settlement,
+        retryable: settlement === 'retryable',
+      },
     );
   }
 
+  // The worker ran. Settle before observing: a crash between these two lines must not
+  // leave an applied launch marked pending, or `recover` would start a second worker to
+  // ask what the first one did.
+  settleApplied(ctx.store, effect.effectId, ctx.nowIso());
   ctx.engine.observeAttempt(result.attempt.attemptId, launched.receipt);
   const receipt = ctx.store.latestReceiptForUnit(unitId);
   ctx.ui.err(
@@ -511,31 +572,6 @@ function evaluateWithWall(
   };
 }
 
-/** Cut the attempt clone from the mirror. The mirror is only ever read. */
-async function cloneAttempt(
-  ctx: VerbInput['ctx'],
-  payload: unknown,
-  pristineRepo: string,
-  baseRev: string,
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly detail: string }> {
-  const launch = payload as LaunchPayloadLike;
-  const adapter = await import('@factory/dsh-adapter').catch(() => null);
-  if (adapter === null) {
-    return { ok: false, detail: 'the @factory/dsh-adapter package could not be imported' };
-  }
-  try {
-    await adapter.createAttemptClone({ pristineRepo, baseRev, attemptDir: launch.attemptDir });
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      detail: `cannot check out ${baseRev.slice(0, 7)} from ${pristineRepo}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
-}
-
 /**
  * The real wall: `evaluate()` in `@factory/wall`, driven by the local runner.
  *
@@ -592,111 +628,6 @@ async function evaluateRealWall(
     string,
     unknown
   >;
-}
-
-type LaunchOutcome =
-  | { readonly ok: true; readonly receipt: unknown }
-  | { readonly ok: false; readonly code: ErrorCode; readonly detail: string };
-
-/**
- * Perform the launch effect through `@factory/dsh-adapter`, resolved lazily: the
- * adapter is optional by construction, and a host without it must get a refusal
- * rather than an import-time crash.
- */
-async function launchAttempt(
-  ctx: VerbInput['ctx'],
-  payload: unknown,
-  effectId: string,
-  attemptNo: number,
-  baseRev: string,
-): Promise<LaunchOutcome> {
-  const launch = payload as LaunchPayloadLike;
-  if (ctx.executor.kind === 'fake' && ctx.executor.scenarioPath !== null) {
-    // Test-only, and bannered before it does anything (`--scenario` on `run`).
-    ctx.ui.err('executor: FAKE (no DSH process launched)');
-    const adapter = await import('@factory/dsh-adapter').catch(() => null);
-    if (adapter === null)
-      return {
-        ok: false,
-        code: 'EXECUTOR_UNAVAILABLE',
-        detail: 'the @factory/dsh-adapter package could not be imported',
-      };
-    try {
-      const pidFile = (ctx.env.FACTORY_SCENARIO_PID_FILE ?? '').trim();
-      const executor = adapter.createFakeExecutorFromFile(ctx.executor.scenarioPath, {
-        factoryHome: ctx.home,
-        baseRev,
-        ...(pidFile === '' ? {} : { pidFile }),
-        log: {
-          info: (fields: Record<string, unknown>, message?: string) =>
-            ctx.ui.err(message ?? JSON.stringify(fields)),
-          warn: (fields: Record<string, unknown>, message?: string) =>
-            ctx.ui.err(`WARN ${message ?? JSON.stringify(fields)}`),
-          error: (fields: Record<string, unknown>, message?: string) =>
-            ctx.ui.err(`ERROR ${message ?? JSON.stringify(fields)}`),
-        },
-      });
-      return {
-        ok: true,
-        receipt: await executor.run(launch, { effectId, attempt: attemptNo - 1 }),
-      };
-    } catch (error) {
-      if (error instanceof FactoryError)
-        return { ok: false, code: error.code, detail: error.message };
-      return {
-        ok: false,
-        code: 'EXECUTOR_UNAVAILABLE',
-        detail: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-  const proxyBaseUrl = (ctx.env.FACTORY_PROXY_BASE_URL ?? '').trim();
-  const modelId = (ctx.env.FACTORY_MODEL_ID ?? '').trim();
-  if (proxyBaseUrl.length === 0 || modelId.length === 0) {
-    return {
-      ok: false,
-      code: 'EXECUTOR_UNAVAILABLE',
-      detail:
-        'FACTORY_PROXY_BASE_URL and FACTORY_MODEL_ID must be set for a launch; no proxy means no worker',
-    };
-  }
-  if (ctx.executor.binPath === null)
-    return { ok: false, code: 'EXECUTOR_UNAVAILABLE', detail: 'no dsh binary' };
-
-  const adapter = await import('@factory/dsh-adapter').catch(() => null);
-  if (adapter === null)
-    return {
-      ok: false,
-      code: 'EXECUTOR_UNAVAILABLE',
-      detail: 'the @factory/dsh-adapter package could not be imported',
-    };
-
-  try {
-    const executor = adapter.createDshExecutor({
-      dshBin: ctx.executor.binPath,
-      factoryHome: ctx.home,
-      proxyBaseUrl,
-      modelId,
-      log: {
-        info: (fields: Record<string, unknown>, message?: string) =>
-          ctx.ui.err(message ?? JSON.stringify(fields)),
-        warn: (fields: Record<string, unknown>, message?: string) =>
-          ctx.ui.err(`WARN ${message ?? JSON.stringify(fields)}`),
-        error: (fields: Record<string, unknown>, message?: string) =>
-          ctx.ui.err(`ERROR ${message ?? JSON.stringify(fields)}`),
-      },
-    });
-    const receipt = await executor.run(launch, { effectId, attempt: attemptNo - 1 });
-    return { ok: true, receipt };
-  } catch (error) {
-    if (error instanceof FactoryError)
-      return { ok: false, code: error.code, detail: error.message };
-    return {
-      ok: false,
-      code: 'EXECUTOR_UNAVAILABLE',
-      detail: error instanceof Error ? error.message : String(error),
-    };
-  }
 }
 
 export const runVerb: VerbSpec = {

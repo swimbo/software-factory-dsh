@@ -21,6 +21,21 @@ const PASS_REASONS: Readonly<Record<string, string>> = {
  *   SQL. A fixture that fabricates rows the store would refuse would be a test of
  *   the fixture, not of the CLI.
  */
+/**
+ * **Test-only module.** Nothing outside `*.test.ts` may import it.
+ *
+ * It lives in the CLI's source tree because its fixtures must use the same modules the
+ * CLI uses (`context.ts`, `main.ts`) — a fixture that re-implemented them would test
+ * itself. That is also why it needs the gate below: production source that can be
+ * imported by the product is production surface, whatever the filename says.
+ */
+if (process.env.NODE_ENV === 'production') {
+  throw new Error(
+    'apps/cli/src/testing.ts is the CLI test harness and must never be loaded in production; ' +
+      'import the verb or the context directly instead',
+  );
+}
+
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

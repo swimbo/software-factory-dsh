@@ -703,9 +703,15 @@ export function createEngine(deps: EngineDeps): Engine {
       store.incrementAttemptCount(unitId, opts);
       const dispatched = store.setUnitState(unitId, 'dispatched', null, opts);
 
-      // The effect is the outbox: the transaction commits the intent to launch,
-      // and the adapter claims it. Nothing is launched from inside this call, so a
-      // crash after commit retries the launch instead of losing it.
+      // The effect is the outbox: this transaction commits the *intent* to launch and
+      // nothing is spawned from inside it, so a crash after commit can be retried
+      // instead of losing the launch. The caller performs the launch and settles the
+      // row: `apps/cli/src/effects.ts` asserts the row is this one and still pending
+      // (`claimLaunchEffect`), marks it applied once the worker has run, records a
+      // retryable failure when the environment refused it, and exhausts it when only a
+      // person can help. `factory recover` is what actually performs a row left pending
+      // by a crash — and only after the attempt's lease has expired, because a live
+      // lease is the one thing that says a process might already own the attempt.
       const effect = store.enqueueEffect({
         effectId: deps.newId('E-'),
         idempotencyKey: launchKey,
