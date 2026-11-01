@@ -47,6 +47,7 @@ import {
   idempotencyKey,
   isTerminal,
   toDecisionReceipt,
+  receiptShaFor,
   type LaneDecision,
   type LaneDecisionType,
   type OperationClass,
@@ -771,7 +772,7 @@ export function createEngine(deps: EngineDeps): Engine {
       // re-computes — the narrative is part of what was written, not part of what
       // a decision may use.
       const evidence = toDecisionReceipt(receipt);
-      const receiptSha = contentHash(receipt);
+      const receiptSha = receiptShaFor(receipt);
 
       if (receipt.attemptId !== attemptId) {
         throw new FactoryError(

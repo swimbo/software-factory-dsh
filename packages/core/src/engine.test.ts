@@ -34,6 +34,7 @@ import {
   type UnitSpec as UnitSpecType,
   type Verdict as VerdictType,
   type WorkerReceipt as WorkerReceiptType,
+  receiptShaFor,
 } from '@factory/contracts';
 import type { EffectRow } from '@factory/store';
 
@@ -703,14 +704,14 @@ describe('observeAttempt', () => {
     expect(observed.attempt.state).toBe('produced-receipt');
     expect(observed.attempt.exitCode).toBe(0);
     expect(observed.attempt.sessionId).toBe('dsh-session-1');
-    expect(observed.receipt.receiptSha).toBe(contentHash(body));
+    expect(observed.receipt.receiptSha).toBe(receiptShaFor(body));
     expect(h.store.getLiveLease(h.unitId)).toBeNull();
     expect(h.store.eventsOfType('attempt.receipted')).toEqual([
       {
         type: 'attempt.receipted',
         unitId: h.unitId,
         attemptId: h.attemptId,
-        receiptSha: contentHash(body),
+        receiptSha: receiptShaFor(body),
         exitCode: 0,
       },
     ]);
@@ -722,7 +723,7 @@ describe('observeAttempt', () => {
     h.engine.observeAttempt(h.attemptId, body);
 
     const error = expectCode(() => h.engine.observeAttempt(h.attemptId, body), 'RECEIPT_CONFLICT');
-    expect(error.details['receiptSha']).toBe(contentHash(body));
+    expect(error.details['receiptSha']).toBe(receiptShaFor(body));
     expect(h.store.eventsOfType('attempt.receipted')).toHaveLength(1);
   });
 
@@ -751,7 +752,15 @@ describe('observeAttempt', () => {
     expect(liarResult.attempt.state).toBe(honestResult.attempt.state);
     expect(liar.store.eventsOfType('unit.verified')).toHaveLength(0);
     expect(liar.store.getUnit(liar.unitId)?.state).not.toBe('verified');
-    expect(liarResult.receipt.receiptSha).not.toBe(honestResult.receipt.receiptSha);
+    // The evidence identity is the *decision* projection, so the narrative is not
+    // part of it: two receipts that differ only in prose are the same evidence, and
+    // saying otherwise would let an agent mint new evidence by editing its story.
+    // (The earlier assertion here was `not.toBe`, which enforced the opposite and
+    // was itself the bug: it made the narrative part of the evidence hash.)
+    expect(liarResult.receipt.receiptSha).toBe(honestResult.receipt.receiptSha);
+    // Receipt ids come from a per-test id factory, so two separate stores both mint
+    // `R-1`. The point is the hash, not the sequence number.
+    expect(liarResult.receipt.receiptSha).toBe(honestResult.receipt.receiptSha);
   });
 
   it('refuses a receipt filed against another attempt', () => {
@@ -797,7 +806,7 @@ describe('recordVerdict', () => {
     const h = dispatched();
     const body = receipt({ unitId: h.unitId, attemptId: h.attemptId });
     h.engine.observeAttempt(h.attemptId, body);
-    return { ...h, receiptSha: contentHash(body) };
+    return { ...h, receiptSha: receiptShaFor(body) };
   }
 
   it('verifies the unit on a pass, with the verdict bound to the receipt the wall read', () => {
@@ -942,7 +951,7 @@ describe('recordVerdict', () => {
     // The wall cannot have judged a receipt that was never filed, so the refusal is
     // about missing evidence, not about the unit's phase.
     const body = receipt({ unitId: h.unitId, attemptId: h.attemptId });
-    const sha = contentHash(body);
+    const sha = receiptShaFor(body);
     const eventsBefore = h.store.ledger.length;
 
     const error = expectCode(
@@ -1027,7 +1036,7 @@ describe('abortUnit', () => {
     h.engine.observeAttempt(h.attemptId, body);
     h.engine.recordVerdict(
       h.attemptId,
-      passVerdict({ unitId: h.unitId, attemptId: h.attemptId, receiptSha: contentHash(body) }),
+      passVerdict({ unitId: h.unitId, attemptId: h.attemptId, receiptSha: receiptShaFor(body) }),
     );
 
     const aborted = h.engine.abortUnit(h.unitId, 'holdout drift found in review');

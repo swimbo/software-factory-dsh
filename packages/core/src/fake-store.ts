@@ -29,6 +29,7 @@ import {
   type LaneDecisionType,
   type LedgerEvent,
   type UnitState,
+  receiptShaFor,
 } from '@factory/contracts';
 import type {
   AppendOptions,
@@ -942,7 +943,7 @@ export class FakeStore implements Store {
     this.attempt(row.attemptId);
     const body = WorkerReceipt.parse(row.receipt);
     // Faithful: the real store recomputes the hash and refuses a disagreement.
-    if (contentHash(body) !== row.receiptSha) {
+    if (receiptShaFor(body) !== row.receiptSha) {
       throw new FactoryError('INTERNAL', `receipt ${row.receiptId} disagrees with its own hash`, {
         receiptId: row.receiptId,
       });

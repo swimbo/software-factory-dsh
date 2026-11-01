@@ -9,6 +9,8 @@
  */
 import { z } from 'zod';
 
+import { contentHash } from './canonical.ts';
+
 export const CommandRecord = z.object({
   argv: z.array(z.string().min(1)).min(1).max(64),
   cwd: z.string().min(1),
@@ -101,6 +103,24 @@ export function toDecisionReceipt(receipt: WorkerReceipt): DecisionReceipt {
   const { narrative, ...rest } = receipt;
   void narrative;
   return rest;
+}
+
+/**
+ * The identity of a receipt's **evidence**.
+ *
+ * Hashed over the decision projection — the receipt *without* `narrative` — because
+ * that is the only form the wall ever sees (L1: the agent's prose is not evidence).
+ * Hashing the whole body instead put the factory in a state where a receipt with a
+ * narrative could not be joined to the verdict that judged it: the wall hashes what
+ * it was given, the store hashed what it stored, and the two never matched.
+ *
+ * One function, used by the engine when it files a receipt, by the store when it
+ * joins a verdict to one, and by every fixture. If this changes, evidence filed
+ * under the old function stops joining — which is the correct behaviour for an
+ * identity change, and the reason it lives here rather than at three call sites.
+ */
+export function receiptShaFor(receipt: WorkerReceipt): string {
+  return contentHash(toDecisionReceipt(receipt));
 }
 
 /**

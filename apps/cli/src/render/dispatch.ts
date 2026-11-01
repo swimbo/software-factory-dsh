@@ -43,6 +43,36 @@ export function dispatched(
   };
 }
 
+/**
+ * `running      A-01  executor headless  worker launched`
+ *
+ * The waiting state that has no receipt yet: the worker is thinking. It is printed
+ * *before* the launch is awaited, because a line that appears after the turn ended tells
+ * an operator nothing about what they are currently waiting for.
+ */
+export function running(attemptId: string, executor: string): Transition {
+  return {
+    kind: 'running',
+    at: new Date(0).toISOString(),
+    detail: `${attemptId}  executor ${executor}  worker launched`,
+  };
+}
+
+/**
+ * `verifying    A-01  wall measuring: holdout + pinned suite`
+ *
+ * The second waiting state, and a different failure mode from `running`: the worker is
+ * done and the judgement is being made. Measured from a receipt, never from the worker's
+ * own claim (the wall re-executes the commands, so this can contradict the receipt).
+ */
+export function verifying(attemptId: string, wall: string): Transition {
+  return {
+    kind: 'verifying',
+    at: new Date(0).toISOString(),
+    detail: `${attemptId}  ${wall}`,
+  };
+}
+
 export function receiptLine(
   receiptId: string,
   files: number,

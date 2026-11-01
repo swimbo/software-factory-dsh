@@ -167,7 +167,9 @@ describe('no flag replaces a phrase', () => {
   ];
   const FLAGS = ['-y', '--yes', '--force', '-f', '--assume-yes', '--yes=1', '-fy'];
 
-  it('[@default] every bypass flag is exit 2 on every gated verb', () => {
+  // 21 CLI processes: the assertions are cheap, the spawns are not. An explicit timeout
+  // keeps this honest under the full parallel suite without weakening what is checked.
+  it('[@default] every bypass flag is exit 2 on every gated verb', { timeout: 120_000 }, () => {
     for (const verb of GATED) {
       for (const flag of FLAGS) {
         const run = runFactory([...verb, flag], { home });

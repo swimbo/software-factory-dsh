@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { FactoryError, WALL_VERSION, contentHash } from '@factory/contracts';
+import { FactoryError, WALL_VERSION, contentHash, receiptShaFor } from '@factory/contracts';
 import type {
   LaneDecisionType,
   UnitSpec as UnitSpecType,
@@ -588,7 +588,7 @@ describe('attempts and receipts', () => {
   it('records a receipt, its attempt.receipted event, and moves the unit to receipted', () => {
     dispatchedUnit();
     const body = receipt('U-7f3a9c', 'A-1');
-    const sha = contentHash(body);
+    const sha = receiptShaFor(body);
     const stored = store.insertReceipt(
       {
         receiptId: 'R-1',
@@ -622,7 +622,7 @@ describe('attempts and receipts', () => {
   it('refuses a second receipt with the same sha (append-only evidence)', () => {
     dispatchedUnit();
     const body = receipt('U-7f3a9c', 'A-1');
-    const sha = contentHash(body);
+    const sha = receiptShaFor(body);
     const row = {
       receiptId: 'R-1',
       unitId: 'U-7f3a9c',
@@ -678,7 +678,7 @@ describe('attempts and receipts', () => {
             receiptId: 'R-other',
             unitId: 'U-7f3a9c',
             attemptId: 'A-1',
-            receiptSha: contentHash(receipt('U-7f3a9c', 'A-OTHER')),
+            receiptSha: receiptShaFor(receipt('U-7f3a9c', 'A-OTHER')),
             sessionId: 'sess-1',
             exitCode: 0,
             startedAt: AT,
@@ -697,7 +697,7 @@ describe('verdicts: unknown is not pass', () => {
   function receiptedUnit(): { receiptSha: string } {
     dispatchedUnit();
     const body = receipt('U-7f3a9c', 'A-1');
-    const sha = contentHash(body);
+    const sha = receiptShaFor(body);
     store.insertReceipt(
       {
         receiptId: 'R-1',
@@ -885,7 +885,7 @@ describe('promotions', () => {
   function promotedSetup(): void {
     dispatchedUnit();
     const body = receipt('U-7f3a9c', 'A-1');
-    const sha = contentHash(body);
+    const sha = receiptShaFor(body);
     store.insertReceipt(
       {
         receiptId: 'R-1',

@@ -55,12 +55,11 @@ describe('status --json', () => {
   });
 
   it('[@default] status --json validates against StatusV1', () => {
-    // BUG, reported not patched: on a host where the wall is unavailable and a unit has not
-    // been qualified, the payload carries `factory.wallVersion: null` and `units[].lane: null`.
-    // `StatusV1` requires a non-empty string for `wallVersion` and a lane enum for `lane`, so
-    // `parseStatus()` rejects the CLI's own output. `it.fails` keeps the suite honest while this
-    // is open: the moment the CLI or the schema is reconciled, this assertion passes and vitest
-    // reports it as an unexpected pass, which is the prompt to flip it back to `it`.
+    // Was an `it.fails` while the contract and the CLI disagreed: the payload carries
+    // `factory.wallVersion: null` and `units[].lane: null` on a host with no wall and an
+    // unqualified unit, and `StatusV1` required a non-empty string plus a lane enum. The
+    // schema now admits both, so this is a plain assertion again — and it is the one spec
+    // that would catch the two drifting apart a second time.
     submitUnit(home, { spec: specFor({ baseRev: fixture.baseRev }) });
     const raw = JSON.parse(runFactory(['status', '--json'], { home }).stdout.trim()) as unknown;
 

@@ -5,6 +5,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -128,12 +129,23 @@ describe('killProcessGroup', () => {
     expect(await eventually(() => isDead(grandchild), 5000)).toBe(true);
   });
 
-  it('is a no-op when the group is already gone', () => {
+  it('is a no-op when the group is already gone', async () => {
     // Reaping an already-reaped group must not throw: the watchdog's whole job is
     // to be run late.
-    const child = spawn('true', [], { detached: process.platform !== 'win32', stdio: 'ignore' });
-    const pid = child.pid ?? 0;
-    expect(() => killProcessGroup(pid)).not.toThrow();
+    //
+    // This used to spawn `true` and kill immediately — a race with the event loop.
+    // Under load the child was sometimes still alive (so the group existed) and
+    // sometimes already reaped, which made the assertion a coin flip and the gate
+    // wrong once in a while. Waiting for the exit first makes the state the test
+    // asserts the state it actually has: the group is provably gone.
+    const child = spawn(process.execPath, ['-e', 'process.exit(0)'], {
+      detached: process.platform !== 'win32',
+      stdio: 'ignore',
+    });
+    await once(child, 'exit');
+    const pid = child.pid;
+    expect(pid, 'spawn must produce a pid, otherwise the test proves nothing').toBeGreaterThan(0);
+    expect(() => killProcessGroup(pid ?? 0)).not.toThrow();
   });
 
   it('refuses a nonsensical pid', () => {

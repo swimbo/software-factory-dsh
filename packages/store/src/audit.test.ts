@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { WALL_VERSION, contentHash } from '@factory/contracts';
+import { WALL_VERSION, contentHash, receiptShaFor } from '@factory/contracts';
 import type {
   LaneDecisionType,
   UnitSpec as UnitSpecType,
@@ -269,7 +269,7 @@ function buildToReceipted(): string {
     recordedAt: AT,
   });
   const body = receiptBody();
-  const sha = contentHash(body);
+  const sha = receiptShaFor(body);
   store.insertReceipt(
     {
       receiptId: 'R-1',

@@ -50,6 +50,7 @@ export {
   type WorkerReceipt as WorkerReceiptType,
   type DecisionReceipt,
   toDecisionReceipt,
+  receiptShaFor,
   Faithfulness,
 } from './receipt.ts';
 

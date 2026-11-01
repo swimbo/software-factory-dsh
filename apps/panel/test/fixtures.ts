@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { WALL_VERSION, contentHash, parseStatus } from '@factory/contracts';
+import { WALL_VERSION, contentHash, parseStatus, receiptShaFor } from '@factory/contracts';
 import type {
   BudgetStatus,
   HealthStatus,
@@ -300,7 +300,7 @@ export function walkToVerdict(
   store.setUnitState(unitId, 'dispatched', null, options());
 
   const body = makeReceipt(unitId, attemptId);
-  const receiptSha = contentHash(body);
+  const receiptSha = receiptShaFor(body);
   store.insertReceipt(
     {
       receiptId: walk.receiptId ?? 'R-0aa1',

@@ -29,7 +29,7 @@ import {
 } from '@factory/contracts';
 
 import { UsageError } from '../exit.ts';
-import { dispatched, transitionLine } from '../render/dispatch.ts';
+import { dispatched, running, transitionLine, verifying } from '../render/dispatch.ts';
 import { field } from '../render/format.ts';
 import { join } from 'node:path';
 import { evaluateReceipt, wallPolicyFrom } from '../wall.ts';
@@ -183,6 +183,18 @@ export async function runRun(input: VerbInput): Promise<number> {
     }
 
     const mirror = resolveMirror(ctx.env, unit.spec);
+    // Re-measurement is the same wall, over evidence the store already holds: the same
+    // transition, so a re-verify reads like the run it replaces.
+    ctx.ui.err(
+      transitionLine(
+        verifying(
+          existing.attemptId,
+          ctx.wall.kind === 'fake'
+            ? 'wall FAKE - re-measuring the recorded receipt'
+            : 'wall measuring: re-running the recorded receipt against the holdout',
+        ),
+      ),
+    );
     const reVerdict =
       ctx.wall.kind === 'fake'
         ? evaluateWithWall(ctx, existing.attemptId)
@@ -302,6 +314,11 @@ export async function runRun(input: VerbInput): Promise<number> {
     );
   }
 
+  // The worker starts here. This line precedes the await on purpose: `running` is the
+  // state an operator is *in* while the turn happens, and printing it afterwards would
+  // report a history rather than a status.
+  ctx.ui.err(transitionLine(running(result.attempt.attemptId, ctx.executor.kind)));
+
   const launched = await launchAttempt(
     ctx,
     result.effect.payload,
@@ -333,6 +350,18 @@ export async function runRun(input: VerbInput): Promise<number> {
     }),
   );
 
+  // The wall is about to measure. Between this line and the verdict line the worker is
+  // done and the judgement is in progress — a different wait, with a different failure mode.
+  ctx.ui.err(
+    transitionLine(
+      verifying(
+        result.attempt.attemptId,
+        ctx.wall.kind === 'fake'
+          ? 'wall FAKE - no scenario executed'
+          : 'wall measuring: holdout + pinned suite, receipt re-executed',
+      ),
+    ),
+  );
   if (ctx.wall.kind === 'fake') ctx.ui.err('wall: FAKE (no scenario executed)');
   const verdict =
     ctx.wall.kind === 'fake'

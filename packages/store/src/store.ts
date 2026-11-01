@@ -32,6 +32,7 @@ import {
   assertVerdictIsEarned,
   isTerminal,
   canTransition,
+  receiptShaFor,
 } from '@factory/contracts';
 import type {
   EventType,
@@ -1573,7 +1574,7 @@ export function openStore(options: OpenStoreOptions): Store {
             { attemptId: row.attemptId, receiptId: row.receiptId },
           );
         }
-        const sha = contentHash(body);
+        const sha = receiptShaFor(body);
         if (sha !== row.receiptSha) {
           throw new FactoryError(
             'INTERNAL',
