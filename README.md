@@ -68,10 +68,19 @@ single-uid platform.
 | β (power)                     | **unmeasured** — needs a known-bad corpus nobody has                 | stated in the module header, not published |
 | Anchor freshness window       | **48 h** — `ledger verify` exits 9 past it                           | `packages/anchor`, ADR-008                 |
 | Spend                         | what the gateway reports per call; `unknown` when it reports nothing | `packages/credential-proxy/src/usage.ts`   |
+| Class certificates            | one row per verdict; `audit --certifications` exits 9 when stale     | `class_certificates` in `packages/store`   |
 
-Re-certification on a policy or model change is **not built**: every verdict carries the point and α it
-was measured under, which is the evidence such a job would read, but no job compares a stored class
-certificate with a changed policy version.
+A class certificate is **stored, not narrated**: each verdict's certificate is a row in
+`class_certificates` (the task class, m, k, p0, α, samples, passes, outcome, the policy version and the
+model id it was judged under), written inside the same transaction as the verdict, with a digest that
+ties it to the `wall.class_certified` event. `factory audit --certifications` exits **9** when any
+class's certificate is stale or absent against the running policy or model — expired evidence, not a
+warning.
+
+What that still is not: a **scheduled** re-certification. Nothing runs the measurement again on a
+policy or model change; the audit tells you the certificate expired and a person decides to re-run the
+class. Alerting works the same way — `ledger verify` exits 9 and `audit --certifications` exits 9, but
+nothing pages anyone.
 
 ## Packages
 
