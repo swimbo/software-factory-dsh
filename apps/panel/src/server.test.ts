@@ -211,7 +211,7 @@ describe('the injected DSH observation', () => {
   }
 
   it('goes silent when the probe read the pinned version', async () => {
-    const pinned = await panelWith(() => '0.2.1-rc.3');
+    const pinned = await panelWith(() => '0.2.1-rc.5');
     try {
       const html = await (await fetch(`${pinned.url}/?token=${TOKEN}`)).text();
       // The whole point of the injection: an honest all-ok machine gets no strip.
@@ -231,7 +231,7 @@ describe('the injected DSH observation', () => {
     try {
       const html = await (await fetch(`${skewed.url}/?token=${TOKEN}`)).text();
       expect(html).toContain('DSH VERSION DEGRADED');
-      expect(html).toContain('expected 0.2.1-rc.3, observed 0.3.0');
+      expect(html).toContain('expected 0.2.1-rc.5, observed 0.3.0');
       const body = (await (
         await fetch(`${skewed.url}/api/status?token=${TOKEN}`)
       ).json()) as StatusV1;

@@ -638,7 +638,7 @@ function taskClassHealth(ctx: FactoryContext): StatusModel['health']['taskClasse
 }
 
 export const FACTORY_VERSION = '0.1.0';
-export const PINNED_DSH_VERSION = '0.2.1-rc.3';
+export const PINNED_DSH_VERSION = '0.2.1-rc.5';
 export const WALL_VERSION_FALLBACK = 'wall-2026.11.1';
 
 function observedDshVersion(ctx: FactoryContext): string | null {

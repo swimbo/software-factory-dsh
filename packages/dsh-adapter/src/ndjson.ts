@@ -17,7 +17,7 @@
  *    `MAX_EVENT_BYTES`). A killed process can also leave a half-written final
  *    line. Both are surfaced, never silently dropped — a receipt that quietly
  *    loses events is worse than one that admits it.
- * 3. **Two event shapes.** The installed binary (0.2.1-rc.3) emits `turn_end` as
+ * 3. **Two event shapes.** The installed binary (0.2.1-rc.5) emits `turn_end` as
  *    its own `{"type":"turn_end"}`; the 0.2.1-alpha.4 checkout emits it as
  *    `{"type":"status","phase":"turn_end"}`. The adapter is version-pinned, but
  *    a parser that only understands one shape would silently see "no turn end"

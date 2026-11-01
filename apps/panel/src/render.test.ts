@@ -53,7 +53,7 @@ describe('structure', () => {
 
   it('shows the pinned DSH version and the observed one separately', () => {
     const html = render(sampleStatus());
-    expect(html).toContain('dsh 0.2.1-rc.3');
+    expect(html).toContain('dsh 0.2.1-rc.5');
     expect(html).toContain('observed unknown');
   });
 });

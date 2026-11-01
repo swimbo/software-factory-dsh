@@ -314,7 +314,11 @@ describe.skipIf(!READY)(
 
         // No completed turn anywhere in the evidence, and the run did not claim success.
         expect(turn.completed).toBe(false);
-        expect(run.code).not.toBe(0);
+        // Exit 5 is the documented "the worker's turn failed" code, and it is asserted exactly
+        // rather than as "not zero". `runFactory` reports -1 when *this harness* killed the child
+        // at `timeoutMs`, and `not.toBe(0)` accepted that: a CLI that hung for five minutes and
+        // was shot counted as a passing refusal test, which is a green that means nothing.
+        expect(run.code, 'a killed child is a hung factory, not a refused model').toBe(5);
         if (hasReceipt) {
           const receipt = JSON.parse(readFileSync(join(recordDir, 'receipt.json'), 'utf8')) as {
             exitCode: number | null;
@@ -322,6 +326,7 @@ describe.skipIf(!READY)(
           // A failed launch is a non-zero child, not a clean exit with an empty diff.
           expect(receipt.exitCode === 0 && turn.completed).toBe(false);
         }
+        passed = true;
       } finally {
         if (passed) fixture.cleanup();
         else console.error(`[@live] fixture retained for post-mortem: ${fixture.home}`);

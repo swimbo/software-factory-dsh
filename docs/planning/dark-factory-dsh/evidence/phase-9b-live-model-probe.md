@@ -184,3 +184,31 @@ developer's shell lacks a tool is measuring the shell.
 **What remains true and narrower than the headline:** the live path forwards `BIFROST_API_KEY` to
 `dsh` (no credential proxy exists in v1, ADR-006 amendment), so "the worker never holds the key"
 applies to every offline and container path and **not** to the live one. E2E-48 stays `UNKNOWN`.
+
+## 7. The pin moved, and the proxy taught the live path to end
+
+Two things changed after §6 and both were found by running, not reading.
+
+**The DSH pin moved to `0.2.1-rc.5`.** The installed desktop app auto-updated; `rc.3` is no longer on
+disk, and the provisioning script failed closed on the mismatch (`dsh is 0.2.1-rc.5, this script is
+pinned to 0.2.1-rc.3`) — which is the pin doing its job. The pin was then re-verified rather than
+relaxed: provisioning against a fresh `DSH_HOME`, profile boot failing closed at `MISSING_CREDENTIAL`,
+overlay activation with no warning, and a real live pair (`19.7 s` happy path, `outcome: pass`,
+`replayed 5 of 8`).
+
+**The credential proxy could outlive its own turn.** `pipe` destroys the destination, not the source,
+so when the worker closed its side of a stream the gateway leg kept running into a socket nobody read.
+The factory completed a verified unit — `outcome: pass`, tokens counted, receipt written — and then
+never exited; `runFactory` killed it at the 300 s guard and reported exit `-1`, which the refusal spec
+happily accepted as "not zero". Two fixes, both with specs:
+
+1. the proxy destroys the upstream leg on client close and on its own close;
+2. the refusal spec now asserts **exit 5**, because a killed child is a hung factory, not a refused
+   model — `expect(code).not.toBe(0)` was a green that meant nothing. The refusal spec also had a
+   cleanup bug: `passed` was never set on that path, so a green run retained its home and printed a
+   post-mortem line it did not need.
+
+**Honest state of the evidence:** the hang was intermittent (three of five live runs), and after the
+fix three consecutive live pairs passed (19.7 s, 21.2 s, 23.6 s, ~8.0–8.7 k tokens each). Three passes
+is not a proof of absence; what *is* deterministic is the child-process fixture, which hangs 5/5 without
+the fix and exits immediately with it.

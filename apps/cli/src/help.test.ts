@@ -17,7 +17,7 @@ describe('--help', () => {
   it('exits 0 and names the pinned dsh version', () => {
     const result = runCli(['--help']);
     expect(result.status).toBe(EXIT.ok);
-    expect(result.stdout).toContain('0.2.1-rc.3');
+    expect(result.stdout).toContain('0.2.1-rc.5');
   });
 
   it('states the exit-code table, so a script author never has to guess', () => {
@@ -83,12 +83,12 @@ describe('factory version', () => {
   it('exits 0 and prints the pinned dsh expectation', () => {
     const result = runCli(['version']);
     expect(result.status).toBe(EXIT.ok);
-    expect(result.stderr).toContain('0.2.1-rc.3');
+    expect(result.stderr).toContain('0.2.1-rc.5');
   });
 
   it('reports the pinned version in --json under the same names the status page uses', () => {
     const json = jsonOf(runCli(['version', '--json']));
-    expect(json).toMatchObject({ ok: true, dshVersionExpected: '0.2.1-rc.3' });
+    expect(json).toMatchObject({ ok: true, dshVersionExpected: '0.2.1-rc.5' });
     // `dshVersionObserved` is a *probe*: null when no binary is reachable, the observed version
     // when one is. Asserting `null` made this spec pass only on a shell without `dsh`/`DSH_BIN` —
     // it went red the moment the live layer exported DSH_BIN, which is a test that measured the

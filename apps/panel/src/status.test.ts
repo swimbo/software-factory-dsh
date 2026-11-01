@@ -69,19 +69,19 @@ describe('the envelope', () => {
 
   it('names the pinned DSH version but reports the observed one as unknown', () => {
     const status = statusOf(store());
-    expect(status.factory.dshVersionExpected).toBe('0.2.1-rc.3');
+    expect(status.factory.dshVersionExpected).toBe('0.2.1-rc.5');
     expect(status.factory.dshVersionObserved).toBeNull();
     // The one thing it must not do: compare a version against itself and call it ok.
     expect(status.health.dshVersion.state).toBe('unavailable');
     expect(status.health.dshVersion.observed).toBeNull();
-    expect(status.health.dshVersion.expected).toBe('0.2.1-rc.3');
+    expect(status.health.dshVersion.expected).toBe('0.2.1-rc.5');
   });
 
   it('reports `ok` only when the probe really read the pinned version', () => {
-    const status = statusOf(store(), { dshVersionObserved: '0.2.1-rc.3' });
+    const status = statusOf(store(), { dshVersionObserved: '0.2.1-rc.5' });
     expect(status.health.dshVersion.state).toBe('ok');
-    expect(status.health.dshVersion.observed).toBe('0.2.1-rc.3');
-    expect(status.health.dshVersion.expected).toBe('0.2.1-rc.3');
+    expect(status.health.dshVersion.observed).toBe('0.2.1-rc.5');
+    expect(status.health.dshVersion.expected).toBe('0.2.1-rc.5');
     expect(status.health.dshVersion.detail).toBeNull();
   });
 
@@ -89,7 +89,7 @@ describe('the envelope', () => {
     const status = statusOf(store(), { dshVersionObserved: '0.3.0' });
     expect(status.health.dshVersion.state).toBe('degraded');
     expect(status.health.dshVersion.observed).toBe('0.3.0');
-    expect(status.health.dshVersion.detail).toContain('0.2.1-rc.3');
+    expect(status.health.dshVersion.detail).toContain('0.2.1-rc.5');
     expect(status.health.dshVersion.detail).toContain('0.3.0');
   });
 

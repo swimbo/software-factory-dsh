@@ -432,7 +432,7 @@ describe('createDshExecutor — refusals', () => {
   });
 
   it('accepts a caller-supplied pin, so the contract module can own it later', async () => {
-    const { run } = harness('fake-dsh-success.sh', { expectedVersion: '0.2.1-rc.3' });
+    const { run } = harness('fake-dsh-success.sh', { expectedVersion: '0.2.1-rc.5' });
     const receipt = await run();
     expect(receipt.exitCode).toBe(0);
   });

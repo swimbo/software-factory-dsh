@@ -22,7 +22,7 @@ export const PROBE_TIMEOUT_MS = 1_500;
 /**
  * Pull a version out of whatever `--version` printed.
  *
- * Real outputs look like `dsh/0.2.1-rc.3`, `dsh 0.2.1-rc.3` or `0.2.1-rc.3`; the
+ * Real outputs look like `dsh/0.2.1-rc.5`, `dsh 0.2.1-rc.5` or `0.2.1-rc.5`; the
  * parser takes the first semver-shaped token and ignores the rest, so a banner line
  * or a build suffix cannot turn a readable answer into `null`.
  */

@@ -21,7 +21,7 @@
 # run — after the profile was created, so the retry fails too and the state is
 # confusing. Adding `--dump-config` composes and prints the profile instead of
 # booting it: same profile, exit 0, and provably no chance of starting a turn (and
-# therefore no chance of a paid model call). Verified against 0.2.1-rc.3.
+# therefore no chance of a paid model call). Verified against 0.2.1-rc.5.
 #
 # Usage:
 #   scripts/provision-dsh-home.sh [--root DIR] [--dsh PATH] [--profile NAME]
@@ -32,7 +32,7 @@
 
 set -euo pipefail
 
-readonly DEFAULT_VERSION='0.2.1-rc.3'
+readonly DEFAULT_VERSION='0.2.1-rc.5'
 readonly DOMAINS=(worker evaluator)
 
 log() { printf '%s\n' "provision-dsh-home: $*" >&2; }

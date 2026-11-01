@@ -237,7 +237,7 @@ export function probeExecutor(
     scenarioPath: null,
     detail: missing.length === 0 ? `dsh at ${String(binPath)}` : missing.join('; '),
     runbook:
-      'runbook: install the pinned dsh (0.2.1-rc.3) and make it reachable on PATH, then re-run: factory run <unitId>',
+      'runbook: install the pinned dsh (0.2.1-rc.5) and make it reachable on PATH, then re-run: factory run <unitId>',
   };
 }
 

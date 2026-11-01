@@ -10,7 +10,9 @@
  * an operator whether a worker had the wrong token, a dead token, or a token for another
  * attempt.
  */
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startCredentialProxy, pathWithinPrefix, type CredentialProxy } from './server.ts';
@@ -276,6 +278,94 @@ describe('revocation on settle, end to end', () => {
     expect(described).toEqual({ token: 'scoped', expiresAt: '2026-11-01T12:40:00.000Z' });
     // The value is not in the description, which is what goes into `launch.json`.
     expect(JSON.stringify(described)).not.toContain(minted.token);
+  });
+});
+
+describe('the stream lifecycle: nothing outlives the turn that opened it', () => {
+  it('lets the process exit after a turn is abandoned mid-stream', async () => {
+    // This one is spawned, not called: the property under test is **process exit**, and a factory
+    // that finishes a verified unit and then never dies is invisible to an assertion made inside
+    // the same process. It hung a live run at its 300 s guard with the verdict already written;
+    // the child reproduces it in one second. Without the fix it prints `done` and then hangs
+    // forever, because the upstream leg is still streaming into a socket the closed proxy no
+    // longer reads.
+    const child = spawn(
+      process.execPath,
+      [join(import.meta.dirname, '__fixtures__', 'exit-child.ts')],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => (stdout += chunk));
+    child.stderr.on('data', (chunk: string) => (stderr += chunk));
+    const outcome = await Promise.race([
+      new Promise<'exited'>((resolve) => child.once('exit', () => resolve('exited'))),
+      new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 5_000)),
+    ]);
+    if (outcome === 'hung') child.kill('SIGKILL');
+    expect(stdout).toContain('done');
+    expect(outcome, `${stderr}\nthe proxy kept an upstream stream open past close()`).toBe(
+      'exited',
+    );
+    proxy = null;
+  });
+
+  it('tears the upstream leg down when the worker abandons a streaming response', async () => {
+    // The in-process half of the same property: the client leg going away must destroy the
+    // upstream leg rather than leaving a stream running into a socket nobody reads (`pipe`
+    // destroys the destination, not the source).
+    const clock = '2026-11-01T00:00:00.000Z';
+    let upstreamConnections = 0;
+    const gateway: Server = createServer((_req, res) => {
+      upstreamConnections += 1;
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      res.write('data: {"delta":"half a turn"}\n\n');
+    });
+    await new Promise<void>((resolve) => gateway.listen(0, '127.0.0.1', () => resolve()));
+    const address = gateway.address();
+    if (address === null || typeof address === 'string') throw new Error('no port');
+
+    const started = await startCredentialProxy({
+      upstream: {
+        baseUrl: `http://127.0.0.1:${String(address.port)}/openai/v1`,
+        apiKey: GATEWAY_KEY,
+      },
+      now: () => clock,
+    });
+    const minted = started.tokens.mint({
+      attemptId: 'A-abandoned',
+      issuedAt: clock,
+      expiresAt: '2026-11-01T00:10:00.000Z',
+    });
+
+    const controller = new AbortController();
+    const request = fetch(`${started.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${minted.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'auto' }),
+      signal: controller.signal,
+    }).catch(() => null);
+
+    // Read the first chunk, then abandon the response exactly as a finished turn would.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    controller.abort();
+    await request;
+
+    const closed = await Promise.race([
+      started.close().then(() => 'closed' as const),
+      new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 2_000)),
+    ]);
+    expect(upstreamConnections, 'the gateway was asked exactly once').toBe(1);
+    expect(closed, 'the proxy held its own stream open after the worker left').toBe('closed');
+    await new Promise<void>((resolve) => {
+      gateway.closeAllConnections();
+      gateway.close(() => resolve());
+    });
+    proxy = null;
   });
 });
 

@@ -6,7 +6,17 @@
   per-attempt token — bounded to a localhost socket, the attempt's lease, one upstream prefix, and
   revoked before the verdict is written — and writes the `Authorization` header itself. The launch
   record now says `credentialsForwarded: []` with `credentialProxy: { token: 'scoped' }` (ADR-007).
-  `FACTORY_LIVE_MODEL=1` is only a consent switch now. 23 specs cover it (14 proxy, 9 wiring).
+  `FACTORY_LIVE_MODEL=1` is only a consent switch now. 26 specs cover it (17 proxy, 9 wiring).
+- **Fixed: the factory could finish a verified unit and then never exit.** The proxy piped the
+  gateway's response into the worker but never destroyed the _upstream_ leg when the worker left, so
+  a finished turn left an SSE stream running into an unread socket. It cost a live run: `outcome:
+pass`, tokens counted, receipt written — and the process killed at its 300 s guard. The proxy now
+  tears the upstream leg down on client close and on its own close, and a spawned-child spec asserts
+  the process exits (it hung 5/5 before the fix).
+- **The DSH pin moved to `0.2.1-rc.5`** because the installed desktop app auto-updated and `rc.3` is
+  no longer on disk. Re-verified rather than assumed: provisioning, profile boot with
+  `MISSING_CREDENTIAL` fail-closed, overlay activation, and a real live pair (`19.7 s`, `outcome
+pass`). The adapter still refuses any version that is not the pin.
 
 What changed for someone using this repository, in order. Not a file-by-file diff — the commits say
 that. Releases are tagged; entries below them are the commits that carried them.

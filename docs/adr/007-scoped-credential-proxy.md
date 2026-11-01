@@ -28,6 +28,14 @@ A per-attempt **credential proxy** on `127.0.0.1:<ephemeral>` holds the key; the
 - **Revocation is ordered, not incidental.** `launch.ts` settles and closes the proxy in a `finally`
   that runs on the failure path too; the verdict is written after that returns. A token that outlived
   its attempt would be a credential alive while the factory had recorded the attempt as over.
+- **Nothing outlives the turn, including the gateway's stream.** The proxy destroys its upstream
+  leg when the worker closes its side, and destroys any leg still streaming when it closes itself.
+  This is in the ADR because it is not an optimisation: `pipe` destroys the _destination_, not the
+  source, so a worker that finished a turn left the gateway streaming into a socket nobody read —
+  and a live run completed a verified unit (`outcome: pass`, tokens counted) and then never
+  exited, killed at its 300 s guard. `packages/credential-proxy/src/__fixtures__/exit-child.ts`
+  reproduces it in one second and the spec asserts process exit, because "the factory must end"
+  is not visible to an assertion made inside the same process.
 - **`FACTORY_LIVE_MODEL=1` is now only a consent switch** — "this run may spend" — and no longer copies
   a key into the child. The env allowlist still refuses `*_KEY` by category; that rule did not move.
 

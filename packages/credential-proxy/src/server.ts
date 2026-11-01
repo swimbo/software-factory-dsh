@@ -34,7 +34,13 @@
  * so an operator reading a log can tell a wrong path from a dead token. Only then is the
  * request forwarded, with `Authorization: Bearer <gateway key>` written by *this* file.
  */
-import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
+import {
+  createServer,
+  request as httpRequest,
+  type ClientRequest,
+  type IncomingMessage,
+  type Server,
+} from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { ServerResponse } from 'node:http';
 import {
@@ -167,6 +173,11 @@ export async function startCredentialProxy(
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const tokens = createTokenRegistry({ now: options.now });
   const send = upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest;
+  // Every upstream request that is still streaming. A proxy that forgets one keeps a socket
+  // open for the gateway's full timeout, and an open socket keeps *this* process alive: the
+  // factory would finish a verified unit and then sit there until it was killed. That is not a
+  // hypothetical — it hung a live run at 300 s with the verdict already written.
+  const inFlight = new Set<ClientRequest>();
 
   const server: Server = createServer((req, res) => {
     const started = performance.now();
@@ -241,6 +252,7 @@ export async function startCredentialProxy(
       if (settled) return;
       settled = true;
       const body = Buffer.concat(chunks);
+      let upstreamResForCleanup: IncomingMessage | null = null;
       const upstream = send(
         {
           method,
@@ -260,6 +272,7 @@ export async function startCredentialProxy(
           timeout: requestTimeoutMs,
         },
         (upstreamRes) => {
+          upstreamResForCleanup = upstreamRes;
           options.onEvent?.({
             kind: 'forward',
             method,
@@ -278,6 +291,19 @@ export async function startCredentialProxy(
           upstreamRes.on('error', () => res.destroy());
         },
       );
+      inFlight.add(upstream);
+      const forget = (): void => {
+        inFlight.delete(upstream);
+      };
+      upstream.on('close', forget);
+      // The worker closing its side (a finished SSE stream, an aborted turn) must destroy the
+      // upstream leg too: `pipe` only destroys the *destination*, so without this the gateway
+      // keeps streaming into a socket nobody reads and this process never exits.
+      res.on('close', () => {
+        forget();
+        upstream.destroy();
+        upstreamResForCleanup?.destroy();
+      });
       upstream.on('timeout', () => {
         upstream.destroy(new Error('upstream timed out'));
       });
@@ -337,6 +363,10 @@ export async function startCredentialProxy(
       tokens.revokeAll();
       if (closed) return;
       closed = true;
+      // Before the server teardown: an in-flight upstream response is not a *client* connection,
+      // so `closeAllConnections` does not touch it and `server.close` would wait for the stream.
+      for (const pending of inFlight) pending.destroy();
+      inFlight.clear();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error === undefined ? resolve() : reject(error)));
         // In-flight keep-alive sockets would otherwise hold `close` open past the attempt.

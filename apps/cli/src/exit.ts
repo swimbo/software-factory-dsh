@@ -117,7 +117,7 @@ const RUNBOOKS: Readonly<Record<string, string>> = {
   EXECUTOR_UNAVAILABLE:
     'runbook: install the pinned dsh on PATH and start a docker daemon, then re-run: factory run <unitId>',
   DSH_VERSION_MISMATCH:
-    'runbook: install dsh 0.2.1-rc.3 exactly — a version mismatch is refused, never warned about',
+    'runbook: install dsh 0.2.1-rc.5 exactly — a version mismatch is refused, never warned about',
   STORE_QUARANTINED:
     'runbook: docs/runbooks/store-quarantine.md — do not reset, delete or re-initialise the store; copy it and read',
   WALL_UNAVAILABLE:

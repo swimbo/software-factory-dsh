@@ -99,14 +99,14 @@ const MAX_NARRATIVE_CHARS = 200_000;
  * The `dsh` build every fact in this package was established against.
  *
  * The overlay schema, the `--json` event shapes and the `turn_end` reason kinds
- * are all version-specific: 0.2.1-alpha.4 and 0.2.1-rc.3 already disagree about
+ * are all version-specific: 0.2.1-alpha.4 and 0.2.1-rc.5 already disagree about
  * how a turn end is delivered, and the registry carries newer builds. Running an
  * unpinned harness would mean producing receipts from a contract nobody verified.
  *
  * The pin lives here until `packages/contracts/src/dsh-version.ts` exists; the
  * `expectedVersion` option is the seam for wiring that in without touching callers.
  */
-export const PINNED_DSH_VERSION = '0.2.1-rc.3';
+export const PINNED_DSH_VERSION = '0.2.1-rc.5';
 
 /**
  * The custom profile every attempt boots.

@@ -546,8 +546,8 @@ export function sampleStatus(sample: SampleOptions = {}): StatusV1 {
     outbox: { state: 'ok', pending: 0, retrying: null, dead: null, detail: null, since: null },
     dshVersion: {
       state: allOk ? 'ok' : 'unavailable',
-      expected: '0.2.1-rc.3',
-      observed: allOk ? '0.2.1-rc.3' : null,
+      expected: '0.2.1-rc.5',
+      observed: allOk ? '0.2.1-rc.5' : null,
       detail: allOk ? null : 'the panel cannot observe the worker DSH version from the store',
       since: null,
     },
@@ -600,7 +600,7 @@ export function sampleStatus(sample: SampleOptions = {}): StatusV1 {
     generatedAt: LATER,
     factory: {
       version: '0.1.0',
-      dshVersionExpected: '0.2.1-rc.3',
+      dshVersionExpected: '0.2.1-rc.5',
       dshVersionObserved: null,
       policyVersion: POLICY,
       wallVersion: WALL_VERSION,

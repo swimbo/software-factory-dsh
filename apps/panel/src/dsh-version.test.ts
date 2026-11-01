@@ -33,8 +33,8 @@ function fakeDsh(name: string, body: string): string {
 
 describe('parsing what --version printed', () => {
   it('reads the version out of the shapes dsh actually prints', () => {
-    expect(parseDshVersion('dsh/0.2.1-rc.3\n')).toBe('0.2.1-rc.3');
-    expect(parseDshVersion('dsh 0.2.1-rc.3\n')).toBe('0.2.1-rc.3');
+    expect(parseDshVersion('dsh/0.2.1-rc.5\n')).toBe('0.2.1-rc.5');
+    expect(parseDshVersion('dsh 0.2.1-rc.5\n')).toBe('0.2.1-rc.5');
     expect(parseDshVersion('0.2.1\n')).toBe('0.2.1');
     expect(parseDshVersion('v0.2.1+build.7\n')).toBe('0.2.1+build.7');
     expect(parseDshVersion('deepseek-harness 1.2.3 (darwin arm64)\n')).toBe('1.2.3');
@@ -50,8 +50,8 @@ describe('parsing what --version printed', () => {
 
 describe('probing', () => {
   it('returns the observed version from a working binary', () => {
-    const bin = fakeDsh('dsh-ok', 'echo "dsh/0.2.1-rc.3"');
-    expect(probeDshVersion({ env: { FACTORY_DSH_BIN: bin } })).toBe('0.2.1-rc.3');
+    const bin = fakeDsh('dsh-ok', 'echo "dsh/0.2.1-rc.5"');
+    expect(probeDshVersion({ env: { FACTORY_DSH_BIN: bin } })).toBe('0.2.1-rc.5');
   });
 
   it('reads a version printed on stderr too', () => {
@@ -60,7 +60,7 @@ describe('probing', () => {
   });
 
   it('returns null for a binary that exits non-zero', () => {
-    const bin = fakeDsh('dsh-fail', 'echo "0.2.1-rc.3"\nexit 3');
+    const bin = fakeDsh('dsh-fail', 'echo "0.2.1-rc.5"\nexit 3');
     expect(probeDshVersion({ env: { FACTORY_DSH_BIN: bin } })).toBeNull();
   });
 
