@@ -9,7 +9,7 @@
  * - `anchor` then `verify` in the same home is fresh, and the record on disk hashes the ledger that
  *   was there at the time.
  */
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -88,6 +88,35 @@ describe('ledger anchor', () => {
     expect(verify.stderr).not.toContain('MISSING');
     // The JSON surface must not carry an outcome it did not measure.
     expect(jsonOf(verify)).toMatchObject({ ok: false, code: 'ANCHOR_UNAVAILABLE' });
+  });
+
+  /**
+   * The local half of the same claim: an anchor file that is there and cannot be read is "I could
+   * not look" (exit 8), not "there is no record" (exit 9). `--dir` on an empty directory above stays
+   * `MISSING`/9 — the two directions are asserted within one file on purpose.
+   */
+  it('exits 8, not 9, when the local anchor file cannot be read', () => {
+    const home = tempHome();
+    const directory = anchorDir();
+    const path = join(directory, 'ledger-anchors.jsonl');
+    writeFileSync(path, '{"schemaVersion":1,"seq":1}\n');
+    chmodSync(path, 0o000);
+    const verify = runCli(['ledger', 'verify', '--dir', directory, '--json'], { home });
+    chmodSync(path, 0o644);
+    expect(verify.status).toBe(EXIT.environment);
+    expect(verify.status).not.toBe(EXIT.integrity);
+    expect(verify.stderr).toContain('could not be read');
+    expect(verify.stderr).toContain('EACCES');
+    expect(jsonOf(verify)).toMatchObject({ ok: false, code: 'ANCHOR_UNAVAILABLE' });
+  });
+
+  it('exits 8 when the anchor file exists but holds no readable record', () => {
+    const home = tempHome();
+    const directory = anchorDir();
+    writeFileSync(join(directory, 'ledger-anchors.jsonl'), 'truncated garbage\n{"schemaVer');
+    const verify = runCli(['ledger', 'verify', '--dir', directory], { home });
+    expect(verify.status).toBe(EXIT.environment);
+    expect(verify.stderr).toContain('holds no readable record');
   });
 
   it('exits 9 when the anchor is older than the window', () => {

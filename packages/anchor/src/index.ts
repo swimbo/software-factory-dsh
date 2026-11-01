@@ -211,10 +211,20 @@ export function fileTransport(
       let text: string;
       try {
         text = await readFile(path, 'utf8');
-      } catch {
-        return null;
+      } catch (error) {
+        // A genuinely absent file is a fact about the ledger: nothing was ever anchored here, and
+        // `verify` must say `missing` (exit 9). Anything else — `EACCES`, `EISDIR`, a disk that
+        // refuses — means nobody looked, and it must not be reported as `missing` (exit 8 instead).
+        if (errnoOf(error) === 'ENOENT') return null;
+        throw new FactoryError(
+          'ANCHOR_UNAVAILABLE',
+          `the anchor at file ${path} could not be read: ${errnoDetail(error)}. ` +
+            'This is an environment failure, not a verdict about the ledger — nothing was learned ' +
+            'about the ledger, so it is not `missing`.',
+          { transport: `file ${path}`, errno: errnoOf(error) },
+        );
       }
-      return lastValidRecord(text);
+      return recordOrRefuse(text, `file ${path}`);
     },
   };
 }
@@ -311,7 +321,14 @@ export function commandTransport(options: {
             );
             return;
           }
-          resolve(lastValidRecord(stdout));
+          // `recordOrRefuse` throws for content that exists but cannot be parsed, and a throw inside
+          // an event handler is an uncaught exception rather than a rejection — it would escape the
+          // promise, so it is turned into a rejection here, deliberately.
+          try {
+            resolve(recordOrRefuse(stdout, options.label));
+          } catch (error) {
+            reject(error);
+          }
         });
       });
     },
@@ -369,6 +386,43 @@ export function anchorTargetFrom(
     'no anchor target is configured: set FACTORY_ANCHOR_SSH (+ FACTORY_ANCHOR_PATH) for an off-host ' +
       'anchor, or FACTORY_ANCHOR_DIR for a local one. A local anchor detects truncation but not a host ' +
       'that rewrites both copies, and `verify` will say so.',
+  );
+}
+
+/** The errno of a filesystem error, when it has one. */
+function errnoOf(error: unknown): string | null {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : null;
+}
+
+/** The errno and its sentence, because "could not be read" alone sends the reader to `ls`. */
+function errnoDetail(error: unknown): string {
+  const code = errnoOf(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return code === null ? message : message.includes(code) ? message : `${code}: ${message}`;
+}
+
+/**
+ * A record, or a refusal — never a silent `null` for content that exists but cannot be parsed.
+ *
+ * Both transports route through this, because the same claim has to hold for a local file and for an
+ * ssh read: **empty means missing** (the command ran, the file is empty or absent behind `|| true`),
+ * and **non-empty but unparseable means the check could not be performed** — an anchor file with
+ * garbage in it, a half-written record with no earlier good line, a schema this build does not know.
+ * Returning `null` for the second case would report `missing` (exit 9), which asserts a fact about
+ * the ledger that nobody established; exit 8 says only what is true: I could not look.
+ */
+function recordOrRefuse(text: string, label: string): AnchorRecord | null {
+  const record = lastValidRecord(text);
+  if (record !== null) return record;
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  throw new FactoryError(
+    'ANCHOR_UNAVAILABLE',
+    `the anchor at ${label} exists but holds no readable record (${trimmed.length} bytes, no line ` +
+      'parses as an anchor). This is an environment failure, not a verdict about the ledger — the ' +
+      'check could not be performed, so it is not `missing`.',
+    { transport: label, bytes: trimmed.length },
   );
 }
 

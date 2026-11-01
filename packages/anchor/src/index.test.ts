@@ -10,7 +10,7 @@
  * 2. **`rollback` is not `fresh`.** An anchor that is one hour old and says 400 events, next to a
  *    database holding 380, is the attack the anchor exists for. A recency-only check calls that fresh.
  */
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -159,6 +159,17 @@ describe('verify: four outcomes, and only one of them lets you claim the ledger 
   });
 });
 
+/** The settled outcome of a read, so two promises can be compared without racing the runner. */
+async function capture(
+  read: Promise<AnchorRecord | null>,
+): Promise<{ ok: true; record: AnchorRecord | null } | { ok: false; code: string }> {
+  try {
+    return { ok: true, record: await read };
+  } catch (error) {
+    return { ok: false, code: (error as { code?: string }).code ?? 'NO_CODE' };
+  }
+}
+
 describe('transports', () => {
   it('appends to a file and reads the last record back', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'anchor-file-'));
@@ -180,6 +191,65 @@ describe('transports', () => {
     expect(await transport.readHead()).toEqual(second);
     const text = readFileSync(join(directory, 'ledger-anchors.jsonl'), 'utf8');
     expect(text.trim().split('\n')).toHaveLength(2);
+  });
+
+  /**
+   * The same claim the remote transport makes, for the local one: an anchor file that exists and
+   * cannot be read is "I could not look" (exit 8), never "there is no record" (exit 9). Both cases
+   * here fail against the old implementation, which caught every `readFile` error into `null`.
+   */
+  it('a local anchor that exists and cannot be read rejects, naming the errno', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'anchor-eacces-'));
+    const path = join(directory, 'ledger-anchors.jsonl');
+    writeFileSync(
+      path,
+      `${JSON.stringify({ schemaVersion: 1, seq: 1, eventCount: 1, headHash: 'sha256:x', anchoredAt: '2026-11-01T00:00:00.000Z' })}\n`,
+    );
+    chmodSync(path, 0o000);
+    const transport = fileTransport(directory);
+    await expect(transport.readHead()).rejects.toThrow(/could not be read: EACCES/u);
+    await expect(transport.readHead()).rejects.toMatchObject({ code: 'ANCHOR_UNAVAILABLE' });
+    chmodSync(path, 0o644);
+  });
+
+  it('a path that is a directory rejects rather than reading as missing', async () => {
+    // `EISDIR` is the cheapest stand-in for "the thing is there and is not an anchor file".
+    const directory = mkdtempSync(join(tmpdir(), 'anchor-eisdir-'));
+    mkdirSync(join(directory, 'ledger-anchors.jsonl'));
+    await expect(fileTransport(directory).readHead()).rejects.toMatchObject({
+      code: 'ANCHOR_UNAVAILABLE',
+    });
+  });
+
+  it('an absent file, or an empty one, is genuinely missing — the direction that must not move', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'anchor-empty-'));
+    const transport = fileTransport(directory);
+    expect(await transport.readHead()).toBeNull(); // ENOENT: never anchored here
+    writeFileSync(join(directory, 'ledger-anchors.jsonl'), '');
+    expect(await transport.readHead()).toBeNull(); // empty file: the same fact
+  });
+
+  it('a file that exists with no parseable record is not "missing" either', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'anchor-corrupt-'));
+    writeFileSync(join(directory, 'ledger-anchors.jsonl'), 'not json at all\n{schemaVersion:');
+    const transport = fileTransport(directory);
+    await expect(transport.readHead()).rejects.toThrow(/holds no readable record/u);
+    await expect(transport.readHead()).rejects.toMatchObject({ code: 'ANCHOR_UNAVAILABLE' });
+  });
+
+  it('both transports make the same claim about corrupt content', async () => {
+    // The local file and the ssh read must not disagree about what "unreadable" means, or the same
+    // broken anchor would be exit 9 through one surface and exit 8 through another.
+    const directory = mkdtempSync(join(tmpdir(), 'anchor-corrupt-both-'));
+    writeFileSync(join(directory, 'ledger-anchors.jsonl'), 'garbage\n');
+    const local = fileTransport(directory);
+    const remote = commandTransport({
+      read: 'printf "garbage\\n"',
+      append: 'true',
+      label: 'ssh host:g',
+    });
+    await expect(local.readHead()).rejects.toMatchObject({ code: 'ANCHOR_UNAVAILABLE' });
+    await expect(remote.readHead()).rejects.toMatchObject({ code: 'ANCHOR_UNAVAILABLE' });
   });
 
   it('a truncated tail does not hide the last good record', () => {

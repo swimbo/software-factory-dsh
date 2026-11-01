@@ -15,7 +15,7 @@
  * The decision is a pure function (`decideAlerts`) tested against facts, not against the store; the
  * CLI-level specs then prove the same answers come out of the real binary.
  */
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -358,6 +358,26 @@ describe('factory alerts', () => {
     expect((payload['anchor'] as { state: string }).state).toBe('unreachable');
     expect(payload['ok']).toBe(false);
     expect(alerts.stderr).toContain('could not be read');
+  });
+
+  it('exits 8 on a local anchor file it cannot read, and agrees with `ledger verify`', () => {
+    const { home } = seededHome();
+    const anchorDir = mkdtempSync(join(tmpdir(), 'factory-alerts-eacces-'));
+    const path = join(anchorDir, 'ledger-anchors.jsonl');
+    writeFileSync(path, '{"schemaVersion":1,"seq":1}\n');
+    chmodSync(path, 0o000);
+    const alerts = runCli(['alerts', '--json'], { home, env: { FACTORY_ANCHOR_DIR: anchorDir } });
+    const ledger = runCli(['ledger', 'verify', '--json'], {
+      home,
+      env: { FACTORY_ANCHOR_DIR: anchorDir },
+    });
+    chmodSync(path, 0o644);
+    expect(alerts.status).toBe(EXIT.environment);
+    expect(ledger.status).toBe(EXIT.environment);
+    expect(alerts.status).toBe(ledger.status);
+    const payload = jsonOf(alerts);
+    expect((payload['anchor'] as { state: string }).state).toBe('unreachable');
+    expect(payload['ok']).toBe(false);
   });
 
   it('refuses a positional argument with exit 2', () => {
