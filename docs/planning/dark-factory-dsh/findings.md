@@ -253,6 +253,54 @@ Four decisions the Phase 5 debate could not settle. Each is argued in full — w
 
 All four are **claim-blockers, not ship-blockers**: the code is correct under either answer, and what changes is the sentence the operator is allowed to say. None of them may be closed by an agent.
 
+### Recommended answers (Lead, 2026-11-01 — operator to ratify)
+
+The operator asked for positions that are **neither maximally cautious nor maximally aggressive**, and
+that is the right instinct for these four: the cautious answer to each is "ship nothing and claim
+nothing", which leaves the factory unable to say anything about itself, and the aggressive answer
+claims properties no single-operator deployment can verify. Each recommendation below buys a *narrower
+true sentence* rather than a broader false one.
+
+**ND1 — certify per task class at m=20, k=18; publish α, never a global pass rate.**
+One trial unit = one **task class**, not the factory and not the product. m=20 attempts, k=18 passes
+(α ≈ 0.882), and the published number is that α with its definition — "the probability a class that
+truly passes 95 % of the time fails certification" — not a claim about production success. Re-certify
+when the policy version or the model id changes, because both move the population. **Why middle:** m=6
+(α ≈ 0.687) certifies flukes, and m=48/k=44 costs 2.4× the spend for a marginal α. **Does not buy:**
+β, the power to detect a regressing class — that needs a known-bad corpus nobody has; say so instead of
+publishing a β that was never measured.
+
+**ND2 — ship the two-uid topology as the Linux default, keep single-uid on the dev host, and scope the
+claim to the topology actually in use.**
+On the Linux target: the wall (verdict store, holdout corpus, operator key) runs as `factory-wall`; the
+worker as `factory-worker`; the verdict store is `0750` owned by the wall group, so the worker cannot
+read the corpus or rewrite a verdict. On macOS (this developer host) there is no second uid in play, so
+the README says "single-uid: the wall is a separate *process*, not a separate *principal*". **Why
+middle:** a full second host is real money and real ops for a property file modes already give on Linux;
+status quo, though, leaves the "independent wall" argument at process level everywhere. **Does not
+buy:** protection against a root-level attacker on the host — nothing at this layer does.
+
+**ND3 — gateway is the source of truth; the proxy records a signed usage fact and *enforces* by
+revocation, not by billing-grade accounting.**
+Per attempt the proxy records `{tokensIn, tokensOut, costUsd, gatewayRequestId, signedAt}` into the
+ledger, reconciles against Bifrost's own usage on a daily job, and when observed spend crosses the
+envelope it **revokes the attempt token** so the run stops. The reservation stays an estimate and says
+so. **Why middle:** real-time metering with sub-cent accuracy is billing infrastructure nobody needs
+here; leaving spend as an estimate means the ceiling only refuses *before* a run and never stops one
+already over. **Does not buy:** an invoice — reconciliation is best-effort and reports `unknown` when
+the gateway cannot be read, which is the honest state.
+
+**ND4 — anchor the ledger head off-host once a day, to the machine that already exists.**
+A daily job appends `{seq, headHash, receiptCount, anchorAt}` to `hermes-control` (already in the
+tailnet, already holds the operator's secrets) and the factory refuses to trust a local ledger whose
+head has no anchor newer than 48 h. **Why middle:** a full WORM store or third-party timestamping is
+money and a new dependency; nothing at all means a coordinated local rewrite is undetectable, which is
+the exact attack the anchor exists for. **Does not buy:** real-time tamper evidence — the window is up
+to a day, and the README will say "detectable within 48 h", not "prevented".
+
+Recording these as recommendations, not as decisions: the table above still governs, and an agent
+changing them would be exactly the failure mode this section warns about.
+
 ## Contradiction log (resolved 2026-11-01)
 
 Four inconsistencies were found between `architecture.md`, `phased-plan.md` and the Phase 3/4 artifacts. All are resolved; the resolution is recorded here so an auditor can see they were decided rather than drifted.
