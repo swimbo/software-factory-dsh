@@ -11,9 +11,13 @@ the audit says so and this document repeats it rather than smoothing it over.
 export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"   # 26.12.1, or preflight fails
 pnpm install
 pnpm run preflight          # node version, package layout, the pinned dsh expectation
-bash scripts/verify.sh      # preflight → typecheck → lint → format:check → test → build
+bash scripts/verify.sh      # preflight → typecheck → lint → format:check → test → build → panel
 pnpm run factory version    # dsh expected/observed, policy hash, executor availability, home
 ```
+
+The `panel` stage runs the 41 browser specs; if the chromium build `@playwright/test` pins is
+missing it **fails** with the remedy (`npx playwright install chromium`) rather than skipping,
+because a panel the README calls shipped and a gate that never opens it is a claim nobody checked.
 
 `bash scripts/verify.sh` writes `docs/verification/<run-id>/{verify.log,summary.json}`, and the
 summary records the commit it measured and whether a model key was present — a green line is a

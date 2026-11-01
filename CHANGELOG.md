@@ -1,8 +1,35 @@
 # Changelog
 
 What changed for someone using this repository, in order. Not a file-by-file diff — the commits say
-that. The branch holds twelve commits: four change behaviour, the rest change documents (the audit,
-status tables, the README). This log covers the four.
+that. Releases are tagged; entries below them are the commits that carried them.
+
+## v0.1.0 — 2026-11-01
+
+The first release that does the thing the repository exists for: **a dark unit was verified end to
+end by the wall, on a real model turn.** Attempt `A-e507950c0625`-era on 2026-11-01: `outcome: pass`,
+`reasons: []`, the wall's faithfulness replay reporting `replayed 5 of 8 recorded commands; 0
+mismatched`, a discriminating holdout (1 of 1), a real wall (`wall/0.1.0+local`, `fakeWall: false`),
+CLI exit `0`, and the gate green with the live stage included. The other six measurements were
+green in the same verdict: suite, holdout, delta, scope, diff, tests-weakened.
+
+**What is verified.** `factory intent` → `qualify` → `run` → verdict → `promote`, with the four
+controls that the design rests on proven by specs rather than asserted: a sabotage that passes its
+own suite is rejected on the holdout; `unknown` never satisfies a gate; recovery never re-dispatches;
+an unsigned promotion writes no file. The live layer is opt-in and gated on `BIFROST_API_KEY` **and**
+`DSH_BIN`, so the offline gate costs nothing and needs neither; when it runs it forwards exactly one
+credential name (`FACTORY_LIVE_MODEL=1` → `credentialsForwarded: ['BIFROST_API_KEY']`, the name, never
+the value). The gate now has a `panel` stage — the 41 browser specs are run by `scripts/verify.sh`,
+not merely described as passing — and reports 7 passed, 1 skipped, 0 failed offline.
+
+**What is fenced** (unchanged from `README.md`, which is the source of truth): no container
+isolation on this host; no model-call budget of the factory's own; DSH's sandbox is not a security
+boundary; no ACP worker; the live path is the one path where the worker process can hold the gateway
+key, because v1 has no credential proxy container (ADR-006 records the amendment).
+
+**Known `UNKNOWN` layers** — measured as unknown, not as working: the `@docker` worker path (4 specs
+tagged and skipped; containment is unmeasured here), E2E-48's credential-proxy clauses (no proxy
+container exists in v1), and the ACP path (seam exists behind the `Executor` port, implementation
+does not). A skipped check is `UNKNOWN` in this repository's vocabulary, never a pass.
 
 ## Unreleased — the audit's findings, closed
 

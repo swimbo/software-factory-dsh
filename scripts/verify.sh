@@ -122,6 +122,28 @@ node_ok() {
   return 0
 }
 
+# run_stage_failure <name> <command> <reason>
+# A stage that could not run because the ENVIRONMENT lacks something it needs is a FAILURE, not a
+# skip: "the panel is shipped" (README) and "the gate proves the panel works" have to agree, and a
+# skip that looks like a pass is the failure mode this repo keeps finding.
+run_stage_failure() {
+  local name="$1" command="$2" reason="$3"
+  failures=$((failures + 1))
+  stage_names+=("$name")
+  stage_statuses+=("fail")
+  stage_exits+=("1")
+  stage_commands+=("$command")
+  stage_durations+=("0")
+  stage_reasons+=("$reason")
+  stage_logs+=("")
+  local safe_reason="${reason//\"/\'}"
+  safe_reason="${safe_reason//\\/}"
+  printf '{"name":"%s","command":"%s","exitCode":1,"status":"fail","durationMs":0,"reason":"%s"}\n' \
+    "$name" "$command" "$safe_reason" >>"$stages_file"
+  printf '\n$ %s\n(failed) %s\n' "$command" "$reason" >>"$log_file"
+  if [ "$json_mode" -eq 0 ]; then printf '\n$ %s\n(failed) %s\n' "$command" "$reason"; fi
+}
+
 # --- stage runner ----------------------------------------------------------------------
 stage_names=()
 stage_statuses=()
@@ -227,6 +249,18 @@ else
   run_stage "format:check" "pnpm run format:check" pnpm run format:check
   run_stage test "pnpm exec vitest run" pnpm exec vitest run
   run_stage build "pnpm run build" pnpm run build
+  # The browser panel is part of what this repository ships, so the gate proves it. The check is
+  # explicit: `@playwright/test` pins a chromium revision, and a cache that stops one revision
+  # short produced 41 browser specs nobody ran. A missing browser FAILS this stage with the
+  # remedy, because a skip here would read as "the panel is fine".
+  panel_browser=""
+  panel_browser="$(node -e 'try { process.stdout.write(require("@playwright/test").chromium.executablePath()); } catch { process.stdout.write(""); }' 2>/dev/null)"
+  if [ -n "$panel_browser" ] && [ -f "$panel_browser" ]; then
+    run_stage panel "pnpm run test:e2e:panel" pnpm run test:e2e:panel
+  else
+    run_stage_failure panel "pnpm run test:e2e:panel" \
+      "the chromium build @playwright/test pins is not installed (expected $panel_browser); run: npx playwright install chromium"
+  fi
 fi
 
 # The live stage spends money, so it is OPT-IN even when a key is present: `FACTORY_VERIFY_LIVE=1`
