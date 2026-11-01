@@ -17,8 +17,6 @@
  *    the two would either page a person for an ssh key or tell them the anchor is gone when it is
  *    not.
  */
-import { spawnSync } from 'node:child_process';
-
 import {
   AlertsV1,
   type Alert,
@@ -27,10 +25,10 @@ import {
   type AlertsV1 as AlertsDocument,
 } from '@factory/contracts';
 import {
+  anchorTargetFrom,
   DEFAULT_MAX_AGE_HOURS,
-  fileTransport,
-  lastValidRecord,
   verifyAnchor,
+  type AnchorRecord,
 } from '@factory/anchor';
 import {
   certificatesRecency,
@@ -212,101 +210,76 @@ export function decideAlerts(facts: AlertFacts): AlertDecision {
   };
 }
 
-/** Read the anchor head without ever letting a transport failure read as "missing". */
-export function probeAnchor(
+/**
+ * Read the anchor head through the **same** transport `factory ledger verify` uses.
+ *
+ * There is no probing logic of its own any more: `anchorTargetFrom` builds the transport and
+ * `readHead` rejects (with `ANCHOR_UNAVAILABLE`) when the host could not be reached, so the
+ * distinction between "nobody looked" and "there is no record" lives in one place and both callers
+ * inherit it. Before that fix landed this verb carried a `spawnSync` workaround, which is exactly the
+ * second implementation the reuse rule exists to prevent.
+ */
+export async function probeAnchor(
   env: Readonly<Record<string, string | undefined>>,
   localEventCount: number,
-): AnchorProbe {
-  const host = (env['FACTORY_ANCHOR_SSH'] ?? '').trim();
-  const remotePath = (env['FACTORY_ANCHOR_PATH'] ?? '/var/lib/factory/ledger-anchors.jsonl').trim();
-  const directory = (env['FACTORY_ANCHOR_DIR'] ?? '').trim();
+  overrides: { readonly directory?: string | undefined } = {},
+): Promise<AnchorProbe> {
   const nowIso = new Date().toISOString();
-
-  if (host === '') {
-    if (directory === '') {
-      return {
-        state: 'unconfigured',
-        scope: 'unknown',
-        ageHours: null,
-        transport: 'none configured',
-        reason:
-          'no anchor target is configured (FACTORY_ANCHOR_SSH + FACTORY_ANCHOR_PATH, or ' +
-          'FACTORY_ANCHOR_DIR); an unconfigured monitor cannot say the anchor is fresh',
-        record: null,
-      };
-    }
-    const path = `${directory}/ledger-anchors.jsonl`;
-    const record = readLocalAnchor(path);
-    return judge(record, 'local', path, nowIso, localEventCount);
+  let transport;
+  try {
+    transport = anchorTargetFrom(env, overrides).transport;
+  } catch (error) {
+    return {
+      state: 'unconfigured',
+      scope: 'unknown',
+      ageHours: null,
+      transport: 'none configured',
+      reason:
+        error instanceof Error
+          ? error.message
+          : 'no anchor target is configured; an unconfigured monitor cannot say the anchor is fresh',
+      record: null,
+    };
   }
 
-  // The read is deliberately *not* wrapped in `|| true`: the ledger's own read can afford to swallow
-  // a remote failure into `missing`, but a monitor cannot — an unreachable host and an absent anchor
-  // are different facts, and the whole point of this verb is to keep them apart.
-  const safePath = remotePath.replace(/'/gu, "'\\''");
-  const command = `ssh -o BatchMode=yes -- ${host} 'tail -n 50 -- ${safePath}'`;
-  const result = spawnSync('sh', ['-c', command], { encoding: 'utf8', timeout: 30_000 });
-  const transport = `ssh ${host}:${remotePath}`;
-  if (result.error !== undefined || result.status === 255) {
-    const detail =
-      result.error?.message ??
-      (result.stderr ?? '').trim().split('\n').filter(Boolean).slice(-1)[0] ??
-      'ssh failed';
+  let record: AnchorRecord | null;
+  try {
+    record = await transport.readHead();
+  } catch (error) {
+    // The transport failed, which is an environment fault: `exit 8`, never 0, and never `missing`.
     return {
       state: 'unreachable',
       scope: 'unknown',
       ageHours: null,
-      transport,
-      reason: `the anchor host could not be reached (${detail}); this is an environment failure, not a verdict about the ledger`,
+      transport: transport.describe(),
+      reason: error instanceof Error ? error.message : String(error),
       record: null,
     };
   }
-  // A non-255 exit is the remote `tail` failing, which for our purposes is "the file is not there".
-  const text = result.status === 0 ? (result.stdout ?? '') : '';
-  return judge(lastValidRecord(text), 'off-host', transport, nowIso, localEventCount);
-}
 
-function readLocalAnchor(path: string): ReturnType<typeof lastValidRecord> {
-  // A local read cannot be "unreachable": the file either parses or it does not, and the absence of
-  // it is `missing` — a fact about the ledger, not about a host. `|| true` is safe here for exactly
-  // that reason, and would not be safe over ssh.
-  const result = spawnSync('sh', ['-c', `cat ${JSON.stringify(path)} 2>/dev/null || true`], {
-    encoding: 'utf8',
-    timeout: 10_000,
-  });
-  return lastValidRecord(result.stdout ?? '');
-}
-
-function judge(
-  record: ReturnType<typeof lastValidRecord>,
-  scope: 'off-host' | 'local',
-  transport: string,
-  nowIso: string,
-  localEventCount: number,
-): AnchorProbe {
+  // Without the local count a rollback is invisible: an anchor ahead of this ledger is the one
+  // signature of a database that was replaced or restored, and it outranks staleness.
   const verdict = verifyAnchor(record, {
     nowIso,
     maxAgeHours: DEFAULT_MAX_AGE_HOURS,
-    scope,
-    // Without the local count a rollback is invisible: an anchor ahead of this ledger is the one
-    // signature of a database that was replaced or restored, and it outranks staleness.
+    scope: transport.scope,
     local: { seq: localEventCount, eventCount: localEventCount },
   });
   if (verdict.record === null) {
     return {
       state: 'missing',
-      scope,
+      scope: transport.scope,
       ageHours: null,
-      transport,
+      transport: transport.describe(),
       reason: verdict.reason,
       record: null,
     };
   }
   return {
     state: verdict.outcome,
-    scope,
+    scope: transport.scope,
     ageHours: verdict.ageHours,
-    transport,
+    transport: transport.describe(),
     reason: verdict.reason,
     record: { anchoredAt: verdict.record.anchoredAt },
   };
@@ -337,12 +310,12 @@ function certificatesFrom(ctx: VerbInput['ctx']): readonly CertificateRecency[] 
   });
 }
 
-export function runAlerts(input: VerbInput): number {
+export async function runAlerts(input: VerbInput): Promise<number> {
   const { ctx } = input;
   if (input.args.length > 0) {
     throw new UsageError('USAGE: factory alerts takes no arguments');
   }
-  const anchor = probeAnchor(ctx.env, ctx.store.eventCount());
+  const anchor = await probeAnchor(ctx.env, ctx.store.eventCount());
   const certificates = certificatesFrom(ctx);
   const usage = ctx.store.listUsage?.() ?? [];
   const crossed = usage.filter((row) => row.ceilingCrossed);

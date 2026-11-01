@@ -32,7 +32,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { canonicalJson, sha256Hex } from '@factory/contracts';
+import { canonicalJson, FactoryError, sha256Hex } from '@factory/contracts';
 
 /** The record written off-host. Small on purpose: it is read on every `verify`. */
 export interface AnchorRecord {
@@ -246,23 +246,130 @@ export function commandTransport(options: {
         child.once('close', (code) =>
           code === 0
             ? resolve()
-            : reject(new Error(`anchor write failed (${String(code)}): ${stderr.trim()}`)),
+            : reject(
+                new FactoryError(
+                  'ANCHOR_UNAVAILABLE',
+                  `the anchor at ${options.label} could not be written (exit ${String(code)}): ` +
+                    `${(stderr.trim() || 'no stderr').replace(/\.+$/u, '')}. This is an environment ` +
+                    'failure, not a verdict ' +
+                    'about the ledger.',
+                  { transport: options.label, exitCode: code },
+                ),
+              ),
         );
         child.stdin.end(`${JSON.stringify(record)}\n`);
       });
     },
+    /**
+     * Read the head, and keep "I could not look" apart from "there is nothing there".
+     *
+     * A non-zero exit — ssh's 255 for an unreachable host, a shell that could not start — means the
+     * anchor was never read, and that is an **environment** failure, not a verdict about the ledger.
+     * Resolving `null` made `ledger verify` call an unreachable host `missing`, which is the same
+     * class of lie as reporting a transport failure as "fresh": the reader is told a fact about the
+     * ledger that nobody measured.
+     *
+     * A *successful* command with no parseable record — an empty file, a file whose last line is
+     * half-written — is genuinely `missing` and resolves `null`. The read commands are composed to
+     * make that distinction reliable: the remote `tail … || true` keeps a missing *file* at exit 0
+     * while ssh's own connection failure still exits 255.
+     */
     async readHead() {
       const { spawn } = await import('node:child_process');
       return await new Promise<AnchorRecord | null>((resolve, reject) => {
         const child = spawn('sh', ['-c', options.read], { stdio: ['ignore', 'pipe', 'pipe'] });
         let stdout = '';
+        let stderr = '';
         child.stdout.setEncoding('utf8');
+        child.stderr.setEncoding('utf8');
         child.stdout.on('data', (chunk: string) => (stdout += chunk));
-        child.once('error', reject);
-        child.once('close', () => resolve(lastValidRecord(stdout)));
+        child.stderr.on('data', (chunk: string) => (stderr += chunk));
+        child.once('error', (error) => {
+          reject(
+            new FactoryError(
+              'ANCHOR_UNAVAILABLE',
+              `the anchor at ${options.label} could not be read: ${error.message}. ` +
+                'This is an environment failure, not a verdict about the ledger.',
+              { transport: options.label },
+            ),
+          );
+        });
+        child.once('close', (code) => {
+          if (code !== 0) {
+            const last = stderr.trim().split('\n').filter(Boolean).slice(-1)[0] ?? 'no stderr';
+            // ssh's own messages end in a period; the sentence continues, so drop it rather than
+            // print "...failed.." to an operator.
+            const detail = last.replace(/\.+$/u, '');
+            reject(
+              new FactoryError(
+                'ANCHOR_UNAVAILABLE',
+                `the anchor at ${options.label} could not be read (exit ${String(code)}): ${detail}. ` +
+                  'This is an environment failure, not a verdict about the ledger — nothing was ' +
+                  'learned about the ledger, so it is not `missing`.',
+                { transport: options.label, exitCode: code },
+              ),
+            );
+            return;
+          }
+          resolve(lastValidRecord(stdout));
+        });
       });
     },
   };
+}
+
+/** What the operator configured, or a refusal that names both variables. */
+export interface AnchorTarget {
+  readonly transport: AnchorTransport;
+  /** True when a `--dir` flag overrode the environment: the flag wins, by design. */
+  readonly overridden: boolean;
+}
+
+/**
+ * Build the anchor transport from the running configuration, the same way for every caller.
+ *
+ * One function, not two: `factory ledger verify` and `factory alerts` must read the same variable,
+ * apply the same default path and refuse with the same sentence, or a monitor can watch a different
+ * anchor than the one the control verifies. This lives in `@factory/anchor` rather than in either
+ * verb for that reason — it is the shape of the configuration, not a rendering decision.
+ *
+ * Precedence: an explicit `--dir` (local, and reported as local) beats `FACTORY_ANCHOR_SSH`, which
+ * beats `FACTORY_ANCHOR_DIR`. A local transport is never called off-host, because it is not.
+ */
+export function anchorTargetFrom(
+  env: Readonly<Record<string, string | undefined>>,
+  overrides: { readonly directory?: string | undefined } = {},
+): AnchorTarget {
+  const explicitDir = overrides.directory?.trim();
+  const host = (env['FACTORY_ANCHOR_SSH'] ?? '').trim();
+  const remotePath = (env['FACTORY_ANCHOR_PATH'] ?? '/var/lib/factory/ledger-anchors.jsonl').trim();
+  const directory = explicitDir ?? (env['FACTORY_ANCHOR_DIR'] ?? '').trim();
+
+  if (explicitDir !== undefined && explicitDir !== '') {
+    return { transport: fileTransport(explicitDir, 'local'), overridden: true };
+  }
+  if (host !== '') {
+    // `--` and single quotes: the host and path are configuration, and neither may grow into a shell.
+    // `|| true` on the read is deliberate: a missing remote *file* is `missing`, an unreachable host
+    // is ssh's own non-zero exit, and only the latter should be a transport failure.
+    const safePath = remotePath.replace(/'/gu, "'\\''");
+    return {
+      transport: commandTransport({
+        read: `ssh -o BatchMode=yes -- ${host} 'tail -n 50 -- ${safePath} 2>/dev/null || true'`,
+        append: `ssh -o BatchMode=yes -- ${host} 'cat >> ${safePath}'`,
+        label: `ssh ${host}:${remotePath}`,
+      }),
+      overridden: false,
+    };
+  }
+  if (directory !== '') return { transport: fileTransport(directory, 'local'), overridden: false };
+
+  throw new FactoryError(
+    'ANCHOR_UNAVAILABLE',
+    'no anchor target is configured: set FACTORY_ANCHOR_SSH (+ FACTORY_ANCHOR_PATH) for an off-host ' +
+      'anchor, or FACTORY_ANCHOR_DIR for a local one. A local anchor detects truncation but not a host ' +
+      'that rewrites both copies, and `verify` will say so.',
+  );
 }
 
 /** The last line that parses as an anchor. A truncated tail must not hide a good record. */

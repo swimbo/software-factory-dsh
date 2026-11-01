@@ -20,10 +20,9 @@
  * reported as such and never described as off-host.
  */
 import {
+  anchorTargetFrom,
   computeAnchor,
-  commandTransport,
   DEFAULT_MAX_AGE_HOURS,
-  fileTransport,
   shortHash,
   verifyAnchor,
   type AnchorRecord,
@@ -36,40 +35,23 @@ import { field } from '../render/format.ts';
 import { numberOption, textOption, type VerbInput, type VerbSpec } from './types.ts';
 
 /**
- * Build the transport from the environment. Reading `process.env` here is deliberate: this is a
- * composition decision, and the discipline lint allows env reads at composition roots only.
+ * The anchor transport, from the operator's environment. Reading `process.env` here is deliberate:
+ * this is a composition decision, and the discipline lint allows env reads at composition roots only.
  *
- * - `FACTORY_ANCHOR_SSH=host` → `ssh host 'cat PATH'` / `ssh host 'cat >> PATH'` (`FACTORY_ANCHOR_PATH`)
+ * The mapping itself lives in `@factory/anchor` (`anchorTargetFrom`) because `factory alerts` must
+ * read the same configuration the same way: a monitor that built its own transport could watch a
+ * different anchor than the control it reports on, and neither surface would look wrong on its own.
+ * The only thing this verb adds is its own `--dir` override.
+ *
+ * - `FACTORY_ANCHOR_SSH=host` → `ssh host 'tail …'` / `ssh host 'cat >> …'` (`FACTORY_ANCHOR_PATH`)
  * - `FACTORY_ANCHOR_DIR=dir`  → a local directory, reported as **local**, never as off-host
- * - neither                  → refuse, naming both variables
+ * - neither                  → refuse, naming both variables (`ANCHOR_UNAVAILABLE`, exit 8)
  */
 function transportFrom(
   env: Readonly<Record<string, string | undefined>>,
   options: Readonly<Record<string, unknown>>,
 ): AnchorTransport {
-  const explicitDir = textOption(options, 'dir');
-  const host = (env['FACTORY_ANCHOR_SSH'] ?? '').trim();
-  const remotePath = (env['FACTORY_ANCHOR_PATH'] ?? '/var/lib/factory/ledger-anchors.jsonl').trim();
-  const directory = explicitDir ?? (env['FACTORY_ANCHOR_DIR'] ?? '').trim();
-
-  if (host !== '') {
-    // `--` and single quotes: the host and path are configuration, and neither may grow into a shell.
-    const safePath = remotePath.replace(/'/gu, "'\\''");
-    return commandTransport({
-      read: `ssh -o BatchMode=yes -- ${host} 'tail -n 50 -- ${safePath} 2>/dev/null || true'`,
-      append: `ssh -o BatchMode=yes -- ${host} 'cat >> ${safePath}'`,
-      label: `ssh ${host}:${remotePath}`,
-    });
-  }
-  if (directory !== '') return fileTransport(directory, 'local');
-
-  throw new FactoryError(
-    'ANCHOR_UNAVAILABLE',
-    'no anchor target is configured: set FACTORY_ANCHOR_SSH (+ FACTORY_ANCHOR_PATH) for an off-host ' +
-      'anchor, or FACTORY_ANCHOR_DIR for a local one. A local anchor detects truncation but not a host ' +
-      'that rewrites both copies, and `verify` will say so.',
-    { exitCode: EXIT.environment },
-  );
+  return anchorTargetFrom(env, { directory: textOption(options, 'dir') }).transport;
 }
 
 /** The events the anchor hashes: the whole ledger, in order, as the ledger itself reports it. */

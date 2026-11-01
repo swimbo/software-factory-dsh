@@ -115,7 +115,7 @@ export function exitCodeOf(code: string): ExitCode {
  */
 const RUNBOOKS: Readonly<Record<string, string>> = {
   ANCHOR_UNAVAILABLE:
-    'runbook: docs/runbooks/ledger-anchor.md — set FACTORY_ANCHOR_SSH (+ FACTORY_ANCHOR_PATH) for an off-host anchor, or FACTORY_ANCHOR_DIR to accept a local one',
+    'runbook: docs/runbooks/ledger-anchor.md — either no target is configured (set FACTORY_ANCHOR_SSH + FACTORY_ANCHOR_PATH, or FACTORY_ANCHOR_DIR to accept a local anchor) or the host did not answer; the message above says which',
   EXECUTOR_UNAVAILABLE:
     'runbook: install the pinned dsh on PATH and start a docker daemon, then re-run: factory run <unitId>',
   DSH_VERSION_MISMATCH:

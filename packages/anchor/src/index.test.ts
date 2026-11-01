@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeAnchor,
   computeHeadHash,
+  anchorTargetFrom,
   commandTransport,
   eventContentHash,
   fileTransport,
@@ -214,6 +215,35 @@ describe('transports', () => {
     expect(readFileSync(path, 'utf8')).toContain('sha256:nine');
   });
 
+  /**
+   * The never-regress spec for a bug that made a monitor lie about the *class* of failure.
+   *
+   * `readHead` used to resolve `null` on a non-zero exit, so an unreachable anchor host was reported
+   * as `missing` — a verdict about the ledger that nobody had looked at. This case fails against that
+   * implementation: a transport that swallows the exit code cannot satisfy it.
+   */
+  it('a non-zero exit is a transport failure, not an empty anchor', async () => {
+    const transport = commandTransport({
+      read: 'echo "ssh: connect to host: Connection refused" >&2; exit 255',
+      append: 'true',
+      label: 'ssh host:/var/lib/factory/ledger-anchors.jsonl',
+    });
+    await expect(transport.readHead()).rejects.toThrow(
+      /could not be read \(exit 255\).*Connection refused/su,
+    );
+    // The distinction the fix exists for: it must not resolve `null`, because `null` means "no
+    // record exists" and this means "no record was looked for".
+    await expect(transport.readHead()).rejects.toMatchObject({ code: 'ANCHOR_UNAVAILABLE' });
+  });
+
+  it('a successful read with no record is genuinely missing, not a failure', async () => {
+    // Exit 0 and no output: the command ran, the file is empty (or absent behind a `|| true`). This
+    // is `missing`, which `verify` reports at exit 9 — and it must stay `null` rather than becoming
+    // a rejection, or a store that was never anchored would look like a broken host.
+    const transport = commandTransport({ read: 'true', append: 'true', label: 'ssh host:empty' });
+    expect(await transport.readHead()).toBeNull();
+  });
+
   it('surfaces a failing command instead of pretending the anchor was written', async () => {
     const transport = commandTransport({ read: 'true', append: 'exit 3', label: 'broken' });
     await expect(
@@ -224,6 +254,56 @@ describe('transports', () => {
         headHash: 'sha256:x',
         anchoredAt: '2026-11-01T00:00:00.000Z',
       }),
-    ).rejects.toThrow(/anchor write failed/u);
+    ).rejects.toThrow(/could not be written \(exit 3\)/u);
+  });
+});
+
+describe('anchorTargetFrom', () => {
+  it('builds the same off-host target from the same two variables, whoever asks', () => {
+    const target = anchorTargetFrom({
+      FACTORY_ANCHOR_SSH: 'hermes-control',
+      FACTORY_ANCHOR_PATH: '/srv/anchors/factory.jsonl',
+    });
+    expect(target.overridden).toBe(false);
+    expect(target.transport.scope).toBe('off-host');
+    expect(target.transport.describe()).toContain('hermes-control');
+    expect(target.transport.describe()).toContain('/srv/anchors/factory.jsonl');
+  });
+
+  it('a local directory is reported as local, never as off-host', () => {
+    const target = anchorTargetFrom({ FACTORY_ANCHOR_DIR: '/tmp/anchors' });
+    expect(target.transport.scope).toBe('local');
+    expect(target.transport.describe()).toContain('(local)');
+  });
+
+  it('an explicit --dir wins over the environment, and says it did', () => {
+    const target = anchorTargetFrom(
+      { FACTORY_ANCHOR_SSH: 'hermes-control', FACTORY_ANCHOR_DIR: '/tmp/env' },
+      { directory: '/tmp/explicit' },
+    );
+    expect(target.overridden).toBe(true);
+    expect(target.transport.scope).toBe('local');
+    expect(target.transport.describe()).toContain('/tmp/explicit');
+  });
+
+  it('refuses with ANCHOR_UNAVAILABLE (exit 8) and names both variables', () => {
+    expect(() => anchorTargetFrom({})).toThrow(/FACTORY_ANCHOR_SSH/u);
+    expect(() => anchorTargetFrom({})).toThrow(/FACTORY_ANCHOR_DIR/u);
+    try {
+      anchorTargetFrom({});
+      expect.unreachable('an unconfigured target must refuse');
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'ANCHOR_UNAVAILABLE', exitCode: 8 });
+    }
+  });
+
+  it('quotes the remote path so configuration cannot become a second shell command', () => {
+    // The path is configuration, not data, but a `'` in a path must not close the quoting and append
+    // a command. `anchorTargetFrom` escapes it; this asserts the escaping, not the string.
+    const target = anchorTargetFrom({
+      FACTORY_ANCHOR_SSH: 'host',
+      FACTORY_ANCHOR_PATH: "/tmp/it's here.jsonl",
+    });
+    expect(target.transport.kind).toBe('command');
   });
 });

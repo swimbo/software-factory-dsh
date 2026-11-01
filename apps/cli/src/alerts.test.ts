@@ -341,6 +341,25 @@ describe('factory alerts', () => {
     expect(result.stderr).not.toContain('no alerts');
   });
 
+  /**
+   * The parity the shared transport buys: `alerts` and `ledger verify` must classify the same
+   * configuration the same way. Before `anchorTargetFrom` existed, `alerts` carried its own probe and
+   * the two surfaces could disagree about an unreachable host while each looked correct alone.
+   */
+  it('classifies an unreachable host as exit 8, exactly as `ledger verify` does', () => {
+    const { home } = seededHome();
+    const env = { FACTORY_ANCHOR_SSH: '127.0.0.1', FACTORY_ANCHOR_PATH: '/tmp/anchors.jsonl' };
+    const alerts = runCli(['alerts', '--json'], { home, env });
+    const ledger = runCli(['ledger', 'verify', '--json'], { home, env });
+    expect(alerts.status).toBe(EXIT.environment);
+    expect(ledger.status).toBe(EXIT.environment);
+    expect(alerts.status).toBe(ledger.status);
+    const payload = jsonOf(alerts);
+    expect((payload['anchor'] as { state: string }).state).toBe('unreachable');
+    expect(payload['ok']).toBe(false);
+    expect(alerts.stderr).toContain('could not be read');
+  });
+
   it('refuses a positional argument with exit 2', () => {
     const { home, anchorDir } = seededHome();
     const result = runCli(['alerts', 'U-7f3a9c'], { home, env: { FACTORY_ANCHOR_DIR: anchorDir } });

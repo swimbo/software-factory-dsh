@@ -56,11 +56,38 @@ describe('ledger anchor', () => {
   });
 
   it('exits 9 when there is no anchor at all: unanchored is not verified', () => {
+    // This stays `missing` after the transport fix: the command ran and found nothing, which is a
+    // fact about the ledger. Only a command that *could not run* becomes exit 8 now.
     const home = tempHome();
     const directory = anchorDir();
-    const verify = runCli(['ledger', 'verify', '--dir', directory], { home });
+    const verify = runCli(['ledger', 'verify', '--dir', directory, '--json'], { home });
     expect(verify.status).toBe(EXIT.integrity);
     expect(verify.stderr).toContain('MISSING');
+    // The machine-readable surface says `missing` — a fact about the ledger, not a failed read.
+    expect(jsonOf(verify)['outcome']).toBe('missing');
+  });
+
+  /**
+   * The behaviour change this fix makes, stated as a claim: an anchor host that cannot be reached is
+   * an **environment** failure (exit 8), not `missing` (exit 9). `missing` says "there is no record";
+   * the truth here is "nobody looked", and reporting the first when the second is true is how an
+   * unreachable host hides for a week.
+   */
+  it('exits 8, not 9, when the anchor host cannot be reached', () => {
+    const home = tempHome();
+    seedUnit(home, { lane: 'dark' });
+    // 127.0.0.1 is enough: BatchMode never prompts, so ssh exits 255 (refused, or host key unknown)
+    // within a second — the same non-zero exit a dead remote produces.
+    const verify = runCli(['ledger', 'verify', '--json'], {
+      home,
+      env: { FACTORY_ANCHOR_SSH: '127.0.0.1', FACTORY_ANCHOR_PATH: '/tmp/anchors.jsonl' },
+    });
+    expect(verify.status).toBe(EXIT.environment);
+    expect(verify.status).not.toBe(EXIT.integrity);
+    expect(verify.stderr).toContain('could not be read');
+    expect(verify.stderr).not.toContain('MISSING');
+    // The JSON surface must not carry an outcome it did not measure.
+    expect(jsonOf(verify)).toMatchObject({ ok: false, code: 'ANCHOR_UNAVAILABLE' });
   });
 
   it('exits 9 when the anchor is older than the window', () => {
