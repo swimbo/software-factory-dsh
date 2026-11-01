@@ -212,3 +212,14 @@ happily accepted as "not zero". Two fixes, both with specs:
 fix three consecutive live pairs passed (19.7 s, 21.2 s, 23.6 s, ~8.0–8.7 k tokens each). Three passes
 is not a proof of absence; what *is* deterministic is the child-process fixture, which hangs 5/5 without
 the fix and exits immediately with it.
+
+## 8. Final gate, with the panel and the live layer in it
+
+```
+preflight PASS · typecheck PASS · lint PASS · format:check PASS · test PASS (102.7 s)
+build PASS · panel PASS (17.8 s) · live-model PASS (91.2 s)
+verify: 8 passed, 0 skipped, 0 failed — OK        docs/verification/2026-11-01T20-30-27Z/
+```
+
+The `panel` row is new in `v0.2.0`: 41 browser specs that were passing but outside the gate now
+gate it, and an absent chromium is a **FAIL** naming `npx playwright install chromium`, never a skip.

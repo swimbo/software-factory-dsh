@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 — 2026-11-01
 
 - **The live path no longer hands the worker the gateway key.** `packages/credential-proxy` mints a
   per-attempt token — bounded to a localhost socket, the attempt's lease, one upstream prefix, and
