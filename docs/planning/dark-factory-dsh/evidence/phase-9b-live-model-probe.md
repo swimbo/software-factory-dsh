@@ -115,6 +115,15 @@ That is the whole claim of the project, measured once: a dark agent produced a c
 rejected neither it nor its evidence, the holdout discriminated the change from the base, and the
 verdict carried no reason at all.
 
+It was re-measured on a later run through the spec itself — unit `U-…`, `outcome: pass`, `reasons: []`,
+`replayed 5 of 8 recorded commands; 0 mismatched`, two `step_end` lines (205 in / 124 out / 6,089 total,
+then 786 / 71 / 6,617) and one `turn_end.reason.kind = completed`. The spec was still red on the line
+after the verdict, and **the reason was the reader, not the product**: it matched `type === 'step_end'`
+while `dsh 0.2.1-rc.3` emits `step_end` as a _phase_, so a completed 12,706-token turn was reported as
+zero tokens. Fixed, and now pinned offline by a seven-line fixture cut verbatim from that paid
+transcript (`e2e/harness/__fixtures__/dsh-live-turn/stdout.log`, spec
+`e2e/cli/default/17-turn-facts.test.ts`, _"a turn that spent 43,680 tokens is not reported as zero"_).
+
 The spec that ran it was still red — **on its own guard**, which looked for `receipt.json` in the
 attempt directory. The real executor never writes that file: the receipt is a row in
 `state/factory.db`, and the attempt directory holds `launch.json`, `attempt.patch`, `command-

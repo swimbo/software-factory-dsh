@@ -93,7 +93,7 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
 One real unit — not a fixture — was verified end to end on 2026-11-01: a `dsh` one-shot turn through
 Bifrost (`auto` → `deepseek-v4.1-flash:1017`), receipt written, wall measured, verdict
 **`pass` with no reasons**, `replayed 5 of 8 recorded commands; 0 mismatched`, holdout discriminating,
-CLI exit 0, `12,706` tokens over two steps. The numbers, the three defects that run exposed, and the
+CLI exit 0, ~`12.7k` tokens over two steps (measured twice: 12,684 and 12,706). The numbers, the three defects that run exposed, and the
 replay-policy decisions they forced are in
 [`docs/planning/dark-factory-dsh/evidence/phase-9b-live-model-probe.md`](docs/planning/dark-factory-dsh/evidence/phase-9b-live-model-probe.md).
 
