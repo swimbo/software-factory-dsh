@@ -342,7 +342,9 @@ describe('createDshExecutor — a runaway attempt', () => {
     const pidFile = join(dir, 'grandchild.pid');
     const { run } = harness('fake-dsh-hang.sh', {
       wallClockMs: 400,
-      parentEnv: { PATH: process.env['PATH'] ?? '', FACTORY_FAKE_GRANDCHILD_PID: pidFile },
+      // No `_PID`/`_PATH`-shaped name: the child allowlist drops those (a worker that is
+      // handed a host path is the leak E2E-33 forbids), and this fixture only needs a handle.
+      parentEnv: { PATH: process.env['PATH'] ?? '', FACTORY_FAKE_GRANDCHILD: pidFile },
     });
 
     const receipt = await run();

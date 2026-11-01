@@ -143,6 +143,8 @@ describe('currentPolicyVersion', () => {
       minSamples: 10,
       allowColdStart: false,
       privilegedBrokering: 'off',
+      maxConcurrentAttempts: 1,
+      maxConcurrentWalls: 1,
       darkThreshold: 90,
     };
     // Same content, different literal order: the version must not move, or every

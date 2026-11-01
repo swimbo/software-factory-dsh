@@ -357,10 +357,27 @@ export function resolvePolicy(
   // Read here, at the composition root, and nowhere else: the worker's process environment
   // must not be able to switch brokering off for the factory that brokers it.
   const brokering = env['FACTORY_PRIVILEGED_BROKERING'] === 'on' ? 'on' : 'off';
+  // The ceilings are the operator's, read here and nowhere else. A value that is not a
+  // positive integer is ignored rather than coerced: "MAX=0" must not become a silent
+  // "no dispatch ever", and "" must not become NaN.
+  const ceiling = (raw: string | undefined, fallback: number): number => {
+    const text = (raw ?? '').trim();
+    if (text === '') return fallback;
+    const value = Number(text);
+    return Number.isInteger(value) && value >= 1 ? value : fallback;
+  };
   return {
     ...DEFAULT_POLICY,
     allowColdStart: enabled,
     privilegedBrokering: brokering,
+    maxConcurrentAttempts: ceiling(
+      env['FACTORY_MAX_CONCURRENT_ATTEMPTS'],
+      DEFAULT_POLICY.maxConcurrentAttempts,
+    ),
+    maxConcurrentWalls: ceiling(
+      env['FACTORY_MAX_CONCURRENT_WALLS'],
+      DEFAULT_POLICY.maxConcurrentWalls,
+    ),
   };
 }
 

@@ -32,6 +32,12 @@ import { UsageError } from '../exit.ts';
 import { dispatched, running, transitionLine, verifying } from '../render/dispatch.ts';
 import { field } from '../render/format.ts';
 import { join } from 'node:path';
+import {
+  assertAttemptCapacity,
+  assertWallCapacity,
+  ceilingIsDefault,
+  readOccupancy,
+} from '../dispatch-limit.ts';
 import { claimLaunchEffect, settleApplied, settleFailure } from '../effects.ts';
 import {
   cloneAttempt,
@@ -270,6 +276,17 @@ export async function runRun(input: VerbInput): Promise<number> {
       { unitId, reason: 'pristine-repo-unusable' },
     );
   }
+
+  // The ceiling is read *before* the transaction, for the same reason the budget gate is:
+  // `runUnit` writes an attempt row, takes a lease and reserves budget, so a ceiling that
+  // reserved first and refused afterwards would leave the operator with a busy factory and
+  // an attempt that never ran. No attempt, no lease, no reservation — the spec asserts it.
+  assertAttemptCapacity({
+    read: readOccupancy(ctx.store, { excludeUnitId: unitId }),
+    limit: ctx.policy.maxConcurrentAttempts,
+    limitIsDefault: ceilingIsDefault(ctx.env, 'FACTORY_MAX_CONCURRENT_ATTEMPTS'),
+    unitId,
+  });
 
   const result = ctx.engine.runUnit(unitId);
   const attemptNo = unit.attemptCount + 1;
@@ -600,6 +617,16 @@ async function evaluateRealWall(
       'wall: no FACTORY_WALL_SUITE declared — the wall has no oracle of its own, so the verdict cannot pass',
     );
   }
+  // Where the wall would start, and nowhere else: two units must not measure at once when
+  // the operator capped walls at one. This is after the attempt (a wall measures a receipt),
+  // so the refusal leaves an attempt with no verdict rather than a verdict nobody measured.
+  assertWallCapacity({
+    read: readOccupancy(ctx.store, { excludeUnitId: unit.unitId }),
+    limit: ctx.policy.maxConcurrentWalls,
+    limitIsDefault: ceilingIsDefault(ctx.env, 'FACTORY_MAX_CONCURRENT_WALLS'),
+    unitId: unit.unitId,
+  });
+
   const outcome = await evaluateReceipt({
     spec: unit.spec,
     receipt: toDecisionReceipt(receiptRow.receipt),

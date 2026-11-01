@@ -22,6 +22,8 @@ const STATUS_KEYS = [
   'units',
   'health',
   'budget',
+  // The dispatch ceiling, shaped like `budget`: `limit` + `limitIsDefault` + `inFlight`.
+  'concurrency',
 ] as const;
 
 describe('status --json', () => {

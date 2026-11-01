@@ -15,6 +15,7 @@ import type { UnitRow, VerdictRow } from '@factory/store';
 
 import { DEFAULT_PER_DAY_USD, type FactoryContext } from '../context.ts';
 import { outboxCounts } from '../effects.ts';
+import { readOccupancy } from '../dispatch-limit.ts';
 import { field, pill, record, sep, usd, wrap } from './format.ts';
 
 export const STATUS_SCHEMA_VERSION = 'status.v1';
@@ -186,6 +187,28 @@ export interface StatusModel {
     };
     readonly unknownCount: number;
     readonly state: string;
+  };
+  /**
+   * The dispatch ceilings and how full they are.
+   *
+   * Shaped like `budget` on purpose: a `limit` with `limitIsDefault` when the number is the
+   * documented default rather than an envelope the operator set, and a `state` of `unknown`
+   * — never `0` — when the occupancy could not be read. A floor plan that shows a busy
+   * factory as empty is worse than one that shows nothing.
+   */
+  readonly concurrency: {
+    readonly attempts: {
+      readonly limit: number;
+      readonly limitIsDefault: boolean;
+      readonly inFlight: number | null;
+      readonly state: string;
+    };
+    readonly walls: {
+      readonly limit: number;
+      readonly limitIsDefault: boolean;
+      readonly inFlight: number | null;
+      readonly state: string;
+    };
   };
 }
 
@@ -499,6 +522,37 @@ export function buildStatus(
       // render a gap rather than a rounded-down total (§5.1).
       state: unknownSpendRows > 0 ? 'unknown' : 'ok',
     },
+    concurrency: concurrencyHealth(ctx),
+  };
+}
+
+/**
+ * Occupancy, as of this read.
+ *
+ * `inFlight: null` with `state: 'unknown'` when the store could not be counted: the page
+ * must say "I do not know" rather than print a zero that reads as "nothing is running".
+ */
+function concurrencyHealth(ctx: FactoryContext): StatusModel['concurrency'] {
+  // No unit is excluded here: `status` reports the factory, not one unit's measurement.
+  const read = readOccupancy(ctx.store);
+  const { policy, env } = ctx;
+  const attemptsLimit = policy.maxConcurrentAttempts;
+  const wallsLimit = policy.maxConcurrentWalls;
+  const attemptsIsDefault = (env['FACTORY_MAX_CONCURRENT_ATTEMPTS'] ?? '').trim() === '';
+  const wallsIsDefault = (env['FACTORY_MAX_CONCURRENT_WALLS'] ?? '').trim() === '';
+  return {
+    attempts: {
+      limit: attemptsLimit,
+      limitIsDefault: attemptsIsDefault,
+      inFlight: read.ok ? read.occupancy.attempts : null,
+      state: read.ok ? (read.occupancy.attempts >= attemptsLimit ? 'at-ceiling' : 'ok') : 'unknown',
+    },
+    walls: {
+      limit: wallsLimit,
+      limitIsDefault: wallsIsDefault,
+      inFlight: read.ok ? read.occupancy.walls : null,
+      state: read.ok ? (read.occupancy.walls >= wallsLimit ? 'at-ceiling' : 'ok') : 'unknown',
+    },
   };
 }
 
@@ -621,10 +675,28 @@ export function renderAggregate(model: StatusModel, plain: boolean): string[] {
     `store ${model.health.store.state}`,
     `today ${usd(model.budget.perDay.spent)}/${usd(model.budget.perDay.limit)}` +
       `${model.budget.perDay.limitIsDefault === true ? ' default' : ''} estimated`,
+    `dispatch ${occupancyLine(model.concurrency.attempts, model.concurrency.walls)}`,
   ];
   const line = parts.join(` ${sep()} `);
   void plain;
   return [line];
+}
+
+/**
+ * `0/1 attempt(s), 0/1 wall run(s)` — a count the reader can compare with the ceiling, with
+ * `?` for a failed read and ` default` on a number the operator did not choose.
+ */
+function occupancyLine(
+  attempts: StatusModel['concurrency']['attempts'],
+  walls: StatusModel['concurrency']['walls'],
+): string {
+  const show = (node: { readonly inFlight: number | null; readonly limit: number }): string =>
+    `${node.inFlight === null ? '?' : String(node.inFlight)}/${String(node.limit)}`;
+  const label = (node: { readonly limitIsDefault: boolean }): string =>
+    node.limitIsDefault ? ' default' : '';
+  return (
+    `${show(attempts)} attempt(s)${label(attempts)}, ` + `${show(walls)} wall run(s)${label(walls)}`
+  );
 }
 
 export function renderStatus(model: StatusModel, plain: boolean): string {

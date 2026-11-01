@@ -45,6 +45,7 @@ const EXPECTED_EXIT_CODES: Readonly<Record<ErrorCode, number>> = {
   // 6 — budget
   BUDGET_EXCEEDED: 6,
   // 7 — concurrency / conflict
+  CONCURRENCY_LIMIT: 7,
   LEASE_HELD: 7,
   RECEIPT_CONFLICT: 7,
   // 8 — environment

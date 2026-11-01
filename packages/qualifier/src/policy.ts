@@ -76,6 +76,25 @@ export interface QualifierPolicy {
    * is a privilege it cannot verify, and that is not a policy choice.
    */
   readonly privilegedBrokering: 'off' | 'on';
+  /**
+   * How many attempts may be in flight at once, across the whole factory.
+   *
+   * "In flight" means a worker may be running: an attempt in `launching`/`running`, or a
+   * unit holding a live lease for such an attempt. `ambiguous` is deliberately **not** in
+   * flight — it is the state a crashed attempt leaves, and a ceiling that counted it would
+   * stop the factory until a person reconciled, which is a much worse failure than the
+   * overlap the ceiling prevents.
+   *
+   * The ceiling refuses; it does not queue. A queue would be a promise about *when* work
+   * happens, and this build has no scheduler to keep that promise.
+   */
+  readonly maxConcurrentAttempts: number;
+  /**
+   * How many walls may measure at once. Wall runs are the expensive half — a clone, a
+   * base/candidate pair and a pinned suite per unit — so the operator can cap them below
+   * the attempt ceiling.
+   */
+  readonly maxConcurrentWalls: number;
 }
 
 /**
@@ -96,6 +115,8 @@ export const DEFAULT_POLICY: QualifierPolicy = Object.freeze({
   maxFiles: 25,
   restateOverlapMin: 0.5,
   privilegedBrokering: 'off',
+  maxConcurrentAttempts: 1,
+  maxConcurrentWalls: 1,
   weights: Object.freeze({
     intent_derivability: 30,
     reversibility: 20,
@@ -135,6 +156,12 @@ function requireCount(name: string, value: number, minimum: number): void {
  */
 export function assertPolicy(policy: QualifierPolicy): void {
   const { weights } = policy;
+  for (const name of ['maxConcurrentAttempts', 'maxConcurrentWalls'] as const) {
+    const value = policy[name];
+    if (!Number.isInteger(value) || value < 1) {
+      fail(`${name} must be an integer >= 1, got ${String(value)}`);
+    }
+  }
   if (policy.privilegedBrokering !== 'off' && policy.privilegedBrokering !== 'on') {
     fail(
       `privilegedBrokering must be 'off' or 'on', got ${JSON.stringify(policy.privilegedBrokering)}`,

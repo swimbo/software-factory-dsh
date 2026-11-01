@@ -14,6 +14,6 @@ printf '%s\n' '{"type":"session","sessionId":"sess-fixture-hang"}'
 printf '%s\n' '{"type":"status","phase":"turn_start","turn":1}'
 
 sh -c 'sleep 300' &
-echo $! > "$FACTORY_FAKE_GRANDCHILD_PID"
+echo $! > "$FACTORY_FAKE_GRANDCHILD"
 
 sleep 300

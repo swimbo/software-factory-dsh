@@ -54,7 +54,19 @@ import type { z } from 'zod';
 import { assertSelfContainedClone } from './clone.ts';
 import { attemptHomePath, destroyAttemptHome, readOutSession, seedAttemptHome } from './home.ts';
 import { createLineSplitter, parseHeadlessStream } from './ndjson.ts';
+import {
+  buildChildEnv,
+  effectiveProfile,
+  fingerprintEnv,
+  hashOverlay,
+  writeLaunchRecord,
+} from './launch-record.ts';
 import { buildOverlay } from './overlay.ts';
+
+// Re-exported for callers that import it from the executor (the public API predates the
+// launch-record module). The definition lives with the record now, because the allowlist and
+// the record are the same decision seen twice: what the worker may see, and what we admit.
+export { buildChildEnv, CREDENTIAL_NAME } from './launch-record.ts';
 import { createWatchdog, killProcessGroup, type WatchdogCeiling } from './watchdog.ts';
 
 type ArtifactValue = z.infer<typeof ArtifactRecord>;
@@ -193,48 +205,6 @@ export function attemptRecordDir(root: string, unitId: string, attemptId: string
     }
   }
   return join(root, 'attempts', unitId, attemptId);
-}
-
-/**
- * Env-var names that look like they carry a credential.
- *
- * Applied to `FACTORY_*` passthrough as well: a `FACTORY_PROXY_TOKEN` is still a
- * token, and the allowlist must not become a loophole just because the name
- * starts with the factory's prefix.
- */
-const CREDENTIAL_NAME = /(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|PRIVATE_KEY)/i;
-
-/**
- * The child environment: an allowlist, never a copy.
- *
- * Copying `process.env` and deleting the key is the pattern that fails the day
- * someone adds `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` to the operator's shell.
- * An allowlist fails closed instead. There is deliberately no `HOME`, and no path
- * under `~/.factory` other than the per-attempt home: the worker's world is the
- * mount plus its own home, and the holdout is not on either.
- */
-export function buildChildEnv(
-  dshHome: string,
-  parentEnv: NodeJS.ProcessEnv,
-  onDropped?: (name: string) => void,
-): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    DSH_HOME: dshHome,
-    // Product telemetry posts to an external collector; a factory run must not
-    // reach anything but the proxy.
-    DSH_TELEMETRY_DISABLED: '1',
-    PATH: parentEnv['PATH'] ?? '/usr/local/bin:/usr/bin:/bin',
-  };
-  for (const [name, value] of Object.entries(parentEnv)) {
-    if (value === undefined) continue;
-    if (!name.startsWith('FACTORY_')) continue;
-    if (CREDENTIAL_NAME.test(name)) {
-      onDropped?.(name);
-      continue;
-    }
-    env[name] = value;
-  }
-  return env;
 }
 
 /** Run one command to completion and capture everything the receipt needs. */
@@ -394,31 +364,31 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
       }
 
       const startedAt = new Date().toISOString();
-      const launchBody = `${JSON.stringify(
-        {
-          effectId: ctx.effectId,
-          attempt: ctx.attempt,
-          unitId: payload.unitId,
-          attemptId: payload.attemptId,
-          baseRev,
-          profile,
-          dshHome: home,
-          // The clone path is recorded twice on purpose: it must equal the
-          // container mount target, and that equality is what makes session
-          // adoption work after a restart.
-          attemptDir,
-          mountedAt: attemptDir,
-          startedAt,
-          argv: [
-            ...argv.slice(0, -1),
-            `<prompt ${String(Buffer.byteLength(prompt, 'utf8'))} bytes>`,
-          ],
-        },
-        null,
-        2,
-      )}\n`;
-      const launchPath = join(recordDir, 'launch.json');
-      writeFileSync(launchPath, launchBody, { mode: 0o600 });
+      // What the worker was given, written next to the receipt: the argv (prompt by size, not
+      // content), the directory it ran in, the profile the home actually holds, the overlay
+      // hash, and the child environment as keys plus value hashes. E2E-33 reads this file.
+      const launchPath = writeLaunchRecord(recordDir, {
+        schema: 'launch/1',
+        recordedAt: startedAt,
+        effectId: ctx.effectId,
+        attempt: ctx.attempt,
+        unitId: payload.unitId,
+        attemptId: payload.attemptId,
+        // The prompt itself is not evidence about the boundary, and it can be large: the
+        // record keeps its size, which is what distinguishes "no prompt" from "a prompt".
+        argv: [...argv.slice(0, -1), `<prompt ${String(Buffer.byteLength(prompt, 'utf8'))} bytes>`],
+        cwd: attemptDir,
+        // The clone path is recorded twice on purpose: it must equal the container mount
+        // target, and that equality is what makes session adoption work after a restart.
+        mountedAt: attemptDir,
+        dshHome: home,
+        profile: { requested: profile, effective: effectiveProfile(home) },
+        overlay: { path: overlayPath, sha256: hashOverlay(overlay) },
+        env: fingerprintEnv(env, dropped),
+      });
+      // Read back rather than re-serialise: the receipt's artifact hash must describe the
+      // bytes on disk, and two independent serialisations could drift apart silently.
+      const launchBody = readFileSync(launchPath, 'utf8');
 
       const splitter = createLineSplitter();
       const stdoutLines: string[] = [];

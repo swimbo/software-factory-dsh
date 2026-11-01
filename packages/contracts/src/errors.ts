@@ -35,6 +35,14 @@ export const ERROR_CODES = [
   'EXECUTOR_UNAVAILABLE',
   'DSH_VERSION_MISMATCH',
   'CONTAINER_UNAVAILABLE',
+  /**
+   * A dispatch ceiling the operator set is already reached. Exit 7 (conflict), like
+   * `LEASE_HELD`: the request is well-formed and the factory is healthy — the *world* is
+   * busy. Distinct from `BUDGET_EXCEEDED` (6) because nothing was spent, and from
+   * `LEASE_HELD` because the conflict is with the factory's own ceiling rather than with
+   * another controller's lease on this unit.
+   */
+  'CONCURRENCY_LIMIT',
   // 9 — integrity
   'STORE_QUARANTINED',
   // 1 — internal: the factory is in a state it cannot account for
@@ -66,6 +74,7 @@ const EXIT: Record<ErrorCode, number> = {
   EXECUTOR_UNAVAILABLE: 8,
   DSH_VERSION_MISMATCH: 8,
   CONTAINER_UNAVAILABLE: 8,
+  CONCURRENCY_LIMIT: 7,
   STORE_QUARANTINED: 9,
   INTERNAL: 1,
 };

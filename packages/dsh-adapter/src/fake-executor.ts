@@ -54,6 +54,7 @@
  * receipt that merely looks like success. `unknown` is not `failed`, and it is
  * certainly not `pass`.
  */
+import { buildChildEnv, fingerprintEnv, writeLaunchRecord } from './launch-record.ts';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -283,6 +284,35 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
         );
       }
 
+      // The scripted worker stands in for a real one, so it gets the same allowlist a real
+      // worker would: a scenario that could read `FACTORY_HOLDOUT_ROOT` would be a hole in
+      // the harness rather than a property of the product.
+      const dropped: string[] = [];
+      const childEnv = buildChildEnv(
+        join(options.factoryHome, 'dsh-home', 'attempts', payload.attemptId),
+        process.env,
+        (name) => dropped.push(name),
+      );
+      // The same record the real executor writes, with the fields it cannot have set to
+      // `null`: no DSH home was seeded, no overlay was composed, and saying so is a fact.
+      writeLaunchRecord(recordDir, {
+        schema: 'launch/1',
+        recordedAt: startedAt,
+        effectId: ctx.effectId,
+        attempt: ctx.attempt,
+        unitId: payload.unitId,
+        attemptId: payload.attemptId,
+        argv: ['<fake-executor>', `scenario:${String(scenario.steps.length)} steps`],
+        cwd: payload.attemptDir,
+        mountedAt: payload.attemptDir,
+        dshHome: null,
+        profile: { requested: 'fake', effective: null },
+        overlay: { path: null, sha256: null },
+        // The marker the fake adds is recorded too: the worker must be able to tell it is
+        // scripted, and the record must not describe an environment that never existed.
+        env: fingerprintEnv({ ...childEnv, FACTORY_FAKE_WORKER: '1' }, dropped),
+      });
+
       const events: string[] = [];
       const ran: {
         argv: string[];
@@ -330,7 +360,7 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
               cwd: payload.attemptDir,
               encoding: 'utf8',
               timeout: step.timeoutMs ?? 120_000,
-              env: { ...process.env, FACTORY_FAKE_WORKER: '1' },
+              env: { ...childEnv, FACTORY_FAKE_WORKER: '1' },
             });
             ran.push({
               argv: [...step.argv],

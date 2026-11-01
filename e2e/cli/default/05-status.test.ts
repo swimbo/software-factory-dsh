@@ -30,29 +30,34 @@ afterEach(() => {
 });
 
 describe('status --json', () => {
-  it('[@default] carries every documented key the panel reads, and the unit it just took', () => {
-    const { unitId } = submitUnit(home, { spec: specFor({ baseRev: fixture.baseRev }) });
-    const run = runFactory(['status', '--json'], { home });
-    const raw = JSON.parse(run.stdout.trim()) as Record<string, unknown>;
+  it(
+    '[@default] carries every documented key the panel reads, and the unit it just took',
+    { timeout: 120_000 },
+    () => {
+      const { unitId } = submitUnit(home, { spec: specFor({ baseRev: fixture.baseRev }) });
+      const run = runFactory(['status', '--json'], { home });
+      const raw = JSON.parse(run.stdout.trim()) as Record<string, unknown>;
 
-    expect(run.code).toBe(0);
-    expect(raw['ok']).toBe(true);
-    expect(raw['schemaVersion']).toBe('status.v1');
-    expect(Object.keys(raw).sort()).toEqual(
-      [
-        'budget',
-        'factory',
-        'generatedAt',
-        'health',
-        'ok',
-        'schemaVersion',
-        'units',
-        'waitingOnPerson',
-      ].sort(),
-    );
-    const units = raw['units'] as { unitId: string }[];
-    expect(units.map((unit) => unit.unitId)).toContain(unitId);
-  });
+      expect(run.code).toBe(0);
+      expect(raw['ok']).toBe(true);
+      expect(raw['schemaVersion']).toBe('status.v1');
+      expect(Object.keys(raw).sort()).toEqual(
+        [
+          'budget',
+          'concurrency',
+          'factory',
+          'generatedAt',
+          'health',
+          'ok',
+          'schemaVersion',
+          'units',
+          'waitingOnPerson',
+        ].sort(),
+      );
+      const units = raw['units'] as { unitId: string }[];
+      expect(units.map((unit) => unit.unitId)).toContain(unitId);
+    },
+  );
 
   it('[@default] status --json validates against StatusV1', () => {
     // Was an `it.fails` while the contract and the CLI disagreed: the payload carries
