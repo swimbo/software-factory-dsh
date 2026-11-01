@@ -1,0 +1,8 @@
+{
+  // The wall is typechecked on its own so that a break in another package cannot
+  // hide one here (and so a reviewer can see this package's surface in isolation).
+  // The root `tsconfig.json` still includes `packages/wall/**`; this file narrows
+  // the same compiler options to this package only.
+  "extends": "../../tsconfig.json",
+  "include": ["src/**/*.ts"]
+}

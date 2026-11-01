@@ -1,12 +1,6 @@
 {
   "mode": "pipeline",
-  "lenses": [
-    "reuse",
-    "quality",
-    "efficiency",
-    "test-value",
-    "comments"
-  ],
+  "lenses": ["reuse", "quality", "efficiency", "test-value", "comments"],
   "applied": {
     "reuse": 0,
     "quality": 2,

@@ -35,16 +35,12 @@
       ],
       "file": "stapled-factory/operator/cli.py",
       "first_evidence": "stapled-factory/operator/cli.py:170 --         url = command('gh', 'pr', 'create', '-R', plan['github'], '--base', 'main', '--head', branch,",
-      "independent_reviewers": [
-        "adversarial"
-      ],
+      "independent_reviewers": ["adversarial"],
       "line": 170,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "adversarial"
-      ],
+      "reviewers": ["adversarial"],
       "severity": "P2",
       "suggested_fix": "Resolve live origin/main and require the captured baseline to be its ancestor before preparation and publication, or explicitly calculate, scope-check, and present the complete main...candidate PR diff for review. Test a feature baseline with an out-of-scope file followed by an in-scope worker change.",
       "title": "Feature-branch baseline publishes changes absent from reviewed diff",
@@ -66,18 +62,12 @@
       ],
       "file": "stapled-factory/operator/nuc.py",
       "first_evidence": "stapled-factory/operator/nuc.py:191 --             command('docker', 'stop', worker, proxy)",
-      "independent_reviewers": [
-        "correctness",
-        "reliability"
-      ],
+      "independent_reviewers": ["correctness", "reliability"],
       "line": 191,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "correctness",
-        "reliability"
-      ],
+      "reviewers": ["correctness", "reliability"],
       "severity": "P2",
       "suggested_fix": "Persist a completed-export phase with the verified bundle hash and allocation IDs before stopping containers. On retry, verify the saved export and resume idempotent stop/binding restoration without docker exec; retain the active marker until restoration is complete. Add fault-injection coverage immediately after docker stop and during service restart.",
       "title": "Resume completed exports without executing stopped containers",
@@ -99,16 +89,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/test_operator_workflow.py",
       "first_evidence": "stapled-factory/deployment/nuc/test_operator_workflow.py:51 --     monkeypatch.setattr(cli, 'remote', lambda *a: (_ for _ in ()).throw(ValueError('uncertain')))",
-      "independent_reviewers": [
-        "testing"
-      ],
+      "independent_reviewers": ["testing"],
       "line": 51,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "testing"
-      ],
+      "reviewers": ["testing"],
       "severity": "P2",
       "suggested_fix": "Build a temporary control-root fixture with an active binding, operator plan, runtime, and service file; fake post and time.sleep. Have the first orchestrate post record acceptance then raise OSError, poll an unresolved state, and rerun main for the same unit. Assert exactly one orchestrate send across both invocations, an intent persisted before that send, no rebind, and rejection of another unit.",
       "title": "Exercise uncertain HTTP sends through the NUC state machine",
@@ -131,16 +117,12 @@
       ],
       "file": "stapled-factory/operator/cli.py",
       "first_evidence": "stapled-factory/operator/cli.py:170 --         url = command('gh', 'pr', 'create', '-R', plan['github'], '--base', 'main', '--head', branch,",
-      "independent_reviewers": [
-        "adversarial"
-      ],
+      "independent_reviewers": ["adversarial"],
       "line": 170,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "adversarial"
-      ],
+      "reviewers": ["adversarial"],
       "severity": "P2",
       "suggested_fix": "Resolve live origin/main and require the captured baseline to be its ancestor before preparation and publication, or explicitly calculate, scope-check, and present the complete main...candidate PR diff for review. Test a feature baseline with an out-of-scope file followed by an in-scope worker change.",
       "title": "Feature-branch baseline publishes changes absent from reviewed diff",
@@ -162,18 +144,12 @@
       ],
       "file": "stapled-factory/operator/nuc.py",
       "first_evidence": "stapled-factory/operator/nuc.py:191 --             command('docker', 'stop', worker, proxy)",
-      "independent_reviewers": [
-        "correctness",
-        "reliability"
-      ],
+      "independent_reviewers": ["correctness", "reliability"],
       "line": 191,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "correctness",
-        "reliability"
-      ],
+      "reviewers": ["correctness", "reliability"],
       "severity": "P2",
       "suggested_fix": "Persist a completed-export phase with the verified bundle hash and allocation IDs before stopping containers. On retry, verify the saved export and resume idempotent stop/binding restoration without docker exec; retain the active marker until restoration is complete. Add fault-injection coverage immediately after docker stop and during service restart.",
       "title": "Resume completed exports without executing stopped containers",
@@ -195,16 +171,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/test_operator_workflow.py",
       "first_evidence": "stapled-factory/deployment/nuc/test_operator_workflow.py:51 --     monkeypatch.setattr(cli, 'remote', lambda *a: (_ for _ in ()).throw(ValueError('uncertain')))",
-      "independent_reviewers": [
-        "testing"
-      ],
+      "independent_reviewers": ["testing"],
       "line": 51,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "testing"
-      ],
+      "reviewers": ["testing"],
       "severity": "P2",
       "suggested_fix": "Build a temporary control-root fixture with an active binding, operator plan, runtime, and service file; fake post and time.sleep. Have the first orchestrate post record acceptance then raise OSError, poll an unresolved state, and rerun main for the same unit. Assert exactly one orchestrate send across both invocations, an intent persisted before that send, no rebind, and rejection of another unit.",
       "title": "Exercise uncertain HTTP sends through the NUC state machine",
@@ -216,10 +188,7 @@
   "triage_groups": [
     {
       "title": "Recover and prove single-task observation",
-      "findings": [
-        2,
-        3
-      ],
+      "findings": [2, 3],
       "context": "The operator must recover a completed export and observe ambiguous sends without starting another task.",
       "preferred_resolution": "Implement resumable completed-export restoration for #2, then add the two-invocation uncertainty regression for #3.",
       "why": "Both protect singleton task ownership across interruptions; the tests exercise different recovery boundaries."

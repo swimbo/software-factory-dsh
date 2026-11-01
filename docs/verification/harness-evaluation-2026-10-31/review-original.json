@@ -32,18 +32,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:155 -- return {**entry, 'accepted': check['passed'], 'requests': requests,",
-      "independent_reviewers": [
-        "correctness",
-        "adversarial"
-      ],
+      "independent_reviewers": ["correctness", "adversarial"],
       "line": 155,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "correctness",
-        "adversarial"
-      ],
+      "reviewers": ["correctness", "adversarial"],
       "severity": "P1",
       "suggested_fix": "For held-out tasks with execution requirements, freeze explicit trace predicates in the preregistration and combine their independently audited result with the candidate oracle. In particular, count the required unavailable-dependency import and reject zero or repeated diagnostic attempts before accepted can be true; retain counts or hashes only, not raw thoughts.",
       "title": "Validate required diagnostic execution before accepting blocker artifacts",
@@ -63,16 +57,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:109 -- binding = trial_binding(root, unit)",
-      "independent_reviewers": [
-        "correctness"
-      ],
+      "independent_reviewers": ["correctness"],
       "line": 109,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "correctness"
-      ],
+      "reviewers": ["correctness"],
       "severity": "P2",
       "suggested_fix": "Add an observation-only no-allocation collection branch that verifies the original durable dispatch and proves absence of allocation/gateway activity before recording an unsuccessful zero-call receipt; retain unknown counts when absence cannot be proven. Restore the owned service binding after preserving this receipt, without replacement or redispatch.",
       "title": "Retain failed admissions that never acquire a bound allocation",
@@ -92,16 +82,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:193 --         if json.loads(active.read_text())['unit'] != unit or service.read_text() not in (previous.read_text(), desired.read_text()):",
-      "independent_reviewers": [
-        "reliability"
-      ],
+      "independent_reviewers": ["reliability"],
       "line": 193,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "reliability"
-      ],
+      "reviewers": ["reliability"],
       "severity": "P2",
       "suggested_fix": "Check the durable collected receipt before unconditionally reading active. Allow receipt publication when active is absent and service exactly equals the saved previous service; otherwise require the matching active owner before restoration. Add a fault-injection test stopping between restore and final output creation.",
       "title": "Resume receipt publication after successful binding restoration",
@@ -123,16 +109,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:199 --         if intent.exists():",
-      "independent_reviewers": [
-        "testing"
-      ],
+      "independent_reviewers": ["testing"],
       "line": 199,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "testing"
-      ],
+      "reviewers": ["testing"],
       "severity": "P2",
       "suggested_fix": "Add offline tests calling run() with temporary setup/service files and mocked approval, transport, systemctl, and collection. Cover existing intent causing no dispatch or service writes, collected receipt restoring without redispatch, foreign binding refusing restore, and a changed runtime digest causing no external effects. Patch Path.home() to the temporary home so the real service is unreachable.",
       "title": "Exercise restart safety through the evaluation entry point",
@@ -153,16 +135,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:212 --             state = post(root, 'WorkUnit/' + unit + '/getState', {})",
-      "independent_reviewers": [
-        "reliability"
-      ],
+      "independent_reviewers": ["reliability"],
       "line": 212,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "reliability"
-      ],
+      "reviewers": ["reliability"],
       "severity": "P2",
       "suggested_fix": "Catch bounded polling I/O failures after dispatch, retain an error receipt, and stop/fence only the verified original allocation before returning failure. Add a recovery path for existing intents that observes and contains the original without redispatching; test a state-read timeout immediately after accepted dispatch.",
       "title": "Contain original workers when state polling fails",
@@ -186,18 +164,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:155 -- return {**entry, 'accepted': check['passed'], 'requests': requests,",
-      "independent_reviewers": [
-        "correctness",
-        "adversarial"
-      ],
+      "independent_reviewers": ["correctness", "adversarial"],
       "line": 155,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "correctness",
-        "adversarial"
-      ],
+      "reviewers": ["correctness", "adversarial"],
       "severity": "P1",
       "suggested_fix": "For held-out tasks with execution requirements, freeze explicit trace predicates in the preregistration and combine their independently audited result with the candidate oracle. In particular, count the required unavailable-dependency import and reject zero or repeated diagnostic attempts before accepted can be true; retain counts or hashes only, not raw thoughts.",
       "title": "Validate required diagnostic execution before accepting blocker artifacts",
@@ -217,16 +189,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:109 -- binding = trial_binding(root, unit)",
-      "independent_reviewers": [
-        "correctness"
-      ],
+      "independent_reviewers": ["correctness"],
       "line": 109,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "correctness"
-      ],
+      "reviewers": ["correctness"],
       "severity": "P2",
       "suggested_fix": "Add an observation-only no-allocation collection branch that verifies the original durable dispatch and proves absence of allocation/gateway activity before recording an unsuccessful zero-call receipt; retain unknown counts when absence cannot be proven. Restore the owned service binding after preserving this receipt, without replacement or redispatch.",
       "title": "Retain failed admissions that never acquire a bound allocation",
@@ -246,16 +214,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:193 --         if json.loads(active.read_text())['unit'] != unit or service.read_text() not in (previous.read_text(), desired.read_text()):",
-      "independent_reviewers": [
-        "reliability"
-      ],
+      "independent_reviewers": ["reliability"],
       "line": 193,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "reliability"
-      ],
+      "reviewers": ["reliability"],
       "severity": "P2",
       "suggested_fix": "Check the durable collected receipt before unconditionally reading active. Allow receipt publication when active is absent and service exactly equals the saved previous service; otherwise require the matching active owner before restoration. Add a fault-injection test stopping between restore and final output creation.",
       "title": "Resume receipt publication after successful binding restoration",
@@ -277,16 +241,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:199 --         if intent.exists():",
-      "independent_reviewers": [
-        "testing"
-      ],
+      "independent_reviewers": ["testing"],
       "line": 199,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "testing"
-      ],
+      "reviewers": ["testing"],
       "severity": "P2",
       "suggested_fix": "Add offline tests calling run() with temporary setup/service files and mocked approval, transport, systemctl, and collection. Cover existing intent causing no dispatch or service writes, collected receipt restoring without redispatch, foreign binding refusing restore, and a changed runtime digest causing no external effects. Patch Path.home() to the temporary home so the real service is unreachable.",
       "title": "Exercise restart safety through the evaluation entry point",
@@ -307,16 +267,12 @@
       ],
       "file": "stapled-factory/deployment/nuc/evaluation_trials.py",
       "first_evidence": "stapled-factory/deployment/nuc/evaluation_trials.py:212 --             state = post(root, 'WorkUnit/' + unit + '/getState', {})",
-      "independent_reviewers": [
-        "reliability"
-      ],
+      "independent_reviewers": ["reliability"],
       "line": 212,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "reliability"
-      ],
+      "reviewers": ["reliability"],
       "severity": "P2",
       "suggested_fix": "Catch bounded polling I/O failures after dispatch, retain an error receipt, and stop/fence only the verified original allocation before returning failure. Add a recovery path for existing intents that observes and contains the original without redispatching; test a state-read timeout immediately after accepted dispatch.",
       "title": "Contain original workers when state polling fails",
@@ -329,12 +285,7 @@
   "triage_groups": [
     {
       "title": "Original-attempt recovery and receipt publication",
-      "findings": [
-        2,
-        3,
-        4,
-        5
-      ],
+      "findings": [2, 3, 4, 5],
       "context": "apply-queue: interruption and pre-binding failure paths must preserve original identity and complete accounting without redispatch.",
       "preferred_resolution": "Fix containment and post-restoration recovery, then add entry-point negative controls; handle no-allocation observations conservatively.",
       "why": "These paths share the same durable intent, active marker and final receipt lifecycle."

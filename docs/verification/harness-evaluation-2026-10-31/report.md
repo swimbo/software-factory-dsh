@@ -16,12 +16,12 @@ Each attempt retained its original identity and budget: at most 12 admitted infe
 
 All consumption, including unsuccessful attempts, is included. “Contract reconciled” is an appended assessment of the original outputs and executed actions against the task wording; it does not overwrite the frozen scores.
 
-| Profile | Frozen strict accepted | Frozen output oracle | Contract reconciled | Requests | Input tokens per reconciled accepted task | Median workflow time |
-|---|---:|---:|---:|---:|---:|---:|
-| Baseline | 4/6 | 4/6 | 5/6 | 43 | Unknown | 42.865s |
-| Context | 4/6 | 5/6 | 5/6 | 49 | 69,658.2 | 42.909s |
-| Context + bounded | 4/6 | 4/6 | 5/6 | 48 | 66,083.6 | 41.924s |
-| Combined stall | 5/6 | 6/6 | 6/6 | 48 | 53,594.5 | 28.222s |
+| Profile           | Frozen strict accepted | Frozen output oracle | Contract reconciled | Requests | Input tokens per reconciled accepted task | Median workflow time |
+| ----------------- | ---------------------: | -------------------: | ------------------: | -------: | ----------------------------------------: | -------------------: |
+| Baseline          |                    4/6 |                  4/6 |                 5/6 |       43 |                                   Unknown |              42.865s |
+| Context           |                    4/6 |                  5/6 |                 5/6 |       49 |                                  69,658.2 |              42.909s |
+| Context + bounded |                    4/6 |                  4/6 |                 5/6 |       48 |                                  66,083.6 |              41.924s |
+| Combined stall    |                    5/6 |                  6/6 |                 6/6 |       48 |                                  53,594.5 |              28.222s |
 
 Input totals include reported input, cached reads and cache creation. Denominators count independently accepted tasks while numerators retain all trial consumption. The candidate totals were 348,291, 330,418 and 321,567 input tokens respectively. The full baseline total remains unknown.
 

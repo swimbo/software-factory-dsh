@@ -16,9 +16,7 @@
       "b9d3-20261031-multi-file-r1",
       "b9d3-20261031-failing-tests-r1"
     ],
-    "db96ddd": [
-      "b9d3-20261031-noisy-output-r1-p3"
-    ]
+    "db96ddd": ["b9d3-20261031-noisy-output-r1-p3"]
   },
   "remaining_host_release": "049e51ab08af024b04ff8bbc2c2d9c25c4e2930f",
   "admission_change": "compare unique exact environment values independent of Docker override ordering; model image/context/task/router/limits unchanged",

@@ -13,15 +13,15 @@ Telemetry is deployed on the NUC. All **18 real model trials** completed on the 
 
 ## Results
 
-| Task | Frozen evaluator | Contract-corrected audit | Requests in rounds 1, 2, 3 |
-| --- | --- | --- | --- |
-| discovery | 3/3 | 3/3 | 6, 5, 7 |
-| small-edit | 3/3 | 3/3 | 6, 6, 7 |
-| multi-file | 3/3 | 3/3 | 5, 5, 7 |
-| failing-tests | 3/3 | 3/3 | 6, 6, 6 |
-| noisy-output | 3/3 | 3/3 | 6, 6, 6 |
-| stalled-run | 2/3 | 3/3 | 6, 6, 5 |
-| **Total** | **17/18** | **18/18** | **107 worker requests** |
+| Task          | Frozen evaluator | Contract-corrected audit | Requests in rounds 1, 2, 3 |
+| ------------- | ---------------- | ------------------------ | -------------------------- |
+| discovery     | 3/3              | 3/3                      | 6, 5, 7                    |
+| small-edit    | 3/3              | 3/3                      | 6, 6, 7                    |
+| multi-file    | 3/3              | 3/3                      | 5, 5, 7                    |
+| failing-tests | 3/3              | 3/3                      | 6, 6, 6                    |
+| noisy-output  | 3/3              | 3/3                      | 6, 6, 6                    |
+| stalled-run   | 2/3              | 3/3                      | 6, 6, 5                    |
+| **Total**     | **17/18**        | **18/18**                | **107 worker requests**    |
 
 - All 107 proxy admissions match retained budget counters and independent gateway log rows. All wire responses have complete usage observations. Every routed request was served by `deepseek-v4.1-flash:1017` through the existing Bifrost route.
 - Gateway-reported prompt tokens: **1,088,401**; completion tokens: **19,714**. Prompt accounting reconciles exactly to **79,889** wire input tokens plus **1,008,512** cached-read tokens and zero cache-creation tokens. The gateway-reported cached-read share is **92.66%**; it is not an SDK-inferred cache percentage or a billing claim.

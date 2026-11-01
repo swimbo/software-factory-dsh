@@ -28,14 +28,14 @@ separately provisioned infrastructure and operator approval.
 This is a sandbox-scoped system under active development. Cloning it does not
 install or enable a complete hosted factory.
 
-| Component | Available behavior | Boundary |
-| --- | --- | --- |
-| Holdout evaluator (“the wall”) | HTTP acceptance scenarios, quorum, aggregate threshold, JSON verdict and receipt | Standalone demo; real holdouts must stay outside the generator workspace |
-| Security primitives | Operation classification, scoped credential tokens, scanner integration | OpenHands terminal operations are not all mediated by the standalone guard |
-| Restate spine | Durable work units, persisted attempt identity, build orchestration and reconciliation | Builds stop at `needs_validation`; no automatic wall evaluation, merge, or deployment from this workflow |
-| OpenHands runtime | Private operator config, isolated Docker allocation, guarded attempt and budget stores | Missing trusted configuration blocks dispatch; production scope is denied |
-| Operator CLI | Sign/prepare a task, run or observe it, collect committed output, check it and publish a PR | Requires the verified NUC deployment; no merge, deployment, or scheduling command |
-| Application validation | Separate exact-revision, prebuilt-candidate validation and signed acceptance | Local CI and an open PR do not establish application acceptance or production readiness |
+| Component                      | Available behavior                                                                          | Boundary                                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Holdout evaluator (“the wall”) | HTTP acceptance scenarios, quorum, aggregate threshold, JSON verdict and receipt            | Standalone demo; real holdouts must stay outside the generator workspace                                 |
+| Security primitives            | Operation classification, scoped credential tokens, scanner integration                     | OpenHands terminal operations are not all mediated by the standalone guard                               |
+| Restate spine                  | Durable work units, persisted attempt identity, build orchestration and reconciliation      | Builds stop at `needs_validation`; no automatic wall evaluation, merge, or deployment from this workflow |
+| OpenHands runtime              | Private operator config, isolated Docker allocation, guarded attempt and budget stores      | Missing trusted configuration blocks dispatch; production scope is denied                                |
+| Operator CLI                   | Sign/prepare a task, run or observe it, collect committed output, check it and publish a PR | Requires the verified NUC deployment; no merge, deployment, or scheduling command                        |
+| Application validation         | Separate exact-revision, prebuilt-candidate validation and signed acceptance                | Local CI and an open PR do not establish application acceptance or production readiness                  |
 
 Request admission uses a **$2 best-effort estimated budget**, not a cap on actual
 provider charges. Failed or uncertain requests retain reservations. See
@@ -108,16 +108,16 @@ Commands use a POSIX shell and start in the repository root unless indicated.
 
 ### Prerequisites
 
-| Tool | Needed for |
-| --- | --- |
-| Python 3.11+ with `venv` and `pip` | Python tests and components; runtime images use Python 3.11 |
-| Node.js 22+ and npm | Spine build/tests; helper scripts use Node type stripping |
-| Git | Checkout, revisions, local verification |
-| OpenSSL | Signing-related local tests and operator approvals |
-| Gitleaks | Full repository verification script |
-| Docker on a trusted Linux host | Real worker provisioning and explicit integration probes |
-| Restate server | Live orchestration only; deployment image pins Restate 1.8.0 |
-| SSH, SCP, authenticated GitHub CLI (`gh`) | Existing NUC operator workflow and PR publication |
+| Tool                                      | Needed for                                                   |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| Python 3.11+ with `venv` and `pip`        | Python tests and components; runtime images use Python 3.11  |
+| Node.js 22+ and npm                       | Spine build/tests; helper scripts use Node type stripping    |
+| Git                                       | Checkout, revisions, local verification                      |
+| OpenSSL                                   | Signing-related local tests and operator approvals           |
+| Gitleaks                                  | Full repository verification script                          |
+| Docker on a trusted Linux host            | Real worker provisioning and explicit integration probes     |
+| Restate server                            | Live orchestration only; deployment image pins Restate 1.8.0 |
+| SSH, SCP, authenticated GitHub CLI (`gh`) | Existing NUC operator workflow and PR publication            |
 
 Docker, Restate, and gateway credentials are unnecessary for the basic tests and
 demo. Python components use the standard library; install `pytest` for the test
@@ -403,31 +403,31 @@ flowchart TD
 These settings are not a complete deployment recipe. Private files, ledgers,
 images, workspaces, and signed inputs must already exist.
 
-| Variable | Purpose |
-| --- | --- |
-| `FACTORY_OPERATOR_CONFIG` | Local operator JSON path; defaults to ignored repository-root `operator.local.json`; `--config` overrides it |
-| `FACTORY_RESTATE_IDENTITY_KEYS` | Required comma-separated `publickeyv1_...` Restate request identity public keys |
-| `FACTORY_ENDPOINT_PORT` | Signed endpoint port; local default `9080` |
-| `FACTORY_INGRESS_TOKEN_FILE` | Owner-only regular file with a random base64url bearer token generated from at least 32 random bytes |
-| `FACTORY_INGRESS_GATEWAY_PORT` | Bearer gateway port; local default `9081` |
-| `FACTORY_RESTATE_INGRESS_PORT` | Gateway upstream ingress port; local default `8080` |
-| `FACTORY_RUNTIME_CONFIG` | Operator-owned mode-`0600` per-attempt runtime JSON |
-| `FACTORY_ATTEMPT_DB`, `FACTORY_ATTEMPT_ANCHOR` | Separate absolute paths for guarded attempt state and its independent watermark |
-| `FACTORY_GATEWAY_KEY_FILE` | Optional owner-only gateway credential file reference; contents stay outside the worker |
-| `FACTORY_IMAGE_APPROVAL_KEY` | Independently provisioned image-approval public trust root |
+| Variable                                       | Purpose                                                                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `FACTORY_OPERATOR_CONFIG`                      | Local operator JSON path; defaults to ignored repository-root `operator.local.json`; `--config` overrides it |
+| `FACTORY_RESTATE_IDENTITY_KEYS`                | Required comma-separated `publickeyv1_...` Restate request identity public keys                              |
+| `FACTORY_ENDPOINT_PORT`                        | Signed endpoint port; local default `9080`                                                                   |
+| `FACTORY_INGRESS_TOKEN_FILE`                   | Owner-only regular file with a random base64url bearer token generated from at least 32 random bytes         |
+| `FACTORY_INGRESS_GATEWAY_PORT`                 | Bearer gateway port; local default `9081`                                                                    |
+| `FACTORY_RESTATE_INGRESS_PORT`                 | Gateway upstream ingress port; local default `8080`                                                          |
+| `FACTORY_RUNTIME_CONFIG`                       | Operator-owned mode-`0600` per-attempt runtime JSON                                                          |
+| `FACTORY_ATTEMPT_DB`, `FACTORY_ATTEMPT_ANCHOR` | Separate absolute paths for guarded attempt state and its independent watermark                              |
+| `FACTORY_GATEWAY_KEY_FILE`                     | Optional owner-only gateway credential file reference; contents stay outside the worker                      |
+| `FACTORY_IMAGE_APPROVAL_KEY`                   | Independently provisioned image-approval public trust root                                                   |
 
 After building, the endpoint runs with `npm start` from `stapled-factory/spine/`;
 the optional gateway runs there with `node dist/ingress_main.js`. Starting either
 does not create/register Restate or provision a worker. Missing or malformed
 identity configuration prevents endpoint startup.
 
-| Listener | Local default | Documented NUC installation |
-| --- | --- | --- |
-| Restate raw ingress | `8080` | `18080` |
-| Restate admin | `9070` | `19070` |
-| Signed spine endpoint | `9080` | `19080` |
-| Bearer ingress gateway | `9081` | `19081` |
-| Demo HTTP target | `8777` | Disposable candidate-specific |
+| Listener               | Local default | Documented NUC installation   |
+| ---------------------- | ------------- | ----------------------------- |
+| Restate raw ingress    | `8080`        | `18080`                       |
+| Restate admin          | `9070`        | `19070`                       |
+| Signed spine endpoint  | `9080`        | `19080`                       |
+| Bearer ingress gateway | `9081`        | `19081`                       |
+| Demo HTTP target       | `8777`        | Disposable candidate-specific |
 
 Keep raw ingress, admin, and internal listeners isolated from untrusted clients.
 Request signing authenticates Restate to the endpoint; it does not authorize
@@ -442,19 +442,19 @@ coordinated rollback of both files.
 
 ## Troubleshooting and recovery
 
-| Symptom | Action |
-| --- | --- |
-| Cannot import `pytest` | Activate `.venv`; install with that environment's `python3 -m pip` |
-| Node/build errors after checkout | Use Node 22+, run `npm ci --ignore-scripts` in `stapled-factory/spine/`, then rebuild |
-| Target unreachable or port occupied | Start the intended fixture; only one demo can bind `127.0.0.1:8777` |
-| Evaluator exits successfully despite failures | Read `verdict.passed` and the receipt; process success only means a result was produced |
-| Endpoint rejects startup or unsigned requests | Check public identity keys and signed-server setup; retain identity verification |
-| Bearer ingress returns `401` or `404` | Check authentication, allowlisted route, POST method, and exact `application/json` content type |
-| Worker reports `blocked` | Check trusted config, permissions, image approval, guarded stores, and sandbox scope |
+| Symptom                                        | Action                                                                                                       |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Cannot import `pytest`                         | Activate `.venv`; install with that environment's `python3 -m pip`                                           |
+| Node/build errors after checkout               | Use Node 22+, run `npm ci --ignore-scripts` in `stapled-factory/spine/`, then rebuild                        |
+| Target unreachable or port occupied            | Start the intended fixture; only one demo can bind `127.0.0.1:8777`                                          |
+| Evaluator exits successfully despite failures  | Read `verdict.passed` and the receipt; process success only means a result was produced                      |
+| Endpoint rejects startup or unsigned requests  | Check public identity keys and signed-server setup; retain identity verification                             |
+| Bearer ingress returns `401` or `404`          | Check authentication, allowlisted route, POST method, and exact `application/json` content type              |
+| Worker reports `blocked`                       | Check trusted config, permissions, image approval, guarded stores, and sandbox scope                         |
 | `needs_reconciliation` or `NEEDS_INTERVENTION` | Preserve original identity/state and use documented observation; do not bypass uncertainty with another unit |
-| Completed build stays at `needs_validation` | Expected until separate application-candidate validation accepts the exact revision |
-| Full CI stops | Inspect `.local-ci/<revision>/receipt.json` and its step logs; check Gitleaks and registry/audit access |
-| Store quarantined | Preserve store and anchor; do not reset them or restore an older snapshot to resume |
+| Completed build stays at `needs_validation`    | Expected until separate application-candidate validation accepts the exact revision                          |
+| Full CI stops                                  | Inspect `.local-ci/<revision>/receipt.json` and its step logs; check Gitleaks and registry/audit access      |
+| Store quarantined                              | Preserve store and anchor; do not reset them or restore an older snapshot to resume                          |
 
 Do not delete active operator markers, reset budgets, or redispatch uncertain
 attempts. For an already safely fenced attempt, signed abandonment retains
@@ -479,20 +479,20 @@ any runtime experiment actually exercised.
 
 ## Documentation
 
-| Topic | Read |
-| --- | --- |
-| Operator workflow | [Operator README](stapled-factory/operator/README.md) |
-| Restate services and ingress | [Spine README](stapled-factory/spine/README.md) |
-| Exact-revision validation | [Validation binding](stapled-factory/spine/VALIDATION_BINDING.md) |
-| Worker boundaries | [Worker README](stapled-factory/worker/README.md), [private configuration](stapled-factory/worker/OPERATOR_CLI.md) |
-| Runtime image trust | [Runtime images](stapled-factory/worker/RUNTIME_IMAGES.md) |
-| Budget witness | [Independent budget witness](stapled-factory/worker/BUDGET_WITNESS.md) |
-| Evaluation | [Wall README](stapled-factory/wall/README.md) |
-| Security | [Security README](stapled-factory/security/README.md) |
-| Deployment | [NUC](stapled-factory/deployment/nuc/README.md), [private Railway Restate](stapled-factory/deployment/restate/README.md) |
-| Design | [Architecture](docs/planning/stapled-factory/architecture.md), [consensus](docs/planning/stapled-factory/consensus-plan.md), [decisions](docs/planning/stapled-factory/decisions/INDEX.md) |
-| Plans and history | [Phased plan](docs/planning/stapled-factory/phased-plan.md), [progress](docs/planning/stapled-factory/progress.md), [verification records](docs/verification/) |
-| Background | [Research report](dark-software-factory-report.md) |
+| Topic                        | Read                                                                                                                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Operator workflow            | [Operator README](stapled-factory/operator/README.md)                                                                                                                                      |
+| Restate services and ingress | [Spine README](stapled-factory/spine/README.md)                                                                                                                                            |
+| Exact-revision validation    | [Validation binding](stapled-factory/spine/VALIDATION_BINDING.md)                                                                                                                          |
+| Worker boundaries            | [Worker README](stapled-factory/worker/README.md), [private configuration](stapled-factory/worker/OPERATOR_CLI.md)                                                                         |
+| Runtime image trust          | [Runtime images](stapled-factory/worker/RUNTIME_IMAGES.md)                                                                                                                                 |
+| Budget witness               | [Independent budget witness](stapled-factory/worker/BUDGET_WITNESS.md)                                                                                                                     |
+| Evaluation                   | [Wall README](stapled-factory/wall/README.md)                                                                                                                                              |
+| Security                     | [Security README](stapled-factory/security/README.md)                                                                                                                                      |
+| Deployment                   | [NUC](stapled-factory/deployment/nuc/README.md), [private Railway Restate](stapled-factory/deployment/restate/README.md)                                                                   |
+| Design                       | [Architecture](docs/planning/stapled-factory/architecture.md), [consensus](docs/planning/stapled-factory/consensus-plan.md), [decisions](docs/planning/stapled-factory/decisions/INDEX.md) |
+| Plans and history            | [Phased plan](docs/planning/stapled-factory/phased-plan.md), [progress](docs/planning/stapled-factory/progress.md), [verification records](docs/verification/)                             |
+| Background                   | [Research report](dark-software-factory-report.md)                                                                                                                                         |
 
 This project split from the earlier `software-factory` project on October 26,
 2026 and has an independent baseline. The release remote is

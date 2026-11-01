@@ -38,11 +38,11 @@ capabilities, numeric unprivileged UID and bounded resources. It exited before
 server launch and made zero model requests. This is an extension integration
 check against the existing image, not a rebuilt/deployed candidate image.
 
-| Rendered SDK component | Baseline reconstruction | Candidate |
-| --- | ---: | ---: |
-| Static system JSON bytes | 16,164 | 7,762 |
-| Tool schema JSON bytes | 28,059 | 17,511 |
-| Expanded tool count | 20 | 6 |
+| Rendered SDK component   | Baseline reconstruction | Candidate |
+| ------------------------ | ----------------------: | --------: |
+| Static system JSON bytes |                  16,164 |     7,762 |
+| Tool schema JSON bytes   |                  28,059 |    17,511 |
+| Expanded tool count      |                      20 |         6 |
 
 These are SDK OpenAI-schema serialization sizes, not the proxy's Anthropic wire
 sizes or token counts. Baseline reconstruction explicitly selects the serving

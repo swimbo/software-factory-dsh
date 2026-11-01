@@ -4,9 +4,7 @@
   "repeat": 2,
   "baseline": "e25eb19801c9a82b5255ecaccc35ce6e0677e91f",
   "task_sha256": "497d7c209c1603fbcb8bb9e97936a1a0bcba8f9846be74b0329784c50b09bcbf",
-  "allowed_paths": [
-    "discovery.json"
-  ],
+  "allowed_paths": ["discovery.json"],
   "runtime_sha256": "1d9ba6a21b181e6c75d0c404ba23161025458b2baa9ef20c689e36eac8cf8bbe",
   "state": {
     "stage": "needs_validation",
@@ -35,9 +33,7 @@
     }
   },
   "revision": "3803d0e45f7f3728677d8066f15f0accae764992",
-  "changed": [
-    "discovery.json"
-  ],
+  "changed": ["discovery.json"],
   "accepted": true,
   "task_wall_elapsed_s": 44.459,
   "budget": {

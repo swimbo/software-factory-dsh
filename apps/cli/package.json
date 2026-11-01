@@ -1,0 +1,17 @@
+{
+  "name": "@factory/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/main.ts",
+  "dependencies": {
+    "@factory/contracts": "workspace:*",
+    "@factory/core": "workspace:*",
+    "@factory/store": "workspace:*",
+    "@factory/qualifier": "workspace:*",
+    "@factory/gates": "workspace:*",
+    "@factory/wall": "workspace:*",
+    "@factory/effects": "workspace:*",
+    "@factory/dsh-adapter": "workspace:*"
+  }
+}

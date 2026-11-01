@@ -10,10 +10,7 @@
   },
   "intent": "Wait for asynchronous Docker proxy startup before creating the worker, while retaining all topology, firewall, binding, deadline and credential-release checks.",
   "intent_confidence": "explicit",
-  "reviewers": [
-    "correctness",
-    "adversarial"
-  ],
+  "reviewers": ["correctness", "adversarial"],
   "findings": [],
   "actionable_findings": [],
   "triage_groups": [],

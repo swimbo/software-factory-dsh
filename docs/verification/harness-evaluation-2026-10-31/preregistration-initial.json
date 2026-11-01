@@ -1,20 +1,8 @@
 {
   "schema": "factory.held-out-preregistration/v1",
   "primary_metric": "input_tokens_per_accepted_task",
-  "tasks": [
-    "expiry",
-    "quoted-csv",
-    "parcels",
-    "service-map",
-    "sensor",
-    "unavailable"
-  ],
-  "profiles": [
-    "baseline",
-    "context-v1",
-    "bounded-native-v1",
-    "stall-v1"
-  ],
+  "tasks": ["expiry", "quoted-csv", "parcels", "service-map", "sensor", "unavailable"],
+  "profiles": ["baseline", "context-v1", "bounded-native-v1", "stall-v1"],
   "schedule": [
     {
       "unit": "s9d5-01-0",
@@ -22,9 +10,7 @@
       "profile": "baseline",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "1235747acdcfd48cf2b0b72361a293459ba7a26d453c89957c62db2b079932d5",
-      "allowed_paths": [
-        "cache.py"
-      ],
+      "allowed_paths": ["cache.py"],
       "runtime_sha256": "a1bb9e3e2febdfffa8f8a1a293c211c8e330f6955e3bbdd897435dae6a4fc1cb"
     },
     {
@@ -33,9 +19,7 @@
       "profile": "context-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "1235747acdcfd48cf2b0b72361a293459ba7a26d453c89957c62db2b079932d5",
-      "allowed_paths": [
-        "cache.py"
-      ],
+      "allowed_paths": ["cache.py"],
       "runtime_sha256": "3607dd0a08d1605856b45dd6ba7e501941675ea52be3e389f444f9b6ed8a589f"
     },
     {
@@ -44,9 +28,7 @@
       "profile": "context-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "cd8581898f9c19c7c451b6f826583e7148a053d761d6e47694a8fd064c0c94b8",
-      "allowed_paths": [
-        "ledger.py"
-      ],
+      "allowed_paths": ["ledger.py"],
       "runtime_sha256": "aa30682bc6c09dda6151c667ba0a0cbe29eeafbfcb3223dd6472585b093a2892"
     },
     {
@@ -55,9 +37,7 @@
       "profile": "baseline",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "cd8581898f9c19c7c451b6f826583e7148a053d761d6e47694a8fd064c0c94b8",
-      "allowed_paths": [
-        "ledger.py"
-      ],
+      "allowed_paths": ["ledger.py"],
       "runtime_sha256": "0575157afd4848854e8fb16c6c40028298c43f0f1df4b577fa6a3545de4a0725"
     },
     {
@@ -66,9 +46,7 @@
       "profile": "baseline",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "e1f81a9f48be79ef894eb1a09a59b9c6ac45e16c2109823dffc46a04dfef26e0",
-      "allowed_paths": [
-        "shipping.py"
-      ],
+      "allowed_paths": ["shipping.py"],
       "runtime_sha256": "423080230a19febc0943fa45fcf3faef1f510b3131ae6e1103fa92b10c687c31"
     },
     {
@@ -77,9 +55,7 @@
       "profile": "context-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "e1f81a9f48be79ef894eb1a09a59b9c6ac45e16c2109823dffc46a04dfef26e0",
-      "allowed_paths": [
-        "shipping.py"
-      ],
+      "allowed_paths": ["shipping.py"],
       "runtime_sha256": "dbb10275234aebb7dbd38a6f34e6fb4d93ad3d363c4ef801da1a54d6daf7bd73"
     },
     {
@@ -88,9 +64,7 @@
       "profile": "context-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "242357dbe06d4dc5493984538a719ef1ae8517880643234625ce8e8334646162",
-      "allowed_paths": [
-        "service-map.json"
-      ],
+      "allowed_paths": ["service-map.json"],
       "runtime_sha256": "05386b493ddb0285d10878a3e16dc73afe374535f1d3ac98bcc53bc1e66dd6be"
     },
     {
@@ -99,9 +73,7 @@
       "profile": "baseline",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "242357dbe06d4dc5493984538a719ef1ae8517880643234625ce8e8334646162",
-      "allowed_paths": [
-        "service-map.json"
-      ],
+      "allowed_paths": ["service-map.json"],
       "runtime_sha256": "27d624c39490db1f9b663e4d7757cd970a4008ceb5ddf936d3f7bf9cc72a58c5"
     },
     {
@@ -110,9 +82,7 @@
       "profile": "baseline",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "2cf947770bc2512b7a3eacdec945e2dae51c985fe4809becd42be8f6b2def89c",
-      "allowed_paths": [
-        "incident.json"
-      ],
+      "allowed_paths": ["incident.json"],
       "runtime_sha256": "47f8196479d36b3324792214eb5600ccf38a1421c0faa3843b4a0dfcac80da1b"
     },
     {
@@ -121,9 +91,7 @@
       "profile": "context-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "2cf947770bc2512b7a3eacdec945e2dae51c985fe4809becd42be8f6b2def89c",
-      "allowed_paths": [
-        "incident.json"
-      ],
+      "allowed_paths": ["incident.json"],
       "runtime_sha256": "9016f3c712bed73bc105d40dbac60ee954c2b3f595ab1031a4e398614c8394d5"
     },
     {
@@ -132,9 +100,7 @@
       "profile": "context-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "b376e14a19461040e3d3ad18294ebce267be72b9611175777ff6172e3236e5cc",
-      "allowed_paths": [
-        "dependency-blocker.json"
-      ],
+      "allowed_paths": ["dependency-blocker.json"],
       "runtime_sha256": "db01a55e208d13c069835c4954cabed3cc05dfe9aeb24b1aad665ede0f804459",
       "diagnostic_dependency": "archive_codec_unavailable",
       "required_diagnostic_attempts": 1,
@@ -147,9 +113,7 @@
       "profile": "baseline",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "b376e14a19461040e3d3ad18294ebce267be72b9611175777ff6172e3236e5cc",
-      "allowed_paths": [
-        "dependency-blocker.json"
-      ],
+      "allowed_paths": ["dependency-blocker.json"],
       "runtime_sha256": "7bcafdabe65e3d8e3e3013c2cc90f165f6cf325e16f82aac47ce660e8638991a",
       "diagnostic_dependency": "archive_codec_unavailable",
       "required_diagnostic_attempts": 1,
@@ -162,9 +126,7 @@
       "profile": "bounded-native-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "b376e14a19461040e3d3ad18294ebce267be72b9611175777ff6172e3236e5cc",
-      "allowed_paths": [
-        "dependency-blocker.json"
-      ],
+      "allowed_paths": ["dependency-blocker.json"],
       "runtime_sha256": "34ab17a6181b0edcf5f507f63cb29291ddc8c0852c00a989d7ec726e29cc517c",
       "diagnostic_dependency": "archive_codec_unavailable",
       "required_diagnostic_attempts": 1,
@@ -177,9 +139,7 @@
       "profile": "bounded-native-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "2cf947770bc2512b7a3eacdec945e2dae51c985fe4809becd42be8f6b2def89c",
-      "allowed_paths": [
-        "incident.json"
-      ],
+      "allowed_paths": ["incident.json"],
       "runtime_sha256": "b0cffe23b6977447d2e4db514823fb6c3ce72466089303ae1affc903c4302a6e"
     },
     {
@@ -188,9 +148,7 @@
       "profile": "bounded-native-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "242357dbe06d4dc5493984538a719ef1ae8517880643234625ce8e8334646162",
-      "allowed_paths": [
-        "service-map.json"
-      ],
+      "allowed_paths": ["service-map.json"],
       "runtime_sha256": "6325563535952a1fe4655ade190a2f46128c314e2ac226696de26d9f9a517277"
     },
     {
@@ -199,9 +157,7 @@
       "profile": "bounded-native-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "e1f81a9f48be79ef894eb1a09a59b9c6ac45e16c2109823dffc46a04dfef26e0",
-      "allowed_paths": [
-        "shipping.py"
-      ],
+      "allowed_paths": ["shipping.py"],
       "runtime_sha256": "6a8cc0ab7e1e88fed8f7f6599eb7b3a19037bb01bd77145c74c76a06775a4f8d"
     },
     {
@@ -210,9 +166,7 @@
       "profile": "bounded-native-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "cd8581898f9c19c7c451b6f826583e7148a053d761d6e47694a8fd064c0c94b8",
-      "allowed_paths": [
-        "ledger.py"
-      ],
+      "allowed_paths": ["ledger.py"],
       "runtime_sha256": "6864eb5ac09febde80c0d0f3c6dcd239655b8bb70c8d6d95236e47ea30ef1c56"
     },
     {
@@ -221,9 +175,7 @@
       "profile": "bounded-native-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "1235747acdcfd48cf2b0b72361a293459ba7a26d453c89957c62db2b079932d5",
-      "allowed_paths": [
-        "cache.py"
-      ],
+      "allowed_paths": ["cache.py"],
       "runtime_sha256": "e3a6a43f17cc46455f463c233882013fea4804cc0255d668a1773d9b83b38684"
     },
     {
@@ -232,9 +184,7 @@
       "profile": "stall-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "b376e14a19461040e3d3ad18294ebce267be72b9611175777ff6172e3236e5cc",
-      "allowed_paths": [
-        "dependency-blocker.json"
-      ],
+      "allowed_paths": ["dependency-blocker.json"],
       "runtime_sha256": "7a85ad2e495376ebf9298bc25fa6d534fb353e865548b29ecf41b33890d9595d",
       "diagnostic_dependency": "archive_codec_unavailable",
       "required_diagnostic_attempts": 1,
@@ -247,9 +197,7 @@
       "profile": "stall-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "2cf947770bc2512b7a3eacdec945e2dae51c985fe4809becd42be8f6b2def89c",
-      "allowed_paths": [
-        "incident.json"
-      ],
+      "allowed_paths": ["incident.json"],
       "runtime_sha256": "443df09a2277ef7c0d27dcde86335093569c8eae0a681cbdc8bc4b5cdad8d1dc"
     },
     {
@@ -258,9 +206,7 @@
       "profile": "stall-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "242357dbe06d4dc5493984538a719ef1ae8517880643234625ce8e8334646162",
-      "allowed_paths": [
-        "service-map.json"
-      ],
+      "allowed_paths": ["service-map.json"],
       "runtime_sha256": "c645c1324cffbafa758a0a64dafa2cf5944a404f016321c7f6dde7bcc46aaa06"
     },
     {
@@ -269,9 +215,7 @@
       "profile": "stall-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "e1f81a9f48be79ef894eb1a09a59b9c6ac45e16c2109823dffc46a04dfef26e0",
-      "allowed_paths": [
-        "shipping.py"
-      ],
+      "allowed_paths": ["shipping.py"],
       "runtime_sha256": "d6ad805d0289300b1f6ab5a3465521edeb228a2d1e5f018521c0299351141a1d"
     },
     {
@@ -280,9 +224,7 @@
       "profile": "stall-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "cd8581898f9c19c7c451b6f826583e7148a053d761d6e47694a8fd064c0c94b8",
-      "allowed_paths": [
-        "ledger.py"
-      ],
+      "allowed_paths": ["ledger.py"],
       "runtime_sha256": "66cfe9b50ea94015ea95ff7af3d7c499f3421eb64a4bed0e0184be77eb59ca99"
     },
     {
@@ -291,9 +233,7 @@
       "profile": "stall-v1",
       "baseline": "6a409326aeb1a0848b789ec0624a6ffc5042959a",
       "task_sha256": "1235747acdcfd48cf2b0b72361a293459ba7a26d453c89957c62db2b079932d5",
-      "allowed_paths": [
-        "cache.py"
-      ],
+      "allowed_paths": ["cache.py"],
       "runtime_sha256": "ff00fa1d59cb837244224b8f4e1b720be796740d7e6b79f5b1cf6f8bcc203972"
     }
   ],

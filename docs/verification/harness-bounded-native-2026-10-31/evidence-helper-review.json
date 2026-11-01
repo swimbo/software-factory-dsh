@@ -11,13 +11,7 @@
   },
   "intent": "Publish reproducible offline comparison and operator preservation/checkpoint-hash helpers for the completed bounded experiment; preserve unknown usage, honest denominators and safe bounded file collection without changing production runtime.",
   "intent_confidence": "explicit",
-  "reviewers": [
-    "correctness",
-    "security",
-    "testing",
-    "reliability",
-    "adversarial"
-  ],
+  "reviewers": ["correctness", "security", "testing", "reliability", "adversarial"],
   "findings": [],
   "actionable_findings": [],
   "triage_groups": [],
@@ -46,15 +40,8 @@
   ],
   "coverage": {
     "depth": "full",
-    "independent_reviewers": [
-      "correctness",
-      "security",
-      "testing"
-    ],
-    "inline_reviewers": [
-      "reliability",
-      "adversarial"
-    ],
+    "independent_reviewers": ["correctness", "security", "testing"],
+    "inline_reviewers": ["reliability", "adversarial"],
     "independence_degraded": true,
     "notes": [
       "Only five explicitly named new evidence helpers reviewed; production runtime and generated receipt data excluded. Original project base049e51a; untracked helper bytes included by caller instruction.",

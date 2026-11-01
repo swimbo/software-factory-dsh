@@ -5,24 +5,9 @@
   "scope": "Bounded final report/data consistency and public-evidence review; no source edits, new whole review, SSH or paid execution.",
   "verified": {
     "trials": 24,
-    "frozen_strict_acceptance": [
-      4,
-      4,
-      4,
-      5
-    ],
-    "contract_reconciled_acceptance": [
-      5,
-      5,
-      5,
-      6
-    ],
-    "profile_order": [
-      "baseline",
-      "context-v1",
-      "bounded-native-v1",
-      "stall-v1"
-    ],
+    "frozen_strict_acceptance": [4, 4, 4, 5],
+    "contract_reconciled_acceptance": [5, 5, 5, 6],
+    "profile_order": ["baseline", "context-v1", "bounded-native-v1", "stall-v1"],
     "overlay": "Only accepted changes in four original dependency trial rows; original accepted copied into frozen_strict_accepted and grade_version added to all rows. All original trial fields, candidate archive hashes, original score file hash and consumed requests remain unchanged.",
     "supplemental_output_checks": "All four original dependency JSON outputs pass task-required field checks; two frozen exact-key oracle false negatives recorded. Matches independently audited executed-action diagnostic receipts.",
     "comparison_reproduction": "Public compare.py independently executed; parsed output exactly equals comparison.json, and both split comparison files match their branches.",

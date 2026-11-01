@@ -6,9 +6,7 @@
   "paths": {
     "/api/conversations/{conversation_id}/events": {
       "get": {
-        "tags": [
-          "Events"
-        ],
+        "tags": ["Events"],
         "summary": "Batch Get Conversation Events",
         "description": "Get a batch of local events given their ids, returning null for any\nmissing item.",
         "operationId": "batch_get_conversation_events_api_conversations__conversation_id__events_get",
@@ -78,9 +76,7 @@
         }
       },
       "post": {
-        "tags": [
-          "Events"
-        ],
+        "tags": ["Events"],
         "summary": "Send Message",
         "description": "Send a message to a conversation.\n\nIf starting the run returns 429, the message is already saved. Retry the\nconversation's /run endpoint instead of resending the message.",
         "operationId": "send_message_api_conversations__conversation_id__events_post",
@@ -140,9 +136,7 @@
     },
     "/api/conversations/{conversation_id}/events/search": {
       "get": {
-        "tags": [
-          "Events"
-        ],
+        "tags": ["Events"],
         "summary": "Search Conversation Events",
         "description": "Search / List local events",
         "operationId": "search_conversation_events_api_conversations__conversation_id__events_search_get",
@@ -314,12 +308,7 @@
       "properties": {
         "role": {
           "type": "string",
-          "enum": [
-            "user",
-            "system",
-            "assistant",
-            "tool"
-          ],
+          "enum": ["user", "system", "assistant", "tool"],
           "title": "Role",
           "default": "user"
         },
@@ -350,10 +339,7 @@
     },
     "EventSortOrder": {
       "type": "string",
-      "enum": [
-        "TIMESTAMP",
-        "TIMESTAMP_DESC"
-      ],
+      "enum": ["TIMESTAMP", "TIMESTAMP_DESC"],
       "title": "EventSortOrder",
       "description": "Enum for event sorting options."
     },
@@ -371,12 +357,7 @@
         },
         "source": {
           "type": "string",
-          "enum": [
-            "agent",
-            "user",
-            "environment",
-            "hook"
-          ],
+          "enum": ["agent", "user", "environment", "hook"],
           "title": "Source",
           "default": "agent"
         },
@@ -504,14 +485,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "thought",
-        "tool_name",
-        "tool_call_id",
-        "tool_call",
-        "llm_response_id",
-        "kind"
-      ],
+      "required": ["thought", "tool_name", "tool_call_id", "tool_call", "llm_response_id", "kind"],
       "title": "ActionEvent"
     },
     "ObservationEvent": {
@@ -528,12 +502,7 @@
         },
         "source": {
           "type": "string",
-          "enum": [
-            "agent",
-            "user",
-            "environment",
-            "hook"
-          ],
+          "enum": ["agent", "user", "environment", "hook"],
           "title": "Source",
           "default": "environment"
         },
@@ -584,13 +553,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "tool_name",
-        "tool_call_id",
-        "observation",
-        "action_id",
-        "kind"
-      ],
+      "required": ["tool_name", "tool_call_id", "observation", "action_id", "kind"],
       "title": "ObservationEvent"
     },
     "TerminalObservation": {
@@ -670,10 +633,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "command",
-        "kind"
-      ],
+      "required": ["command", "kind"],
       "title": "TerminalObservation",
       "description": "A ToolResult that can be rendered as a CLI output."
     },
@@ -697,9 +657,7 @@
       },
       "additionalProperties": false,
       "type": "object",
-      "required": [
-        "text"
-      ],
+      "required": ["text"],
       "title": "TextContent"
     },
     "Success": {

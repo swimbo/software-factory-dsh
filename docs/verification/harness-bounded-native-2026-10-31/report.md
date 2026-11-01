@@ -4,11 +4,11 @@ The authorized bounded-native-v1 sandbox pilot completed: 18/18 independently ac
 
 ## Measured comparison
 
-| Profile | Accepted | Requests | Total prompt tokens including reported cache | Median workflow seconds |
-|---|---:|---:|---:|---:|
-| Original baseline (corrected) | 18/18 | 107 | 1,088,401 | 44.451 |
-| context-v1 | 18/18 | 103 | 605,900 | 44.433 |
-| context-v1 + bounded-native-v1 | 18/18 | 105 | 620,807 | 44.397 |
+| Profile                        | Accepted | Requests | Total prompt tokens including reported cache | Median workflow seconds |
+| ------------------------------ | -------: | -------: | -------------------------------------------: | ----------------------: |
+| Original baseline (corrected)  |    18/18 |      107 |                                    1,088,401 |                  44.451 |
+| context-v1                     |    18/18 |      103 |                                      605,900 |                  44.433 |
+| context-v1 + bounded-native-v1 |    18/18 |      105 |                                      620,807 |                  44.397 |
 
 Prompt tokens per accepted task were 43.0% lower than the corrected original baseline. Against context-v1 alone, they were 2.5% higher; this run demonstrated no incremental token saving from bounded execution. Median workflow latency changed by -0.1% versus the original baseline. Full wire usage coverage: True; gateway/reservation parity: True. Reported cached-read share: 84.2%. Reservations totaled $4.953947; actual provider charges remain unknown and this is not a hard charge cap. Paid canary consumption is separate: eight requests and $0.425619 estimated reservations.
 

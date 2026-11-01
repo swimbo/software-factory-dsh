@@ -1,0 +1,8 @@
+{
+  "ssh_host": "hermes-control",
+  "control_dir": "/home/bo/.local/share/stapled-factory-control",
+  "signer": "/Users/bo/.local/share/stapled-factory-release/keys/image-approval.pem",
+  "runs_dir": "/Users/bo/.local/share/stapled-factory-operator/runs",
+  "ingress_port": 19081,
+  "raw_ingress_port": 18080
+}

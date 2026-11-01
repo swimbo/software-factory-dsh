@@ -10,10 +10,7 @@
     "dispatch_unix": 1793499005.3503294,
     "sdk_create_response_utc": "2026-11-01T02:10:14.939Z",
     "collection_finish_unix": 1793499015.1733298,
-    "gateway_response_completion_utc": [
-      "2026-11-01T02:10:23Z",
-      "2026-11-01T02:10:25Z"
-    ]
+    "gateway_response_completion_utc": ["2026-11-01T02:10:23Z", "2026-11-01T02:10:25Z"]
   },
   "original_stopped_and_fenced": true,
   "root_reserved_unknown_retained": true,

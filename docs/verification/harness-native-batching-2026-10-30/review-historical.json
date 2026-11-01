@@ -36,16 +36,12 @@
       ],
       "file": "stapled-factory/worker/deadline_watchdog.py",
       "first_evidence": "stapled-factory/worker/deadline_watchdog.py:223 --     status=_bound(store,record)",
-      "independent_reviewers": [
-        "reliability"
-      ],
+      "independent_reviewers": ["reliability"],
       "line": 223,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "reliability"
-      ],
+      "reviewers": ["reliability"],
       "severity": "P1",
       "suggested_fix": "After validating the private deadline record and both original container identities/lifecycles, arrange independent best-effort stops for worker and proxy even if ledger lookup or durable fencing fails. Bound ledger-lock acquisition so it cannot indefinitely delay these stops; preserve the ledger and report incomplete fencing without permitting completion/replay. Add tests for a quarantined anchor and unavailable/held ledger lock at expiry, asserting both original containers stop and evidence remains retained.",
       "title": "Stop original containers when deadline ledger validation fails",
@@ -114,16 +110,12 @@
       ],
       "file": "stapled-factory/worker/deadline_watchdog.py",
       "first_evidence": "stapled-factory/worker/deadline_watchdog.py:223 --     status=_bound(store,record)",
-      "independent_reviewers": [
-        "reliability"
-      ],
+      "independent_reviewers": ["reliability"],
       "line": 223,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "reliability"
-      ],
+      "reviewers": ["reliability"],
       "severity": "P1",
       "suggested_fix": "After validating the private deadline record and both original container identities/lifecycles, arrange independent best-effort stops for worker and proxy even if ledger lookup or durable fencing fails. Bound ledger-lock acquisition so it cannot indefinitely delay these stops; preserve the ledger and report incomplete fencing without permitting completion/replay. Add tests for a quarantined anchor and unavailable/held ledger lock at expiry, asserting both original containers stop and evidence remains retained.",
       "title": "Stop original containers when deadline ledger validation fails",

@@ -7,9 +7,7 @@
   "reason": "Canonical gateway observation was initially incomplete; later read-only reconciliation found the final row. No model/tool/controller execution was repeated.",
   "initial_gateway_rows": 11,
   "final_gateway_rows": 12,
-  "new_gateway_row_ids": [
-    "9f4a2e41-1c89-4e5e-be1c-53c0e62083c1"
-  ],
+  "new_gateway_row_ids": ["9f4a2e41-1c89-4e5e-be1c-53c0e62083c1"],
   "gateway": [
     {
       "id": "c13e5305-c560-44ec-92a7-582bfb3c0b80",

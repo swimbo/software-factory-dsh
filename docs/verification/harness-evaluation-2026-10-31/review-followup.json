@@ -39,10 +39,7 @@
     "command_and_capture_argv_supported": true,
     "malformed_syntax_unknown": true,
     "candidate_export_recovery": "Actual scratch Git repository: first collection failed after frozen export; subsequent collect reused saved elapsed metadata and same exact candidate receipt/path without re-export; independent checker accepted retainedbytes. No model/SDK/tool rerun.",
-    "probe_paths": [
-      "/tmp/eval-live-paired-probe.py",
-      "/tmp/eval-export-recovery-probe.py"
-    ]
+    "probe_paths": ["/tmp/eval-live-paired-probe.py", "/tmp/eval-export-recovery-probe.py"]
   },
   "source_sha256": {
     "stapled-factory/deployment/nuc/evaluation_trials.py": "a37741bdc2019780c88db60928c030d3848485680fb8818aabd8f6c6b881d298",

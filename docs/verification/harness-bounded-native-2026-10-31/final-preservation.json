@@ -1317,102 +1317,30 @@
     }
   },
   "paired_and_paid_canary_attempts": [
-    [
-      "b9d3-20261031-discovery-r1:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-discovery-r2-p2:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-discovery-r2:0",
-      "reserved"
-    ],
-    [
-      "b9d3-20261031-discovery-r3:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-failing-tests-r1:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-failing-tests-r2:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-failing-tests-r3:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-multi-file-r1:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-multi-file-r2:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-multi-file-r3:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-noisy-output-r1-p2:0",
-      "reserved"
-    ],
-    [
-      "b9d3-20261031-noisy-output-r1-p3:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-noisy-output-r1:0",
-      "reserved"
-    ],
-    [
-      "b9d3-20261031-noisy-output-r2:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-noisy-output-r3:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-small-edit-r1:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-small-edit-r2:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-small-edit-r3:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-stalled-run-r1-p2:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-stalled-run-r1:0",
-      "reserved"
-    ],
-    [
-      "b9d3-20261031-stalled-run-r2:0",
-      "completed"
-    ],
-    [
-      "b9d3-20261031-stalled-run-r3:0",
-      "completed"
-    ],
-    [
-      "b9d3-canary-20261031-p2:0",
-      "completed"
-    ],
-    [
-      "b9d3-canary-20261031:0",
-      "reserved"
-    ]
+    ["b9d3-20261031-discovery-r1:0", "completed"],
+    ["b9d3-20261031-discovery-r2-p2:0", "completed"],
+    ["b9d3-20261031-discovery-r2:0", "reserved"],
+    ["b9d3-20261031-discovery-r3:0", "completed"],
+    ["b9d3-20261031-failing-tests-r1:0", "completed"],
+    ["b9d3-20261031-failing-tests-r2:0", "completed"],
+    ["b9d3-20261031-failing-tests-r3:0", "completed"],
+    ["b9d3-20261031-multi-file-r1:0", "completed"],
+    ["b9d3-20261031-multi-file-r2:0", "completed"],
+    ["b9d3-20261031-multi-file-r3:0", "completed"],
+    ["b9d3-20261031-noisy-output-r1-p2:0", "reserved"],
+    ["b9d3-20261031-noisy-output-r1-p3:0", "completed"],
+    ["b9d3-20261031-noisy-output-r1:0", "reserved"],
+    ["b9d3-20261031-noisy-output-r2:0", "completed"],
+    ["b9d3-20261031-noisy-output-r3:0", "completed"],
+    ["b9d3-20261031-small-edit-r1:0", "completed"],
+    ["b9d3-20261031-small-edit-r2:0", "completed"],
+    ["b9d3-20261031-small-edit-r3:0", "completed"],
+    ["b9d3-20261031-stalled-run-r1-p2:0", "completed"],
+    ["b9d3-20261031-stalled-run-r1:0", "reserved"],
+    ["b9d3-20261031-stalled-run-r2:0", "completed"],
+    ["b9d3-20261031-stalled-run-r3:0", "completed"],
+    ["b9d3-canary-20261031-p2:0", "completed"],
+    ["b9d3-canary-20261031:0", "reserved"]
   ],
   "all_19_model_attempts_completed": true,
   "original_prebinding_failures_reserved": 5,

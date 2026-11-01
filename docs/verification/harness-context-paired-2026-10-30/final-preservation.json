@@ -820,82 +820,25 @@
     }
   },
   "paired_and_paid_canary_attempts": [
-    [
-      "c9d1-20261030-discovery-r1:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-discovery-r2:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-discovery-r3:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-failing-tests-r1:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-failing-tests-r2:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-failing-tests-r3:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-multi-file-r1:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-multi-file-r2:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-multi-file-r3:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-noisy-output-r1:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-noisy-output-r2:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-noisy-output-r3:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-small-edit-r1:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-small-edit-r2:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-small-edit-r3:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-stalled-run-r1:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-stalled-run-r2:0",
-      "completed"
-    ],
-    [
-      "c9d1-20261030-stalled-run-r3:0",
-      "completed"
-    ],
-    [
-      "c9d1-canary-20261030:0",
-      "completed"
-    ]
+    ["c9d1-20261030-discovery-r1:0", "completed"],
+    ["c9d1-20261030-discovery-r2:0", "completed"],
+    ["c9d1-20261030-discovery-r3:0", "completed"],
+    ["c9d1-20261030-failing-tests-r1:0", "completed"],
+    ["c9d1-20261030-failing-tests-r2:0", "completed"],
+    ["c9d1-20261030-failing-tests-r3:0", "completed"],
+    ["c9d1-20261030-multi-file-r1:0", "completed"],
+    ["c9d1-20261030-multi-file-r2:0", "completed"],
+    ["c9d1-20261030-multi-file-r3:0", "completed"],
+    ["c9d1-20261030-noisy-output-r1:0", "completed"],
+    ["c9d1-20261030-noisy-output-r2:0", "completed"],
+    ["c9d1-20261030-noisy-output-r3:0", "completed"],
+    ["c9d1-20261030-small-edit-r1:0", "completed"],
+    ["c9d1-20261030-small-edit-r2:0", "completed"],
+    ["c9d1-20261030-small-edit-r3:0", "completed"],
+    ["c9d1-20261030-stalled-run-r1:0", "completed"],
+    ["c9d1-20261030-stalled-run-r2:0", "completed"],
+    ["c9d1-20261030-stalled-run-r3:0", "completed"],
+    ["c9d1-canary-20261030:0", "completed"]
   ],
   "all_19_real_attempts_completed": true,
   "original_task_service_binding_restored": true,

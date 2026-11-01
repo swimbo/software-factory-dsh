@@ -45,8 +45,7 @@
   "primary_improvement_fraction": 0.44331179409059707,
   "median_workflow_latency_change_fraction": -0.00040494027130999477,
   "exploratory_six_task_cluster_bootstrap_95_improvement_interval": [
-    0.4162394225534415,
-    0.47375078234211676
+    0.4162394225534415, 0.47375078234211676
   ],
   "actual_model_route_same_all_pairs": true,
   "all_trial_boundaries_and_restoration_passed": true,
@@ -106,16 +105,8 @@
       "task_id": "discovery",
       "baseline_accepted": 3,
       "candidate_accepted": 3,
-      "baseline_requests": [
-        6,
-        5,
-        7
-      ],
-      "candidate_requests": [
-        7,
-        5,
-        6
-      ],
+      "baseline_requests": [6, 5, 7],
+      "candidate_requests": [7, 5, 6],
       "baseline_prompt_tokens": 185045,
       "candidate_prompt_tokens": 108904,
       "median_candidate_elapsed_s": 44.377
@@ -124,16 +115,8 @@
       "task_id": "small-edit",
       "baseline_accepted": 3,
       "candidate_accepted": 3,
-      "baseline_requests": [
-        6,
-        6,
-        7
-      ],
-      "candidate_requests": [
-        6,
-        6,
-        6
-      ],
+      "baseline_requests": [6, 6, 7],
+      "candidate_requests": [6, 6, 6],
       "baseline_prompt_tokens": 196518,
       "candidate_prompt_tokens": 106037,
       "median_candidate_elapsed_s": 44.953
@@ -142,16 +125,8 @@
       "task_id": "multi-file",
       "baseline_accepted": 3,
       "candidate_accepted": 3,
-      "baseline_requests": [
-        5,
-        5,
-        7
-      ],
-      "candidate_requests": [
-        5,
-        5,
-        5
-      ],
+      "baseline_requests": [5, 5, 7],
+      "candidate_requests": [5, 5, 5],
       "baseline_prompt_tokens": 172816,
       "candidate_prompt_tokens": 85578,
       "median_candidate_elapsed_s": 44.621
@@ -160,16 +135,8 @@
       "task_id": "failing-tests",
       "baseline_accepted": 3,
       "candidate_accepted": 3,
-      "baseline_requests": [
-        6,
-        6,
-        6
-      ],
-      "candidate_requests": [
-        6,
-        6,
-        6
-      ],
+      "baseline_requests": [6, 6, 6],
+      "candidate_requests": [6, 6, 6],
       "baseline_prompt_tokens": 183186,
       "candidate_prompt_tokens": 109548,
       "median_candidate_elapsed_s": 44.244
@@ -178,16 +145,8 @@
       "task_id": "noisy-output",
       "baseline_accepted": 3,
       "candidate_accepted": 3,
-      "baseline_requests": [
-        6,
-        6,
-        6
-      ],
-      "candidate_requests": [
-        7,
-        6,
-        5
-      ],
+      "baseline_requests": [6, 6, 6],
+      "candidate_requests": [7, 6, 5],
       "baseline_prompt_tokens": 181680,
       "candidate_prompt_tokens": 106482,
       "median_candidate_elapsed_s": 44.356
@@ -196,16 +155,8 @@
       "task_id": "stalled-run",
       "baseline_accepted": 3,
       "candidate_accepted": 3,
-      "baseline_requests": [
-        6,
-        6,
-        5
-      ],
-      "candidate_requests": [
-        6,
-        5,
-        5
-      ],
+      "baseline_requests": [6, 6, 5],
+      "candidate_requests": [6, 5, 5],
       "baseline_prompt_tokens": 169156,
       "candidate_prompt_tokens": 89351,
       "median_candidate_elapsed_s": 45.442
@@ -229,23 +180,11 @@
       "candidate_agent_span_s": 10.058013,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": false
     },
@@ -266,28 +205,12 @@
       "candidate_agent_span_s": 8.896553,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -308,28 +231,12 @@
       "candidate_agent_span_s": 9.155113,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -350,23 +257,11 @@
       "candidate_agent_span_s": 7.759785,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": false
     },
@@ -387,28 +282,12 @@
       "candidate_agent_span_s": 9.134553,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -429,18 +308,10 @@
       "candidate_agent_span_s": 8.048684,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -461,18 +332,10 @@
       "candidate_agent_span_s": 7.421257,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -493,28 +356,12 @@
       "candidate_agent_span_s": 8.450966,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -535,28 +382,12 @@
       "candidate_agent_span_s": 7.864244,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -577,28 +408,12 @@
       "candidate_agent_span_s": 9.549298,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -619,23 +434,11 @@
       "candidate_agent_span_s": 8.347184,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": false
     },
@@ -656,23 +459,11 @@
       "candidate_agent_span_s": 6.749957,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": false
     },
@@ -693,28 +484,12 @@
       "candidate_agent_span_s": 9.212552,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -735,23 +510,11 @@
       "candidate_agent_span_s": 8.356578,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": false
     },
@@ -772,23 +535,11 @@
       "candidate_agent_span_s": 7.095363,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": false
     },
@@ -809,28 +560,12 @@
       "candidate_agent_span_s": 7.543163,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     },
@@ -851,23 +586,11 @@
       "candidate_agent_span_s": 7.835219,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-high",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ],
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-high", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"],
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": false
     },
@@ -888,18 +611,10 @@
       "candidate_agent_span_s": 6.935161,
       "actual_route_same": true,
       "baseline_routes": [
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "candidate_routes": [
-        [
-          "ollama-flash-low",
-          "deepseek-v4.1-flash:1017",
-          "deepseek-v4.1-flash:1017"
-        ]
+        ["ollama-flash-low", "deepseek-v4.1-flash:1017", "deepseek-v4.1-flash:1017"]
       ],
       "exact_provider_lane_sets_same": true
     }

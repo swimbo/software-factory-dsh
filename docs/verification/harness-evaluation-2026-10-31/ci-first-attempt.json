@@ -6,13 +6,7 @@
   "steps": [
     {
       "name": "secrets",
-      "command": [
-        "gitleaks",
-        "dir",
-        ".",
-        "--redact",
-        "--no-banner"
-      ],
+      "command": ["gitleaks", "dir", ".", "--redact", "--no-banner"],
       "exit_code": 0,
       "log_sha256": "63e5dad8a3a7074bff346451580f8c7174315797a1ae59958f7030a83ff41bcd"
     },

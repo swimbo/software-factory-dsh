@@ -4,10 +4,7 @@
   "repeat": 3,
   "baseline": "e25eb19801c9a82b5255ecaccc35ce6e0677e91f",
   "task_sha256": "32f826ffef72725a2cf1a7559b2e9fc0ff76ce1ff892bb64587211ab02bcaa40",
-  "allowed_paths": [
-    "catalog.py",
-    "app.py"
-  ],
+  "allowed_paths": ["catalog.py", "app.py"],
   "runtime_sha256": "2187134919e35862af5930ba79a70b4c7a96860aa0d489c1170696466fdb2711",
   "state": {
     "stage": "needs_validation",
@@ -36,10 +33,7 @@
     }
   },
   "revision": "8c1e11c3e0a9dcde02d470e3ef5c102490bd2896",
-  "changed": [
-    "app.py",
-    "catalog.py"
-  ],
+  "changed": ["app.py", "catalog.py"],
   "accepted": true,
   "task_wall_elapsed_s": 44.324,
   "budget": {

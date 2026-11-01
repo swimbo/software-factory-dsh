@@ -37,16 +37,12 @@
       ],
       "file": "stapled-factory/worker/stall_observation.py",
       "first_evidence": "stapled-factory/worker/stall_observation.py:40 -- latest={'_source_id':_digest(event.get('id')),'seq':seq,'at_seconds':elapsed,'complete':True,",
-      "independent_reviewers": [
-        "adversarial"
-      ],
+      "independent_reviewers": ["adversarial"],
       "line": 40,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "adversarial"
-      ],
+      "reviewers": ["adversarial"],
       "severity": "P1",
       "suggested_fix": "Carry a durable cursor for all inspected SDK observations and account for every newly completed result before classifying a repeated failure. If current workspace state cannot be attributed to skipped historical results, conservatively clear the detection window whenever those skipped results include a successful investigation or changed diagnostic evidence instead of treating sampled failures as consecutive. Add an integration regression with error/poll, then unique successful diagnostic plus same error/poll repeated at least four times; it must neither intervene nor fence.",
       "title": "Sampling hides new diagnostics and fences productive work",
@@ -70,16 +66,12 @@
       ],
       "file": "stapled-factory/worker/stall_observation.py",
       "first_evidence": "stapled-factory/worker/stall_observation.py:40 -- latest={'_source_id':_digest(event.get('id')),'seq':seq,'at_seconds':elapsed,'complete':True,",
-      "independent_reviewers": [
-        "adversarial"
-      ],
+      "independent_reviewers": ["adversarial"],
       "line": 40,
       "owner": "downstream-resolver",
       "pre_existing": false,
       "requires_verification": true,
-      "reviewers": [
-        "adversarial"
-      ],
+      "reviewers": ["adversarial"],
       "severity": "P1",
       "suggested_fix": "Carry a durable cursor for all inspected SDK observations and account for every newly completed result before classifying a repeated failure. If current workspace state cannot be attributed to skipped historical results, conservatively clear the detection window whenever those skipped results include a successful investigation or changed diagnostic evidence instead of treating sampled failures as consecutive. Add an integration regression with error/poll, then unique successful diagnostic plus same error/poll repeated at least four times; it must neither intervene nor fence.",
       "title": "Sampling hides new diagnostics and fences productive work",

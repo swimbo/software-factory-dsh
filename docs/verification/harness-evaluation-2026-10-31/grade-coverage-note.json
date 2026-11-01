@@ -58,13 +58,7 @@
       "source_of_facts": "Parent-supplied inspection metadata only; reviewer did not read private oracle/candidate or SSH.",
       "given_facts": {
         "frozen_oracle_passed": false,
-        "candidate_keys": [
-          "attempts",
-          "dependency",
-          "diagnostic",
-          "error",
-          "status"
-        ],
+        "candidate_keys": ["attempts", "dependency", "diagnostic", "error", "status"],
         "required_status_matches": true,
         "required_dependency_matches": true,
         "additional_keys_prohibited_by_task": false,

@@ -16,10 +16,7 @@
   },
   "intent": "Prevent diagnostic delivery to an SDK loop already observed inactive, preserve independently verified completion at terminal boundaries, and contain an inactive post-delivery loop without /run, retry or resume. Use a versioned three-failure/four-second runtime policy while retaining the one-shot intent and original allocation lifecycle.",
   "intent_confidence": "explicit",
-  "reviewers": [
-    "correctness",
-    "adversarial"
-  ],
+  "reviewers": ["correctness", "adversarial"],
   "findings": [],
   "actionable_findings": [],
   "triage_groups": [],

@@ -12,19 +12,19 @@ Scoped evidence/accounting/model-matching gate passed: **True**.
 
 ## Paired results
 
-| Metric | Frozen baseline | Context-v1 |
-| --- | ---: | ---: |
-| Contract-corrected acceptance | 18/18 | 18/18 |
-| Total prompt tokens, including cache | 1,088,401 | 605,900 |
-| Uncached input tokens | 79,889 | 70,066 |
-| Cached-read tokens | 1,008,512 | 535,834 |
-| Output tokens | 19,714 | 20,392 |
-| Worker requests | 107 | 103 |
-| Requests per accepted task | 5.944 | 5.722 |
-| Median workflow elapsed | 44.451 s | 44.433 s |
-| Median agent event span | 12.184 s | 8.198 s |
-| Reported cached-read share | 92.66% | 88.44% |
-| Estimated reservations | $7.610171 | $4.843708 |
+| Metric                               | Frozen baseline | Context-v1 |
+| ------------------------------------ | --------------: | ---------: |
+| Contract-corrected acceptance        |           18/18 |      18/18 |
+| Total prompt tokens, including cache |       1,088,401 |    605,900 |
+| Uncached input tokens                |          79,889 |     70,066 |
+| Cached-read tokens                   |       1,008,512 |    535,834 |
+| Output tokens                        |          19,714 |     20,392 |
+| Worker requests                      |             107 |        103 |
+| Requests per accepted task           |           5.944 |      5.722 |
+| Median workflow elapsed              |        44.451 s |   44.433 s |
+| Median agent event span              |        12.184 s |    8.198 s |
+| Reported cached-read share           |          92.66% |     88.44% |
+| Estimated reservations               |       $7.610171 |  $4.843708 |
 
 All trial consumption is included, including any failed/exhausted attempts; no
 model trial was rerun or budget reset. Estimated reservations are admission
@@ -32,14 +32,14 @@ estimates, **not actual charges or verified dollar savings**. Actual billing is
 unknown. Workflow latency includes provisioning/reconciliation polling; agent
 event span is reported separately.
 
-| Task | Baseline / candidate accepted | Baseline requests (r1,r2,r3) | Candidate requests (r1,r2,r3) | Baseline / candidate prompt tokens |
-| --- | --- | --- | --- | --- |
-| discovery | 3/3 / 3/3 | 6, 5, 7 | 7, 5, 6 | 185,045 / 108,904 |
-| small-edit | 3/3 / 3/3 | 6, 6, 7 | 6, 6, 6 | 196,518 / 106,037 |
-| multi-file | 3/3 / 3/3 | 5, 5, 7 | 5, 5, 5 | 172,816 / 85,578 |
-| failing-tests | 3/3 / 3/3 | 6, 6, 6 | 6, 6, 6 | 183,186 / 109,548 |
-| noisy-output | 3/3 / 3/3 | 6, 6, 6 | 7, 6, 5 | 181,680 / 106,482 |
-| stalled-run | 3/3 / 3/3 | 6, 6, 5 | 6, 5, 5 | 169,156 / 89,351 |
+| Task          | Baseline / candidate accepted | Baseline requests (r1,r2,r3) | Candidate requests (r1,r2,r3) | Baseline / candidate prompt tokens |
+| ------------- | ----------------------------- | ---------------------------- | ----------------------------- | ---------------------------------- |
+| discovery     | 3/3 / 3/3                     | 6, 5, 7                      | 7, 5, 6                       | 185,045 / 108,904                  |
+| small-edit    | 3/3 / 3/3                     | 6, 6, 7                      | 6, 6, 6                       | 196,518 / 106,037                  |
+| multi-file    | 3/3 / 3/3                     | 5, 5, 7                      | 5, 5, 5                       | 172,816 / 85,578                   |
+| failing-tests | 3/3 / 3/3                     | 6, 6, 6                      | 6, 6, 6                       | 183,186 / 109,548                  |
+| noisy-output  | 3/3 / 3/3                     | 6, 6, 6                      | 7, 6, 5                       | 181,680 / 106,482                  |
+| stalled-run   | 3/3 / 3/3                     | 6, 6, 5                      | 6, 5, 5                       | 169,156 / 89,351                   |
 
 Every pair uses the same seed revision
 `e25eb19801c9a82b5255ecaccc35ce6e0677e91f`, byte-identical task text, allowed paths,

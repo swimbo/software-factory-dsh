@@ -70,9 +70,7 @@
       "adversarial"
     ],
     "confirmed_findings": 1,
-    "applied_findings": [
-      1
-    ],
+    "applied_findings": [1],
     "residual_findings": 0,
     "fix": "Require explicit final output-token usage; preserve initial counts only as partial observations.",
     "fix_proof": "Missing final usage test failed before fix and passed after; sink failure and upstream interruption integration cases pass.",

@@ -1,0 +1,280 @@
+/**
+ * The schema, and the constraints that make dishonest states unrepresentable.
+ *
+ * These are not documentation — they are enforced by SQLite itself, so a bug in
+ * a later phase cannot write a "passed" verdict without a receipt, cannot edit
+ * the ledger, and cannot hold two leases on one unit. Appendix D of
+ * `data-map.md` lists the invariants; the comments here name the ones that are
+ * enforced at this layer rather than in code.
+ */
+
+export const SCHEMA_VERSION = 1;
+
+/** Pragmas that are mandatory, not advisory (`tech-guide.md` §10). */
+export const REQUIRED_PRAGMAS: ReadonlyArray<readonly [string, string]> = [
+  // WAL: concurrent readers (status page) alongside the control plane.
+  ['journal_mode', 'WAL'],
+  // FULL: NORMAL gives up commit durability on power loss; the ledger is the product.
+  ['synchronous', 'FULL'],
+  // Default busy timeout is 0 → instant SQLITE_BUSY under any contention.
+  ['busy_timeout', '5000'],
+  ['foreign_keys', 'ON'],
+  // Keep the temp store off disk-backed page cache surprises and bound WAL growth.
+  ['wal_autocheckpoint', '1000'],
+];
+
+export const SCHEMA_SQL = /* sql */ `
+-- ---------------------------------------------------------------- migrations
+CREATE TABLE IF NOT EXISTS schema_migration (
+  version     INTEGER PRIMARY KEY,
+  applied_at  TEXT NOT NULL,
+  checksum    TEXT NOT NULL
+);
+
+-- --------------------------------------------------------------------- ledger
+-- I1: append-only. The triggers below make UPDATE/DELETE fail even for the
+-- process that owns the database, so "we did not modify history" is a fact.
+CREATE TABLE IF NOT EXISTS events (
+  seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id     TEXT NOT NULL UNIQUE,
+  type         TEXT NOT NULL,
+  occurred_at  TEXT NOT NULL,
+  actor        TEXT NOT NULL,
+  trace_id     TEXT NOT NULL,
+  payload      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_type_seq ON events(type, seq);
+CREATE INDEX IF NOT EXISTS events_trace ON events(trace_id);
+CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
+BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
+BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+
+-- ---------------------------------------------------------------------- units
+CREATE TABLE IF NOT EXISTS units (
+  unit_id             TEXT PRIMARY KEY,
+  slug                TEXT NOT NULL,
+  revision            INTEGER NOT NULL,
+  repo                TEXT NOT NULL,
+  base_rev            TEXT NOT NULL,
+  spec_hash           TEXT NOT NULL,
+  spec_json           TEXT NOT NULL,
+  state               TEXT NOT NULL CHECK (state IN (
+                        'submitted','qualified','lit_parked','dispatched','receipted',
+                        'verified','promoted','rejected','aborted','ambiguous')),
+  lane                TEXT CHECK (lane IN ('dark','lit','reject')),
+  current_mandate_id  TEXT,
+  attempt_count       INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  terminal_at         TEXT,
+  terminal_reason     TEXT,
+  -- I2: identity is (repo, slug, revision) — the same spec re-submitted is the
+  -- same unit, a changed spec under the same revision is a duplicate refusal.
+  UNIQUE (repo, slug, revision)
+);
+CREATE INDEX IF NOT EXISTS units_state ON units(state);
+CREATE INDEX IF NOT EXISTS units_lane_state ON units(lane, state);
+-- I3: a terminal unit never has a terminal_at-less row and vice versa.
+CREATE TRIGGER IF NOT EXISTS units_terminal_consistent BEFORE UPDATE ON units
+WHEN NEW.terminal_at IS NOT NULL AND NEW.state NOT IN ('promoted','rejected','aborted','lit_parked')
+BEGIN SELECT RAISE(ABORT, 'terminal_at set on a non-terminal unit state'); END;
+
+-- ------------------------------------------------------------------ mandates
+CREATE TABLE IF NOT EXISTS mandates (
+  mandate_id      TEXT PRIMARY KEY,
+  unit_id         TEXT NOT NULL REFERENCES units(unit_id),
+  policy_version  TEXT NOT NULL,
+  lane            TEXT NOT NULL CHECK (lane IN ('dark','lit')),
+  budget_usd      REAL NOT NULL CHECK (budget_usd >= 0),
+  issued_at       TEXT NOT NULL,
+  expires_at      TEXT NOT NULL,
+  revoked_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS mandates_unit ON mandates(unit_id);
+
+-- ------------------------------------------------------------ lane decisions
+CREATE TABLE IF NOT EXISTS lane_decisions (
+  decision_id     TEXT PRIMARY KEY,
+  unit_id         TEXT NOT NULL REFERENCES units(unit_id),
+  lane            TEXT NOT NULL CHECK (lane IN ('dark','lit','reject')),
+  score           REAL NOT NULL CHECK (score >= 0 AND score <= 100),
+  policy_version  TEXT NOT NULL,
+  signals_json    TEXT NOT NULL,
+  reasons_json    TEXT NOT NULL,
+  mandate_id      TEXT,
+  decided_at      TEXT NOT NULL,
+  -- I4: re-qualification under one policy is idempotent.
+  UNIQUE (unit_id, policy_version)
+);
+
+-- --------------------------------------------------------------------- leases
+-- I5: at most one live lease per unit. Partial unique index, not application logic.
+CREATE TABLE IF NOT EXISTS leases (
+  lease_id     TEXT PRIMARY KEY,
+  unit_id      TEXT NOT NULL REFERENCES units(unit_id),
+  owner        TEXT NOT NULL,
+  acquired_at  TEXT NOT NULL,
+  expires_at   TEXT NOT NULL,
+  released_at  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS leases_one_live_per_unit
+  ON leases(unit_id) WHERE released_at IS NULL;
+
+-- ------------------------------------------------------------------- attempts
+CREATE TABLE IF NOT EXISTS attempts (
+  attempt_id     TEXT PRIMARY KEY,
+  unit_id        TEXT NOT NULL REFERENCES units(unit_id),
+  lease_id       TEXT NOT NULL REFERENCES leases(lease_id),
+  state          TEXT NOT NULL CHECK (state IN (
+                   'planned','launching','running','produced-receipt','aborted','ambiguous')),
+  launch_key     TEXT NOT NULL UNIQUE,
+  session_id     TEXT,
+  attempt_dir    TEXT NOT NULL,
+  started_at     TEXT NOT NULL,
+  ended_at       TEXT,
+  exit_code      INTEGER
+);
+CREATE INDEX IF NOT EXISTS attempts_unit ON attempts(unit_id, started_at);
+CREATE INDEX IF NOT EXISTS attempts_state ON attempts(state);
+
+-- ------------------------------------------------------------------- receipts
+-- I6: the receipt is a fact bundle, append-only, addressed by its content hash.
+CREATE TABLE IF NOT EXISTS receipts (
+  receipt_id    TEXT PRIMARY KEY,
+  unit_id       TEXT NOT NULL REFERENCES units(unit_id),
+  attempt_id    TEXT NOT NULL REFERENCES attempts(attempt_id),
+  receipt_sha   TEXT NOT NULL UNIQUE,
+  session_id    TEXT NOT NULL,
+  exit_code     INTEGER,
+  started_at    TEXT NOT NULL,
+  ended_at      TEXT NOT NULL,
+  receipt_json  TEXT NOT NULL,
+  recorded_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS receipts_unit ON receipts(unit_id);
+CREATE TRIGGER IF NOT EXISTS receipts_no_update BEFORE UPDATE ON receipts
+BEGIN SELECT RAISE(ABORT, 'receipts is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS receipts_no_delete BEFORE DELETE ON receipts
+BEGIN SELECT RAISE(ABORT, 'receipts is append-only'); END;
+
+-- ------------------------------------------------------------------- verdicts
+-- I7: unknown cannot be stored as pass. A pass verdict needs a receipt, a
+-- measured Δ and a holdout revision — enforced by CHECK, not by convention.
+CREATE TABLE IF NOT EXISTS verdicts (
+  verdict_id        TEXT PRIMARY KEY,
+  unit_id           TEXT NOT NULL REFERENCES units(unit_id),
+  attempt_id        TEXT NOT NULL REFERENCES attempts(attempt_id),
+  receipt_id        TEXT REFERENCES receipts(receipt_id),
+  receipt_sha       TEXT,
+  holdout_revision  TEXT,
+  policy_version    TEXT NOT NULL,
+  wall_version      TEXT NOT NULL,
+  outcome           TEXT NOT NULL CHECK (outcome IN ('pass','fail','unknown')),
+  delta_checked     INTEGER NOT NULL CHECK (delta_checked IN (0,1)),
+  delta_observed    REAL,
+  reasons_json      TEXT NOT NULL,
+  scenarios_json    TEXT NOT NULL,
+  delta_json        TEXT NOT NULL,
+  evaluated_at      TEXT NOT NULL,
+  CHECK (
+    outcome <> 'pass' OR (
+      receipt_id IS NOT NULL
+      AND receipt_sha IS NOT NULL
+      AND holdout_revision IS NOT NULL
+      AND delta_checked = 1
+      AND delta_observed IS NOT NULL
+    )
+  )
+);
+CREATE INDEX IF NOT EXISTS verdicts_unit ON verdicts(unit_id, evaluated_at);
+CREATE TRIGGER IF NOT EXISTS verdicts_no_update BEFORE UPDATE ON verdicts
+BEGIN SELECT RAISE(ABORT, 'verdicts is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS verdicts_no_delete BEFORE DELETE ON verdicts
+BEGIN SELECT RAISE(ABORT, 'verdicts is append-only'); END;
+
+-- ------------------------------------------------------------------ promotions
+CREATE TABLE IF NOT EXISTS promotions (
+  promotion_id   TEXT PRIMARY KEY,
+  unit_id        TEXT NOT NULL REFERENCES units(unit_id),
+  verdict_id     TEXT NOT NULL REFERENCES verdicts(verdict_id),
+  verdict_sha    TEXT NOT NULL,
+  promotion_sha  TEXT NOT NULL,
+  signed_by      TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  -- I8: promoting the same verdict twice is the same promotion.
+  UNIQUE (unit_id, verdict_sha)
+);
+
+-- ----------------------------------------------------------- spend / envelopes
+CREATE TABLE IF NOT EXISTS spend_ledger (
+  spend_id     TEXT PRIMARY KEY,
+  unit_id      TEXT NOT NULL REFERENCES units(unit_id),
+  attempt_id   TEXT REFERENCES attempts(attempt_id),
+  kind         TEXT NOT NULL CHECK (kind IN ('reserved','estimate','measured','unknown')),
+  amount_usd   REAL CHECK (amount_usd IS NULL OR amount_usd >= 0),
+  recorded_at  TEXT NOT NULL,
+  -- I9: a reservation is written before dispatch; amount may be null (= unknown).
+  CHECK (kind <> 'reserved' OR amount_usd IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS spend_unit ON spend_ledger(unit_id);
+
+CREATE TABLE IF NOT EXISTS envelopes (
+  envelope_id     TEXT PRIMARY KEY,
+  scope           TEXT NOT NULL CHECK (scope IN ('per-unit','daily')),
+  amount_usd      REAL NOT NULL CHECK (amount_usd >= 0),
+  effective_from  TEXT NOT NULL,
+  supersedes      TEXT REFERENCES envelopes(envelope_id),
+  signed_by       TEXT NOT NULL,
+  reason          TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS credentials (
+  grant_id     TEXT PRIMARY KEY,
+  repo         TEXT NOT NULL,
+  ttl_seconds  INTEGER NOT NULL CHECK (ttl_seconds > 0 AND ttl_seconds <= 3600),
+  issued_by    TEXT NOT NULL,
+  issued_at    TEXT NOT NULL,
+  expires_at   TEXT NOT NULL,
+  revoked_at   TEXT
+);
+
+-- -------------------------------------------------------- effects (the outbox)
+-- I10: an effect is applied at most once, keyed by content, never by timing.
+CREATE TABLE IF NOT EXISTS effects (
+  effect_id        TEXT PRIMARY KEY,
+  idempotency_key  TEXT NOT NULL UNIQUE,
+  kind             TEXT NOT NULL,
+  payload_json     TEXT NOT NULL,
+  state            TEXT NOT NULL CHECK (state IN ('pending','applied','failed')),
+  attempts         INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  created_at       TEXT NOT NULL,
+  applied_at       TEXT,
+  last_error       TEXT
+);
+CREATE INDEX IF NOT EXISTS effects_state ON effects(state, created_at);
+
+-- -------------------------------------------------------------- store state
+CREATE TABLE IF NOT EXISTS store_state (
+  key    TEXT PRIMARY KEY,
+  value  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recovery_runs (
+  recovery_run_id    TEXT PRIMARY KEY,
+  started_at         TEXT NOT NULL,
+  completed_at       TEXT,
+  orphaned_attempts  INTEGER NOT NULL DEFAULT 0,
+  ambiguous          INTEGER NOT NULL DEFAULT 0
+);
+`;
+
+/**
+ * Invariants that are *tested* rather than declared in SQL, listed here so the
+ * test file and the schema cannot silently diverge:
+ *  - I11 replay: replaying the ledger reproduces every aggregate.
+ *  - I12 seq contiguity: no gaps in `events.seq` within a trace.
+ *  - I13 quarantine: once `store_state.quarantined` is set, every write path refuses.
+ *  - I14 effect ordering: a `pending` effect older than the sweep interval is reported, never deleted.
+ */
+export const CODE_LEVEL_INVARIANTS = ['I11', 'I12', 'I13', 'I14'] as const;

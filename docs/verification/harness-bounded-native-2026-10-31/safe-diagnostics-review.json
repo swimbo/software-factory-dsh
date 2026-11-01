@@ -10,13 +10,7 @@
   },
   "intent": "Classify private Docker failures into fixed allowlisted static codes, preserve through cleanup, and append only registered codes to existing unknown-error result. Never emit stderr/args/keys/model content or alter no-redispatch/reservations; diagnostic class is not zero-call/admission evidence.",
   "intent_confidence": "explicit",
-  "reviewers": [
-    "correctness",
-    "security",
-    "testing",
-    "reliability",
-    "adversarial"
-  ],
+  "reviewers": ["correctness", "security", "testing", "reliability", "adversarial"],
   "findings": [],
   "actionable_findings": [],
   "triage_groups": [],

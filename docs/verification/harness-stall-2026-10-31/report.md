@@ -22,10 +22,10 @@ Full review found a real false positive: selecting only the latest error discard
 
 ## Two immutable source candidates
 
-| Candidate | Source | Outcome | Gateway requests | Estimated reservations |
-|---|---|---|---:|---:|
-| Initial | ad70b75 | Failed active-loop/adaptation qualification; retained and fenced | 6 | $0.278221 |
-| Corrected | 3b1c3bb | One diagnostic and independently verified adaptation | 12 | $0.640921 |
+| Candidate | Source  | Outcome                                                          | Gateway requests | Estimated reservations |
+| --------- | ------- | ---------------------------------------------------------------- | ---------------: | ---------------------: |
+| Initial   | ad70b75 | Failed active-loop/adaptation qualification; retained and fenced |                6 |              $0.278221 |
+| Corrected | 3b1c3bb | One diagnostic and independently verified adaptation             |               12 |              $0.640921 |
 
 Total consumption was **18 requests and $0.919142 in estimated reservations**. Actual provider charges remain unknown; reservations are not a hard charge cap. Neither original attempt was redispatched or resumed. Each candidate used a fresh, separately approved identity; the failed candidate is not omitted from totals.
 

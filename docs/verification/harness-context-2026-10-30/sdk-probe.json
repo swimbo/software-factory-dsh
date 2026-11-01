@@ -41,14 +41,7 @@
       "sha256": "6d134d9c9012e57e2b2643fa51958e4623abfab394dc96255c54953cb04fd9f9",
       "bytes": 17511
     },
-    "tool_names": [
-      "terminal",
-      "file_editor",
-      "task_tracker",
-      "factory_capture",
-      "finish",
-      "think"
-    ]
+    "tool_names": ["terminal", "file_editor", "task_tracker", "factory_capture", "finish", "think"]
   },
   "repeated_stable": true,
   "profile": "9d7afec3e61276969b2cbe6f21ec7711455f9f81aeae81299d2de0a98339cbf0",

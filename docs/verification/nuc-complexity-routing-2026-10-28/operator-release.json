@@ -52,10 +52,7 @@
     "Six auto-routed requests use actual body-size estimates at known Pro peak rates plus a heuristic $0.01 classification allowance, 1024 output limit and a $2 estimated-total target; classifier/fallback/actual charges remain unknown and are not capped."
   ],
   "rollback": "Remove per-attempt endpoint binding; stop only the bound attempt resources; preserve attempts/budget/Restate state; restore prior endpoint unit from owner-only backup. Never reset ledgers.",
-  "route_canary_units": [
-    "nuc-router-simple-20261028-01",
-    "nuc-router-complex-20261028-01"
-  ],
+  "route_canary_units": ["nuc-router-simple-20261028-01", "nuc-router-complex-20261028-01"],
   "routing": "existing gateway model:auto, trusted attempt-scoped session, no trial header or direct provider egress",
   "scope": "one operator-selected sandbox work unit on dedicated NUC; no main merge or enterprise promotion",
   "status": "pre-dispatch scoped acceptance; observed verification recorded separately",

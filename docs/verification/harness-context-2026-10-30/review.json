@@ -74,11 +74,7 @@
       }
     ],
     "unrequested_behavior_rules": [],
-    "excluded_units": [
-      "9d.3",
-      "9d.4",
-      "9d.5"
-    ],
+    "excluded_units": ["9d.3", "9d.4", "9d.5"],
     "phase_complete": false
   },
   "learnings": [],

@@ -10,9 +10,7 @@
   },
   "intent": "Match inspected Docker Config.Env ordering: explicit CLI overrides first, followed by remaining image environment entries, without changing values or baseline profile.",
   "intent_confidence": "explicit",
-  "reviewers": [
-    "correctness"
-  ],
+  "reviewers": ["correctness"],
   "findings": [],
   "actionable_findings": [],
   "triage_groups": [],

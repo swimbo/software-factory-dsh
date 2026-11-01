@@ -11,10 +11,7 @@
   },
   "intent": "Pin AgentServer conversation, bash-event and persistence directories to the retained bounded workspace; preserve Docker ENV override ordering and baseline profile behavior.",
   "intent_confidence": "explicit",
-  "reviewers": [
-    "correctness",
-    "adversarial"
-  ],
+  "reviewers": ["correctness", "adversarial"],
   "findings": [],
   "actionable_findings": [],
   "triage_groups": [],

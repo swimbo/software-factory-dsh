@@ -1,0 +1,67 @@
+{
+  "revision": "1e28d8365b7f604de7ebb8960653b81cb57dd236",
+  "tree": "bc7dbcc93b2d8216af76809cda9ede8ccc45834c",
+  "started_at": "2026-10-30T03:00:29.737749+00:00",
+  "runner": "local",
+  "steps": [
+    {
+      "name": "secrets",
+      "command": ["gitleaks", "dir", ".", "--redact", "--no-banner"],
+      "exit_code": 0,
+      "log_sha256": "4573ff52c3eb4e2767d89f14c1b8fa6443250e3830ed8175afcc0b6bfd30e9ed"
+    },
+    {
+      "name": "python",
+      "command": [
+        "python3",
+        "-m",
+        "pytest",
+        "worker/tests",
+        "security/tests",
+        "wall/tests",
+        "wall/isolation",
+        "spine/python_tests",
+        "deployment/nuc",
+        "-q"
+      ],
+      "exit_code": 0,
+      "log_sha256": "2d5ca8483ce40722624e8e41a26c45cfe537ec133e1c4916e106bab574fa361b"
+    },
+    {
+      "name": "dependencies",
+      "command": ["npm", "ci", "--ignore-scripts"],
+      "exit_code": 0,
+      "log_sha256": "2a2cc6dd2d6f701212c96108f2651c3fd1288d11cc1c67adbadf8b22883441bc"
+    },
+    {
+      "name": "audit",
+      "command": ["npm", "audit", "--audit-level=high"],
+      "exit_code": 0,
+      "log_sha256": "6d8c5c8f3d7684adb070417bd608d01ae90aa3dc26a65af03ffda4955f38d9a3"
+    },
+    {
+      "name": "build",
+      "command": ["npm", "run", "build"],
+      "exit_code": 0,
+      "log_sha256": "f78a4b179b39a62de1f139ab98ad784486d0ff3aa0a49605d3db25bf38eb470d"
+    },
+    {
+      "name": "node",
+      "command": [
+        "node",
+        "--test",
+        "tests/abandonment.test.mjs",
+        "tests/build.test.mjs",
+        "tests/endpoint.test.mjs",
+        "tests/ingress.test.mjs",
+        "tests/reconcile.test.mjs",
+        "tests/validation.test.mjs",
+        "tests/wall.test.mjs"
+      ],
+      "exit_code": 0,
+      "log_sha256": "7d74d1e5fc61976db447ca96b679ccb05bd0715d3f5c89ed04127c5fb2e4daff"
+    }
+  ],
+  "passed": true,
+  "finished_at": "2026-10-30T03:01:09.142156+00:00"
+}

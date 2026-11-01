@@ -35,9 +35,7 @@
   "allocation_id": "47c828f05ee943f6ae440b9c50efb520",
   "baseline": "a0613bd46c181275f5d5d2965173eed56e3989a8",
   "revision": "4c0eef09b9fbb0df3b49f76c95b9596e9cc8e681",
-  "changed": [
-    "canary.txt"
-  ],
+  "changed": ["canary.txt"],
   "candidate_archive_sha256": "4cff523caff3e4754bf8a1baafdce555995996b82b44eec2ee2ec219cc88fbe1",
   "stall_record": {
     "delivery_status": "sent",

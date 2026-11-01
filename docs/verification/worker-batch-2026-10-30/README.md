@@ -21,16 +21,16 @@ The old baseline exception exists only in an operator experiment adapter pinned
 to this exact unit/SHA, with historical-output publishing disabled. The production
 CLI's current-main baseline check is unchanged.
 
-| Measure | Original worker output | Batched replay output |
-| --- | --- | --- |
-| Completion | Natural | Natural |
-| Ledger requests | 12/12 | 11/12 |
-| Visible model responses | 11 | 10 |
-| External real-HTTP acceptance | 4 passed | 4 passed |
-| Raw focused tests | 1 failure, 15 passed | 17 passed |
-| Operator test corrections | 1 | 0 |
-| Manual runtime recovery | None | None |
-| Estimated reservation | $1.399713 | $1.394777 |
+| Measure                       | Original worker output | Batched replay output |
+| ----------------------------- | ---------------------- | --------------------- |
+| Completion                    | Natural                | Natural               |
+| Ledger requests               | 12/12                  | 11/12                 |
+| Visible model responses       | 11                     | 10                    |
+| External real-HTTP acceptance | 4 passed               | 4 passed              |
+| Raw focused tests             | 1 failure, 15 passed   | 17 passed             |
+| Operator test corrections     | 1                      | 0                     |
+| Manual runtime recovery       | None                   | None                  |
+| Estimated reservation         | $1.399713              | $1.394777             |
 
 The replay combined syntax/diff checks and commit/status into one terminal call;
 its initial reading still took six responses. This is a measured one-request

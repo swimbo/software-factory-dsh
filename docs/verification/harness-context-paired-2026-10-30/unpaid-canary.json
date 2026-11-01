@@ -5,10 +5,7 @@
   "zero_request_expectation": false,
   "explanation": "AgentServer title generation can request the LLM even when initial_message.run=false; dummy gateway authentication rejected every request. No real gateway credential was released.",
   "observed_dummy_requests": 2,
-  "upstream_statuses": [
-    401,
-    401
-  ],
+  "upstream_statuses": [401, 401],
   "accounting": {
     "ledger": {
       "budgets": [

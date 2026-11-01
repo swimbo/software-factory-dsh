@@ -15,9 +15,7 @@
       "b9d3-20261031-multi-file-r1",
       "b9d3-20261031-failing-tests-r1"
     ],
-    "db96ddd": [
-      "b9d3-20261031-noisy-output-r1-p3"
-    ]
+    "db96ddd": ["b9d3-20261031-noisy-output-r1-p3"]
   },
   "remaining_host_release": "eea52b0c32827555495fceb11568dfaf1fb342b8",
   "admission_change": "fixed secret-safe provisioning error codes; model image/context/task/router/limits unchanged",

@@ -9,16 +9,11 @@
     "diff_sha256": "6aae67837255205606f136ad35af6c43e53df3248eb76ffc6d4fd6844aa94571",
     "pr_url": null,
     "files_changed": 3,
-    "excluded_untracked": [
-      "docs/verification/harness-bounded-native-2026-10-31/"
-    ]
+    "excluded_untracked": ["docs/verification/harness-bounded-native-2026-10-31/"]
   },
   "intent": "Compare bounded-profile Docker environment entries by exact unique names and values independently of order. Reject duplicates, changed values, missing or extra entries; preserve default profile strict ordered comparison.",
   "intent_confidence": "explicit",
-  "reviewers": [
-    "correctness",
-    "adversarial"
-  ],
+  "reviewers": ["correctness", "adversarial"],
   "findings": [],
   "actionable_findings": [],
   "triage_groups": [],
