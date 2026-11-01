@@ -50,6 +50,7 @@ import { replayArgv, verificationReadProblem, verificationSequenceProblem } from
 import type { CriteriaLogEntry, CriteriaLogPort, DiscriminationReport } from './criteria-log.ts';
 import type { HoldoutScenario, HoldoutStore } from './holdout.ts';
 import { assessSecurityPaths, SENSITIVE_OPERATION_CLASSES } from './security-path.ts';
+import { certificationForClass, type ClassCertification } from './operating-point.ts';
 import { normalisePath, pathIsInScope } from './scope.ts';
 
 export { pathIsInScope } from './scope.ts';
@@ -199,6 +200,15 @@ export interface EvaluateInput {
      * gate and is the honest default for a cold start.
      */
     readonly minDeltaSamples?: number;
+    /**
+     * The certification operating point (ND1). Defaults to the ratified m = 20, k = 18, p0 = 0.95;
+     * a policy may tighten it, and `evaluate` publishes the α that follows from it.
+     */
+    readonly certification?: {
+      readonly m?: number;
+      readonly k?: number;
+      readonly p0?: number;
+    };
     /**
      * The `factory-env` image digest the wall ran, so a verdict names its instrument
      * (A4.4). Recorded in `wallVersion`; a tag is a mutable pointer and therefore not an
@@ -1653,6 +1663,40 @@ function countDeltaSamples(
 }
 
 /**
+ * The class's certification attempts: one per paired revision, and "passed" when the candidate
+ * side of that attempt produced no `fail` and no unmeasured run.
+ *
+ * A paired revision is one *attempt* — base and candidate observations of the same scenario set —
+ * which is the unit ND1 certifies. Counting scenario rows instead would make a class look
+ * certifiable because its tasks have many scenarios, which is the same error as counting test cases
+ * as attempts.
+ */
+export function countClassAttempts(
+  holdout: HoldoutStore,
+  live: readonly CriteriaLogEntry[],
+  log: readonly CriteriaLogEntry[],
+): { readonly samples: number; readonly passes: number } {
+  const relevant = [...log, ...live].filter(
+    (entry) => entry.taskClass === holdout.taskClass && entry.holdoutRevision === holdout.revision,
+  );
+  const byRevision = new Map<string, { base: boolean; candidate: number; clean: boolean }>();
+  for (const entry of relevant) {
+    const current = byRevision.get(entry.revision) ?? { base: false, candidate: 0, clean: true };
+    if (entry.side === 'base') current.base = true;
+    else {
+      current.candidate += 1;
+      if (entry.outcome !== 'pass') current.clean = false;
+    }
+    byRevision.set(entry.revision, current);
+  }
+  const attempts = [...byRevision.values()].filter((entry) => entry.base && entry.candidate > 0);
+  return {
+    samples: attempts.length,
+    passes: attempts.filter((entry) => entry.clean).length,
+  };
+}
+
+/**
  * Is the *class* certifiable, or does this pass require a human signature?
  *
  * The unit-level verdict is unchanged: the unit verified. What degrades is the right to
@@ -1666,29 +1710,53 @@ function checkClassCertification(
   live: readonly CriteriaLogEntry[],
   log: readonly CriteriaLogEntry[],
   minSamples: number,
+  operatingPoint: { readonly m?: number; readonly k?: number; readonly p0?: number } | undefined,
 ): { readonly outcome: CheckOutcome; readonly requiresHuman: boolean } {
   if (holdout === null) {
     return { outcome: { scenarios: [], reasons: [] }, requiresHuman: false };
   }
 
   const samples = countDeltaSamples(holdout, live, log);
-  const certifiable = samples >= minSamples;
+  const deltaCertifiable = samples >= minSamples;
+  const counted = countClassAttempts(holdout, live, log);
+  const certification: ClassCertification = certificationForClass({
+    samples: counted.samples,
+    passes: counted.passes,
+    ...(operatingPoint?.m === undefined ? {} : { m: operatingPoint.m }),
+    ...(operatingPoint?.k === undefined ? {} : { k: operatingPoint.k }),
+    ...(operatingPoint?.p0 === undefined ? {} : { p0: operatingPoint.p0 }),
+  });
+
+  // Wording rule: the word "certified" appears only when the class certified. `insufficient` says
+  // unknown and says so plainly — a class with three attempts is not "probably fine".
+  const point =
+    `m=${certification.m.toString()} k=${certification.k.toString()} ` +
+    `alpha=${certification.alphaExact}`;
+  const detail =
+    certification.outcome === 'certified'
+      ? `${counted.passes.toString()} of ${counted.samples.toString()} attempts passed for this ` +
+        `task class: certified at ${point} (alpha is P(a class that truly passes ` +
+        `${certification.p0.toString()} fails certification))`
+      : certification.outcome === 'not-certified'
+        ? `${counted.passes.toString()} of ${counted.samples.toString()} attempts passed for this ` +
+          `task class: not certified at ${point}; promotion requires a human signature`
+        : `${counted.samples.toString()} of ${certification.m.toString()} attempts for this task ` +
+          `class: insufficient evidence to certify at ${point} — unknown is not "probably fine", ` +
+          `so promotion requires a human signature`;
+
+  // Two different facts, both kept: `minDeltaSamples` is Δ evidence, certification is the
+  // binomial operating point. Either one unsatisfied means a person decides.
+  const requiresHuman = !deltaCertifiable || certification.outcome !== 'certified';
+  const deltaLine = deltaCertifiable
+    ? `${samples.toString()} delta samples for this task class (min ${minSamples.toString()})`
+    : `${samples.toString()} of ${minSamples.toString()} delta samples for this task class: promotion requires a human signature`;
 
   return {
     outcome: {
-      scenarios: [
-        result(
-          'class-certification',
-          'policy',
-          'pass',
-          certifiable
-            ? `${samples.toString()} delta samples for this task class (min ${minSamples.toString()})`
-            : `${samples.toString()} of ${minSamples.toString()} delta samples for this task class: promotion requires a human signature`,
-        ),
-      ],
+      scenarios: [result('class-certification', 'policy', 'pass', `${deltaLine}; ${detail}`)],
       reasons: [],
     },
-    requiresHuman: !certifiable,
+    requiresHuman,
   };
 }
 
@@ -1762,6 +1830,7 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
     holdout.observations,
     log.entries,
     input.policy.minDeltaSamples ?? 0,
+    input.policy.certification,
   );
 
   // History is written after the decision is computed, and a failed append does not

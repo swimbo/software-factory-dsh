@@ -98,3 +98,12 @@ export {
 } from './selftest.ts';
 
 export { main as cliMain, defaultCorpusDir } from './cli.ts';
+export {
+  binomialCdfAtMost,
+  certificationAlpha,
+  certificationForClass,
+  DEFAULT_OPERATING_POINT,
+  type CertificationOutcome,
+  type ClassCertification,
+  type OperatingPoint,
+} from './operating-point.ts';
