@@ -204,12 +204,14 @@ export function createPanelServer(options: PanelServerOptions): PanelServer {
       // The refusal names the two accepted carriers. It does not say whether the
       // token was wrong, missing or empty — that distinction is a guessing oracle.
       const message = missingCredentialMessage(req);
-      sendJson(
-        res,
-        401,
-        { ok: false, code: 'UNAUTHORIZED', message },
-        { 'WWW-Authenticate': 'Bearer realm="factory-panel"' },
-      );
+      const challenge = { 'WWW-Authenticate': 'Bearer realm="factory-panel"' };
+      if (prefersHtml(req)) {
+        // Same status, same challenge, same "nothing about the store" rule — but a
+        // document, because the caller is a person looking at a tab.
+        send(res, 401, { ...HTML_HEADERS, ...challenge }, renderUnauthorizedHtml(message));
+      } else {
+        sendJson(res, 401, { ok: false, code: 'UNAUTHORIZED', message }, challenge);
+      }
       return;
     }
 
@@ -301,6 +303,30 @@ export function createPanelServer(options: PanelServerOptions): PanelServer {
       });
     },
   };
+}
+
+/**
+ * True when the caller asked for a document rather than a payload.
+ *
+ * A person who opens the URL in a tab sends `text/html` and must get the HTML refusal:
+ * raw JSON in a browser is what gets pasted into a chat. Tooling sends a wildcard or no
+ * `Accept` at all and keeps the machine-readable body. `q=0` means the caller explicitly
+ * refuses the type, so it is honoured — a negotiation that ignores `q` is not one.
+ */
+function prefersHtml(req: IncomingMessage): boolean {
+  const accept = req.headers.accept;
+  if (typeof accept !== 'string' || accept.trim().length === 0) return false;
+  return accept.split(',').some((entry) => {
+    const [mediaType, ...params] = entry.trim().split(';');
+    if (mediaType?.trim().toLowerCase() !== 'text/html') return false;
+    for (const param of params) {
+      const trimmed = param.trim().toLowerCase();
+      if (!trimmed.startsWith('q=')) continue;
+      const quality = Number.parseFloat(trimmed.slice(2));
+      return Number.isFinite(quality) ? quality > 0 : true;
+    }
+    return true;
+  });
 }
 
 function missingCredentialMessage(req: IncomingMessage): string {

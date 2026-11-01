@@ -82,6 +82,14 @@ export {
 } from './container.ts';
 
 export {
+  createLocalRunner,
+  parseSummary,
+  SUMMARY_LINE_PREFIX,
+  LocalRunnerRefusal,
+  type LocalRunnerOptions,
+} from './local.ts';
+
+export {
   runSelfTest,
   loadCorpusCase,
   formatSelfTestReport,

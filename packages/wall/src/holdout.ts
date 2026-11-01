@@ -40,6 +40,12 @@ export interface HoldoutScenario {
   readonly argv: readonly string[];
   readonly expectExit: readonly number[];
   readonly dependsOn?: readonly string[];
+  /**
+   * Isolation this scenario needs. `container` means the wall must not measure it in a
+   * convenience runner: a scenario that expects no network, in a runner that has one, is a
+   * scenario whose result means something else.
+   */
+  readonly requires?: 'container';
 }
 
 /**

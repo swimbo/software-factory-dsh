@@ -242,6 +242,10 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
   const copyCheckout = options.copyCheckout ?? true;
 
   return {
+    // Container isolation is exactly what this runner provides, so `requires: 'container'`
+    // and `network: 'none'` are satisfied rather than refused (the default is `--network none`).
+    kind: 'container',
+
     async run(input: ScenarioRunInput): Promise<ScenarioRunResult> {
       const started = performance.now();
       const source = options.prepare === undefined ? options.cwd : options.prepare(input);

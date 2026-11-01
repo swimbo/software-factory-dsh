@@ -34,7 +34,14 @@ export function runStatus(input: VerbInput): number {
     );
   }
 
-  input.emit(model);
+  // The wire payload is the frozen contract; `limitIsDefault` is a render-only hint
+  // (the status contract has no field for "this number is a documented default"), so it
+  // is stripped here rather than added to a schema another owner holds.
+  const { limitIsDefault: _renderOnly, ...perDayWire } = model.budget.perDay;
+  input.emit({
+    ...model,
+    budget: { ...model.budget, perDay: perDayWire },
+  });
   const rendered = renderStatus(model, ctx.ui.plain);
   const wantsAll = boolOption(input.options, 'all');
   // Human text goes to stderr; only `--json` and documented data payloads touch

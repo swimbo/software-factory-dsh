@@ -71,6 +71,23 @@ export {
 
 export { assertSelfContainedClone, createAttemptClone, type CloneOptions } from './clone.ts';
 
+/**
+ * **Test-only.** A scripted worker behind the same `Executor` interface, so the
+ * `run → attempt → receipt → verdict → promotion` path can be driven offline with
+ * no `dsh`, no container and no model key. Refused under `NODE_ENV=production` by
+ * the CLI's executor probe, and bannered on every command that uses it.
+ */
+export {
+  createFakeExecutor,
+  createFakeExecutorFromFile,
+  parseFakeScenario,
+  scenarioTurnCompleted,
+  type FakeExecutorOptions,
+  type FakeReceiptSpec,
+  type FakeScenario,
+  type FakeStep,
+} from './fake-executor.ts';
+
 export {
   destroyAttemptHome,
   listHomeFiles,

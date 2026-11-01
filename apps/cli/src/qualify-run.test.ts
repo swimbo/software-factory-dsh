@@ -200,11 +200,20 @@ describe('run', () => {
     expect(runCli(['run', unitId, '--retry'], { home }).status).toBe(EXIT.usage);
   });
 
-  it('refuses --verify-only with WALL_UNAVAILABLE (exit 4) instead of pretending to measure', () => {
+  it('refuses --verify-only on a unit that is not awaiting measurement, instead of inventing a verdict', () => {
+    // The wall is wired now, so "there is no instrument" is no longer the reason for
+    // refusing — a seeded unit has no receipt, and re-measuring one would mean
+    // inventing the evidence. The refusal moved, the promise did not: nothing is
+    // dispatched and no verdict is recorded.
     const home = tempHome();
     const { unitId } = seedUnit(home, { lane: 'dark' });
     const result = runCli(['run', unitId, '--verify-only'], { home });
-    expect(result.status).toBe(EXIT.unknown);
-    expect(result.stderr).toContain('WALL_UNAVAILABLE');
+    expect(result.status).toBe(EXIT.policy);
+    expect(result.stderr).toContain('UNIT_ALREADY_TERMINAL');
+    expect(result.stderr).toContain('Nothing was dispatched');
+
+    const status = runCli(['status', unitId, '--json'], { home });
+    const json = JSON.parse(status.stdout.trim()) as Record<string, unknown>;
+    expect(JSON.stringify(json)).not.toContain('verdictId');
   });
 });

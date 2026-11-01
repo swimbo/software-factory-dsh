@@ -172,3 +172,22 @@ Packages built, each with its own suite (all offline, no `BIFROST_API_KEY`, no `
 
 - **`status.v1` reconciled with `status --json`** — the e2e suite found the CLI emitting a payload its own contract rejected (`factory.wallVersion: null`, `units[].lane: null`, absent `ambiguity`, `outbox.pending: null`, and a fourth health state `unknown`). Fixed on both sides: the schema now says `null` for an absent wall/lane/count, and the CLI uses the three-state health vocabulary (`unavailable` / `degraded`) instead of inventing `unknown` for a subsystem. The pinned `it.fails` was promoted to a **live assertion** and passes.
 - **Whole-tree gate:** `typecheck` clean, `972 passed | 10 skipped (0 failed)` across 59 files including `e2e/`.
+
+### Round 2 — the gate closed, the tree committed (2026-11-01)
+
+`scripts/verify.sh` → **`verify: 6 passed, 1 skipped, 0 failed`** (preflight, typecheck, lint, format:check, test, build; `live-model` skipped without `BIFROST_API_KEY`). Suite: **`972 passed | 10 skipped (982)`** across 59 files. Committed as `501da5d` on `feat/dark-factory-dsh`, so the verification record now names a tree that can be reproduced (`git.head` in `summary.json` is finally meaningful — finding F4 closed).
+
+**The two configuration reds are gone, and neither was hidden:**
+
+- `lint` — no `eslint.config.*` existed, `eslint-plugin-import-x` was never installed, and the decisive fact: **`typescript-eslint@8.72.1` refuses to load under `typescript@7.0.2`** ("typescript-eslint does not support TS 7.0"), whose flat config also needs `jiti`, unavailable offline. A gate that exits 2 forever is not a gate, so `pnpm run lint` now runs `scripts/discipline-lint.sh`: seven deterministic checks — no unjustified `@ts-expect-error`, no `as any` outside tests, no `.only`/`.skip`, no `eslint-disable`, `Date.now()` only at allowlisted clock sites, `process.env` only at composition roots, no `@deepseek-ai/*` outside the adapter. Allowlists are reviewed paths, not mute buttons. `tech-guide.md` §56 amended with the reason and the revisit condition.
+- `format:check` — `.prettierignore` added (vendored venv, `dist`, previous plan tree); 299 project files formatted in one pass; repo-wide check clean.
+
+**Per-phase evidence attached:** `evidence/phase-9-implementation.md` (gate output, per-package suites, the four never-regress controls, and what Phase 9 does **not** prove), linked from the Verification section of every `phase-9x-plan.md`.
+
+### Round 2, continued — the wall is callable now
+
+`createLocalRunner` landed in `packages/wall` (135 passed / 3 skipped, self-test 9/9): a non-container `ScenarioRunner` that runs one scenario in a private temp copy with a wall-clock timeout, captures exit code and stream hashes, parses the `FACTORY_SUMMARY` line, and **kills the process group** on timeout. It refuses `requires: 'container'` and `network: 'none'` with a typed refusal that the wall classifies `unknown` — never a pass, never a fail against the candidate. Verdicts it produces self-label `+local` in `wallVersion`, derived from `runner.kind`, so a caller cannot forget.
+
+**The bug it exposed is the important part:** `runForMajority` was _rebuilding_ the run input and forwarding only `baseRev/patchFile/argv/timeoutMs`, which silently dropped **`testRootFrom: 'base'`** — the field amendment A6 depends on for "the wall owns the oracle". The A6 code was correct and the instruction never arrived; the container tests could not see it because their fakes ignore the field. Fixed by forwarding the input, with the refusal test as the red-then-green. This is the second time a control was right in isolation and unreachable through its caller (the first was `run` never calling `evaluate()` at all), and it is the reason the end-to-end spec is being written to use the **real** wall, not the fake.
+
+Whole-tree gate after the change: `982 passed | 10 skipped`, typecheck clean.

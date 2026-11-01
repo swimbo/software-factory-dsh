@@ -194,9 +194,32 @@ known edges.
     (recorded as a plan gap). Changed _paths_ are named — the agent wrote them, so
     they reveal nothing it does not already know — but holdout argv, expectations and
     ids never appear.
-17. **`promotionRequiresHumanSignature` is only as good as its reader.** The flag is
+17. **The local runner measures behaviour, not containment.** `createLocalRunner` is a
+    convenience adapter for hosts and CI workers with no Docker: no network isolation,
+    no filesystem isolation beyond a private temp copy, no uid separation, no read-only
+    root, no image digest. It refuses scenarios that declare `requires: 'container'` or
+    `network: 'none'` rather than running them in a weaker environment, and every verdict
+    it produces is labelled `+local` in `wallVersion` so it cannot be mistaken for a
+    container verdict. Use it to close the loop on a laptop; promote nothing on it.
+18. **`promotionRequiresHumanSignature` is only as good as its reader.** The flag is
     set on a verifying verdict in an uncertifiable class; nothing here enforces that
     the promotion gate honours it. That enforcement belongs to `packages/gates`.
+
+## The three runners
+
+`evaluate()` never constructs a runner; execution is injected, so the decision module stays
+pure and the environment is a choice rather than a default.
+
+| Runner                  | Isolation                                                                              | Use                                                                                               |
+| ----------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `FakeRunner` (in tests) | none                                                                                   | Determinism: a lookup table, so the same inputs produce a byte-identical verdict                  |
+| `createContainerRunner` | digest-pinned image, non-root, read-only root, `--network none`, no holdout/key mounts | Production. A verdict from it names the image in `wallVersion`                                    |
+| `createLocalRunner`     | a private temp copy of the tree and a process-group timeout                            | Hosts and CI with no Docker. No containment; labelled `+local`; refuses scenarios that ask for it |
+
+```ts
+const runner = createLocalRunner({ cwd: '/path/to/prepared/checkout' });
+const verdict = await evaluate({ spec, receipt, holdout, runner, policy, diff, nowIso });
+```
 
 ## Test map
 

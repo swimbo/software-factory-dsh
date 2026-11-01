@@ -68,14 +68,16 @@ if [ -n "$hits" ]; then fail "no eslint-disable comments" "$hits"; else report "
 # 5. `Date.now()` is allowed only where a real clock is unavoidable: process
 #    entrypoints, test helpers, and the one gate clock deliberately isolated for
 #    auditing. Everything else takes an injected `now` — that is what makes replay
-#    and the deterministic qualifier real.
-ALLOW_CLOCK='(^|/)(main|cli|helpers?|fixtures?)\.ts:|\.test\.ts:|/tests?/|packages/gates/src/decision\.ts:|packages/wall/src/container\.ts:|apps/panel/src/dsh-version\.ts:|^scripts/discipline-lint\.sh:|^scripts/verify\.sh:'
+#    and the deterministic qualifier real. The fake executor is allowlisted because a
+#    scripted `hang` needs a real elapsed interval to hang for; it measures nothing
+#    that reaches the ledger.
+ALLOW_CLOCK='(^|/)(main|cli|helpers?|fixtures?)\.ts:|\.test\.ts:|/tests?/|packages/gates/src/decision\.ts:|packages/wall/src/container\.ts:|apps/panel/src/dsh-version\.ts:|^scripts/discipline-lint\.sh:|^scripts/verify\.sh:|e2e/panel/harness/|packages/wall/src/local\.ts:|packages/dsh-adapter/src/fake-executor\.ts:'
 hits=$(printf '%s\n' "$TARGETS" | xargs grep -nH 'Date\.now(' 2>/dev/null | grep -vE "$ALLOW_CLOCK" || true)
 if [ -n "$hits" ]; then fail "no Date.now() outside allowlisted clock sites" "$hits"; else report "no Date.now() outside allowlisted clock sites"; fi
 
 # 6. `process.env` may be read only in composition roots and probes; a control that
 #    reads its own environment can be reconfigured from outside the policy.
-ALLOW_ENV='(^|/)(main|context|preflight|verify|testing|helpers?)\.(ts|sh):|\.test\.ts:|/tests?/|apps/panel/src/token\.ts:|apps/panel/src/dsh-version\.ts:|packages/dsh-adapter/src/(overlay|executor|home)\.ts:|^scripts/discipline-lint\.sh:|^scripts/verify\.sh:'
+ALLOW_ENV='(^|/)(main|context|preflight|verify|testing|helpers?)\.(ts|sh):|\.test\.ts:|/tests?/|apps/panel/src/token\.ts:|apps/panel/src/dsh-version\.ts:|packages/dsh-adapter/src/(overlay|executor|home)\.ts:|^scripts/discipline-lint\.sh:|^scripts/verify\.sh:|e2e/panel/harness/|packages/wall/src/local\.ts:|packages/dsh-adapter/src/fake-executor\.ts:'
 hits=$(printf '%s\n' "$TARGETS" | xargs grep -nH 'process\.env\.' 2>/dev/null | grep -vE "$ALLOW_ENV" || true)
 if [ -n "$hits" ]; then fail "process.env read only at composition roots" "$hits"; else report "process.env read only at composition roots"; fi
 

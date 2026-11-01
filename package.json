@@ -8,7 +8,7 @@
   },
   "scripts": {
     "preflight": "bash scripts/preflight.sh",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p e2e/panel/tsconfig.json --noEmit",
     "lint": "bash scripts/discipline-lint.sh",
     "format:check": "prettier --check .",
     "test": "vitest run",

@@ -40,6 +40,20 @@ export function runQualify(input: VerbInput): number {
   // re-scored": the engine reuses a stored decision for the same policy version.
   const wasStored = ctx.store.getLaneDecision(unitId, ctx.policyVersion) !== null;
 
+  // A unit past `submitted` already carries a decision it is acting on. The engine
+  // says this with an INTERNAL (exit 1) phase error, which is a bug-report tone for
+  // a plainly reachable operator mistake (`qualify` after `run`, or a replayed
+  // command), and `--json` must still answer with a refusal an operator can act on.
+  if (unit.state !== 'submitted' && unit.state !== 'qualified' && unit.state !== 'lit_parked') {
+    throw new FactoryError(
+      'UNIT_ALREADY_TERMINAL',
+      `UNIT_ALREADY_TERMINAL: ${unitId} is ${unit.state}; a lane decision is made once, against a submitted ` +
+        'revision. Re-qualifying would revise a decision this unit is already acting on. ' +
+        `Submit a new revision instead. Nothing was changed.`,
+      { unitId, state: unit.state },
+    );
+  }
+
   const result = ctx.engine.qualifyUnit(unitId);
   const decision = result.decision;
   // The qualifier owns the rule set; the CLI only renders its answer, so the two

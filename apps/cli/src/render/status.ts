@@ -13,7 +13,7 @@ import { contentHash } from '@factory/contracts';
 import { currentPolicyVersion } from '@factory/qualifier';
 import type { UnitRow, VerdictRow } from '@factory/store';
 
-import type { FactoryContext } from '../context.ts';
+import { DEFAULT_PER_DAY_USD, type FactoryContext } from '../context.ts';
 import { field, pill, record, sep, usd, wrap } from './format.ts';
 
 export const STATUS_SCHEMA_VERSION = 'status.v1';
@@ -155,7 +155,19 @@ export interface StatusModel {
       readonly detail: string | null;
       readonly since: string | null;
     };
-    readonly taskClasses: readonly unknown[];
+    readonly taskClasses: readonly {
+      readonly class: string;
+      readonly delta: {
+        readonly value: number | null;
+        readonly samples: number;
+        readonly state: string;
+      };
+      readonly escapeRate: {
+        readonly value: number | null;
+        readonly samples: number;
+        readonly state: string;
+      };
+    }[];
   };
   readonly budget: {
     readonly currency: string;
@@ -164,6 +176,7 @@ export interface StatusModel {
     readonly note: string;
     readonly perUnit: { readonly limit: number; readonly kind: string };
     readonly perDay: {
+      readonly limitIsDefault?: boolean;
       readonly limit: number;
       readonly spent: number;
       readonly reserved: number;
@@ -383,8 +396,14 @@ export function buildStatus(
 
   const quarantined = ctx.store.isQuarantined();
   const ledgerHead = ledgerHeadOf(ctx);
-  const perUnit = ctx.store.currentEnvelope('per-unit')?.amountUsd ?? ctx.envelopeUsd();
-  const perDay = ctx.store.currentEnvelope('daily')?.amountUsd ?? 0;
+  const unitEnvelope = ctx.store.currentEnvelope('per-unit');
+  const dailyEnvelope = ctx.store.currentEnvelope('daily');
+  const perUnit = unitEnvelope?.amountUsd ?? ctx.envelopeUsd();
+  // `?? 0` here meant "no daily envelope has ever been recorded" rendered as
+  // "$0 limit", which reads as an exhausted budget — the opposite of the truth. The
+  // documented default is a *default*, so the note below says so and the line is marked.
+  const perDay = dailyEnvelope?.amountUsd ?? DEFAULT_PER_DAY_USD;
+  const perDayIsDefault = dailyEnvelope === null;
 
   return {
     ok: true,
@@ -462,17 +481,23 @@ export function buildStatus(
               : `expected ${PINNED_DSH_VERSION}, observed ${String(observedDshVersion(ctx))}`,
         since: null,
       },
-      // Δ per task class needs holdout samples the store does not carry; an empty
-      // array is "nothing measured", not "everything stable".
-      taskClasses: [],
+      // Δ per task class, aggregated from verdicts that actually measured one. An empty
+      // array means no verdict carries a checked Δ — "nothing measured", never
+      // "everything stable" — and the human renderer says which of the two it is.
+      taskClasses: taskClassHealth(ctx),
     },
     budget: {
       currency: 'USD',
       priceTableVersion: 'p3',
       telemetry: 'estimated',
-      note: 'no billing-grade telemetry; usage-derived estimate',
+      note:
+        'no billing-grade telemetry; usage-derived estimate' +
+        (perDayIsDefault
+          ? `; the daily limit is the documented default ($${String(DEFAULT_PER_DAY_USD)}/day), not an operator envelope`
+          : ''),
       perUnit: { limit: perUnit, kind: 'estimated' },
       perDay: {
+        limitIsDefault: perDayIsDefault,
         limit: perDay,
         spent: daySpent,
         reserved: dayReserved,
@@ -485,6 +510,41 @@ export function buildStatus(
       state: unknownSpendRows > 0 ? 'unknown' : 'ok',
     },
   };
+}
+
+/**
+ * Δ per task class, from verdicts that measured one.
+ *
+ * The store carries no task-class column: the class a unit belongs to is the qualifier's
+ * notion, and in v1 the unit's slug is the class an operator files it under (the same
+ * default the wall wiring uses for the holdout corpus). So the aggregation is by slug,
+ * and it counts only verdicts whose Δ was actually checked — a verdict with `checked:
+ * false` contributes no sample rather than a zero.
+ *
+ * `escapeRate` stays `unknown`: the wall computes it from irreversible-scenario
+ * outcomes, and no store column carries that yet. Claiming `0` would be the lie that
+ * makes an escape look like something that never happened.
+ */
+function taskClassHealth(ctx: FactoryContext): StatusModel['health']['taskClasses'] {
+  const byClass = new Map<string, number[]>();
+  for (const unit of ctx.store.listUnits()) {
+    const verdict = ctx.store.latestVerdictForUnit(unit.unitId);
+    if (verdict === null) continue;
+    const delta = verdict.verdict.delta;
+    if (!delta.checked || delta.observed === null) continue;
+    const bucket = byClass.get(unit.slug) ?? [];
+    bucket.push(delta.observed);
+    byClass.set(unit.slug, bucket);
+  }
+  const classes = [...byClass.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return classes.map(([classId, samples]) => {
+    const mean = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+    return {
+      class: classId,
+      delta: { value: mean, samples: samples.length, state: 'measured' as const },
+      escapeRate: { value: null, samples: 0, state: 'unknown' as const },
+    };
+  });
 }
 
 export const FACTORY_VERSION = '0.1.0';
@@ -523,7 +583,8 @@ export function renderAggregate(model: StatusModel, plain: boolean): string[] {
     `${unknown} unknown (not a pass)`,
     `wall ${model.health.wall.state}`,
     `store ${model.health.store.state}`,
-    `today ${usd(model.budget.perDay.spent)}/${usd(model.budget.perDay.limit)} estimated`,
+    `today ${usd(model.budget.perDay.spent)}/${usd(model.budget.perDay.limit)}` +
+      `${model.budget.perDay.limitIsDefault === true ? ' default' : ''} estimated`,
   ];
   const line = parts.join(` ${sep()} `);
   void plain;
@@ -538,10 +599,12 @@ export function renderStatus(model: StatusModel, plain: boolean): string {
     // The spend line still prints: an operator who sees no units should still see
     // that the envelope exists, and that its numbers are estimates (A-2).
     lines.push(...renderAggregate(model, plain));
+    lines.push(...renderTaskClasses(model));
     return record(lines);
   }
 
   lines.push(...renderAggregate(model, plain));
+  lines.push(...renderTaskClasses(model));
 
   if (model.units.length === 1) {
     lines.push('', ...renderUnit(model.units[0] as UnitStatus, plain));
@@ -568,6 +631,30 @@ export function renderStatus(model: StatusModel, plain: boolean): string {
     );
   }
   return record(lines);
+}
+
+/**
+ * Δ per task class, as the factory knows it.
+ *
+ * The empty case is printed rather than omitted: an operator reading `task classes  none`
+ * cannot tell "nothing has been measured yet" from "the factory cannot see the
+ * measurement", and those call for different actions.
+ */
+function renderTaskClasses(model: StatusModel): string[] {
+  if (model.health.taskClasses.length === 0) {
+    return [
+      '',
+      'task classes  none measured — no verdict in the store carries a checked Δ ' +
+        '(a class is certified only from measured holdout samples, never from a passing suite)',
+    ];
+  }
+  const lines = ['', 'TASK CLASSES'];
+  for (const item of model.health.taskClasses) {
+    lines.push(
+      `  ${item.class}  Δ ${item.delta.value === null ? 'unknown' : item.delta.value.toFixed(2)}  samples ${String(item.delta.samples)}`,
+    );
+  }
+  return lines;
 }
 
 function renderUnit(unit: UnitStatus, plain: boolean): string[] {

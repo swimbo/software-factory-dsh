@@ -256,3 +256,32 @@ The Phase 5 debate returned while 9a–9e were being implemented. Each amendment
 **`insertReceipt` advances the ledger but not the attempt row.** The receipt is written, `attempt.receipted` is appended, and a replay of the ledger therefore computes `produced-receipt` — but the `attempts` row itself keeps whatever launch state it had (`planned` or `launching`). Nothing in the shipped code depends on the row's post-receipt value _yet_; the read-only panel is the first reader to notice, and it had to treat "this attempt has a receipt" as the evidence that overrides the stale state, otherwise every completed unit's attempt looked like a launch nobody picked up and the executor read `degraded` forever. Found while building `apps/panel`; recorded, not fixed. Candidate fix: have `insertReceipt` move the attempt to `produced-receipt` in the same transaction, and add an audit assertion that the row and the replay agree.
 
 **The `Store` interface exposes neither the promotion row nor the quarantine reason.** `getPromotion(unitId, verdictSha)` returns only `{promotionId}`, so `signedBy`/`signedAt` are read from the `unit.promoted` event and the panel's `promotion.id` is a stable reference (`P-<hash12>` over the signed promotion hash) rather than the row's own id. `isQuarantined()` returns a boolean and the recorded reason is not reachable, so `health.store.since` is permanently `null` and the page names the condition plus the runbook instead of the reason it cannot read. Both are honest workarounds, not bugs to live with. Candidate fix: `getPromotion()` returning the full row and `quarantine(): { reason, at } | null`.
+
+## Findings from the e2e build (Phase 10)
+
+The process-level and browser suites found five things unit tests could not. All are fixed or recorded; none were papered over.
+
+| #   | Finding                                                                                                                                                                                                                               | Status                                                                                      |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| P1  | `run` never called `evaluate()`, so the factory could not produce a verdict at all — the wall was a well-tested package nothing called                                                                                                | fixed: `run` wires `evaluate()` + `recordVerdict`                                           |
+| P2  | `runForMajority` rebuilt its input and silently dropped **`testRootFrom: 'base'`** — amendment A6's "the wall owns the oracle" was implemented correctly and never received its instruction                                           | fixed, with the refusal test as the red-then-green                                          |
+| P3  | `run` never created the attempt clone and there was no configured pristine mirror, so the real executor would have failed `assertSelfContainedClone`                                                                                  | fixed: `FACTORY_PRISTINE_REPO` + `FACTORY_REPO`, fail closed with exit 8 and a runbook line |
+| P4  | The panel omitted the `initial_production_deploy` gate the CLI emits for a verified unit — the page understated what the operator must do (ux A-1)                                                                                    | fixed, with a cross-surface **set-of-kinds** assertion so a later divergence is caught      |
+| P5  | A labelled `pass` (a reason code on a passing verdict) is unrecordable by design: `assertVerdictIsEarned` treats "pass with caveats" as `unknown`. The fake wall therefore labels itself through `wallVersion`, not through `reasons` | kept as designed; contracts unchanged                                                       |
+
+The pattern behind P1–P3 is worth naming: each was a correct control that its caller never invoked. Isolation tests cannot find that class of defect, because the control passes on its own. Only a run through the real composition root — which is what `e2e/cli` and `e2e/panel` are — exposes it. That is the argument for keeping the e2e suite in the acceptance gate rather than treating it as optional.
+
+## Open contract decision: receipt identity vs evidence identity (2026-11-01)
+
+`Verdict.receiptSha` and `receipts.receipt_sha` are two different hashes, and the store's join between them (`insertVerdict`) compares them directly. They diverge for **every receipt that carries a `narrative`**:
+
+- the store hashes the whole stored `WorkerReceipt` (narrative included);
+- the wall hashes `toDecisionReceipt(body)` — the projection without narrative, because L1 says the wall must never see the agent's prose.
+
+So a real receipt with a narrative is unjoinable to its own verdict. `apps/cli` works around it by stamping the stored sha onto the verdict, which makes the gate pass but leaves the contract saying two incompatible things.
+
+**Ruling (for the next round, not applied tonight):** the evidence identity must be the **decision projection** — the bytes the wall was given — and the store should keep the full body only as the record. That means `insertReceipt` and `insertVerdict` both hash `toDecisionReceipt(body)`, and `receipts.receipt_sha` becomes "sha of the evidence", not "sha of the stored bytes".
+
+**Why it was not applied:** the change was made, then reverted. It ripples through every fixture that constructs a receipt (17 store tests plus the panel and e2e fixtures all hashed the full body), and doing that across five agents' files at the end of a session is exactly the kind of sweeping edit that breaks a control silently. The workaround in `apps/cli` is documented and correct; the contract fix is a single coordinated change with its own test-count budget.
+
+Recorded here rather than left in a chat log because the symptom ("a promotion gate that only passes because the CLI rewrote the hash") is invisible in the code that would fail.

@@ -14,6 +14,7 @@
 import { FactoryError } from '@factory/contracts';
 
 import { LEASE_TTL_MS } from '../context.ts';
+
 import { field } from '../render/format.ts';
 import { renderAmbiguity, buildStatus } from '../render/status.ts';
 import type { VerbInput, VerbSpec } from './types.ts';
@@ -85,6 +86,22 @@ export function runRecover(input: VerbInput): number {
   for (const line of lines) ctx.ui.err(line);
 
   if (result.ambiguous > 0) return 4;
+
+  // Exit 0 means "this invocation reconciled nothing", which an operator can easily
+  // misread as "nothing needs me". A unit that is *already* ambiguous is still
+  // waiting for a person, so it is said out loud rather than implied by a later
+  // `factory status`. (Exit 4 is reserved for "this run produced an ambiguity",
+  // §3.4; making it also mean "one already existed" would make the code untestable.)
+  const stillAmbiguous = ambiguousAttempts.length;
+  if (stillAmbiguous > 0) {
+    ctx.ui.err(
+      field(
+        'WAITING',
+        `still ambiguous: ${String(stillAmbiguous)} attempt(s) whose outcome was never observed. ` +
+          'Nothing needs re-running; a person needs to look. See: factory status',
+      ),
+    );
+  }
   return 0;
 }
 

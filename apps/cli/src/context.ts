@@ -119,16 +119,42 @@ export function factoryPaths(home: string): FactoryPaths {
  */
 export interface ExecutorProbe {
   readonly available: boolean;
-  readonly kind: 'headless';
+  /** `headless` is the real `dsh`; `fake` is the scripted test double (`FACTORY_EXECUTOR=fake`). */
+  readonly kind: 'headless' | 'fake';
   readonly binPath: string | null;
   readonly moduleAvailable: boolean;
+  /** The JSON scenario a fake executor runs. `null` for the real one. */
+  readonly scenarioPath: string | null;
   readonly detail: string;
   readonly runbook: string;
 }
 
 export interface WallProbe {
   readonly available: boolean;
+  /** `container` is the real wall; `fake` replays a declared verdict (`FACTORY_WALL=fake`). */
+  readonly kind: 'container' | 'fake';
+  /** The verdict template a fake wall stamps onto the stored receipt. */
+  readonly verdictPath: string | null;
   readonly detail: string;
+}
+
+/**
+ * Test-only switches, refused in production.
+ *
+ * The fake executor and the fake wall exist so the plumbing between `run` and the
+ * verdict can be exercised without a `dsh` binary, a container or a model key. They
+ * are also the shortest possible path to a green nobody earned, so they are guarded
+ * three ways: this refusal, a banner on every command that uses them, and a ledger
+ * marker (`sessionId: fake-<attempt>`, `wallVersion: …-fake`) that survives into the
+ * store. A test double that can be reached in production is not a test double, it
+ * is a back door.
+ */
+function refuseInProduction(
+  env: Readonly<Record<string, string | undefined>>,
+  variable: string,
+): string | null {
+  if (env.NODE_ENV !== 'production') return null;
+  return `${variable} is refused when NODE_ENV=production: a test double may not run a real factory`;
 }
 
 /** A PATH lookup that never spawns a process: `status` must be cheap and deterministic. */
@@ -158,9 +184,47 @@ function moduleResolves(specifier: string): boolean {
 
 export function probeExecutor(
   env: Readonly<Record<string, string | undefined>>,
-  options: { readonly moduleAvailable?: boolean } = {},
+  options: { readonly moduleAvailable?: boolean; readonly scenarioPath?: string | null } = {},
 ): ExecutorProbe {
   const binPath = findOnPath('dsh', env);
+  if (env.FACTORY_EXECUTOR === 'fake') {
+    const refusal = refuseInProduction(env, 'FACTORY_EXECUTOR=fake');
+    const scenarioPath =
+      options.scenarioPath ??
+      ((env.FACTORY_SCENARIO ?? '').trim() === '' ? null : (env.FACTORY_SCENARIO ?? '').trim());
+    if (refusal !== null) {
+      return {
+        available: false,
+        kind: 'fake',
+        binPath: null,
+        moduleAvailable: true,
+        scenarioPath,
+        detail: refusal,
+        runbook:
+          'runbook: unset NODE_ENV or FACTORY_EXECUTOR=fake; the real executor needs the pinned dsh',
+      };
+    }
+    if (scenarioPath === null) {
+      return {
+        available: false,
+        kind: 'fake',
+        binPath: null,
+        moduleAvailable: true,
+        scenarioPath: null,
+        detail: 'FACTORY_EXECUTOR=fake needs a scenario (--scenario <path> or FACTORY_SCENARIO)',
+        runbook: 'runbook: pass --scenario <scenario.json> describing the worker the test needs',
+      };
+    }
+    return {
+      available: true,
+      kind: 'fake',
+      binPath: null,
+      moduleAvailable: true,
+      scenarioPath,
+      detail: `fake executor, scenario ${scenarioPath} - no dsh process will be launched`,
+      runbook: '',
+    };
+  }
   const moduleAvailable = options.moduleAvailable ?? moduleResolves('@factory/dsh-adapter');
   const missing: string[] = [];
   if (binPath === null) missing.push('no `dsh` binary on PATH (set DSH_BIN to override)');
@@ -170,6 +234,7 @@ export function probeExecutor(
     kind: 'headless',
     binPath,
     moduleAvailable,
+    scenarioPath: null,
     detail: missing.length === 0 ? `dsh at ${String(binPath)}` : missing.join('; '),
     runbook:
       'runbook: install the pinned dsh (0.2.1-rc.3) and make it reachable on PATH, then re-run: factory run <unitId>',
@@ -178,16 +243,53 @@ export function probeExecutor(
 
 export function probeWall(
   env: Readonly<Record<string, string | undefined>>,
-  options: { readonly moduleAvailable?: boolean } = {},
+  options: { readonly moduleAvailable?: boolean; readonly verdictPath?: string | null } = {},
 ): WallProbe {
+  if (env.FACTORY_WALL === 'fake') {
+    const refusal = refuseInProduction(env, 'FACTORY_WALL=fake');
+    const verdictPath =
+      options.verdictPath ??
+      ((env.FACTORY_VERDICT ?? '').trim() === '' ? null : (env.FACTORY_VERDICT ?? '').trim());
+    if (refusal !== null) {
+      return { available: false, kind: 'fake', verdictPath, detail: refusal };
+    }
+    if (verdictPath === null) {
+      return {
+        available: false,
+        kind: 'fake',
+        verdictPath: null,
+        detail: 'FACTORY_WALL=fake needs a verdict template (--verdict <path> or FACTORY_VERDICT)',
+      };
+    }
+    return {
+      available: true,
+      kind: 'fake',
+      verdictPath,
+      detail: `fake wall, verdict template ${verdictPath} - no scenario will be executed`,
+    };
+  }
   const moduleAvailable = options.moduleAvailable ?? moduleResolves('@factory/wall');
+  if (!moduleAvailable) {
+    return {
+      available: false,
+      kind: 'container',
+      verdictPath: null,
+      detail: 'the @factory/wall package could not be resolved',
+    };
+  }
+  // Docker is no longer the difference between "can verify" and "cannot": the wall
+  // ships a local runner, so a host without a container runtime still measures —
+  // with no containment, which every verdict it produces labels `+local`. What docker
+  // changes is the *quality* of the instrument, not the availability of one.
   const docker = findOnPath('docker', env);
-  const missing: string[] = [];
-  if (!moduleAvailable) missing.push('the @factory/wall package could not be resolved');
-  if (docker === null) missing.push('no docker daemon reachable (docker not on PATH)');
   return {
-    available: missing.length === 0,
-    detail: missing.length === 0 ? 'wall available (docker on PATH)' : missing.join('; '),
+    available: true,
+    kind: 'container',
+    verdictPath: null,
+    detail:
+      docker === null
+        ? 'wall available via the local runner (no docker: no container isolation)'
+        : 'wall available (docker on PATH: container runner)',
   };
 }
 
@@ -208,6 +310,10 @@ export interface ContextOverrides {
    * on a factory that has measured nothing yet.
    */
   readonly allowColdStart?: boolean;
+  /** `--scenario <path>`: the fake executor's script (test-only). */
+  readonly scenarioPath?: string;
+  /** `--verdict <path>`: the fake wall's verdict template (test-only). */
+  readonly verdictPath?: string;
 }
 
 export interface FactoryContext {
@@ -321,8 +427,9 @@ export function createContext(ui: CliUi, overrides: ContextOverrides = {}): Fact
     policy,
     policyVersion,
     allowColdStart: policy.allowColdStart,
-    executor: overrides.executor ?? probeExecutor(env),
-    wall: overrides.wall ?? probeWall(env),
+    executor:
+      overrides.executor ?? probeExecutor(env, { scenarioPath: overrides.scenarioPath ?? null }),
+    wall: overrides.wall ?? probeWall(env, { verdictPath: overrides.verdictPath ?? null }),
     close: () => store.close(),
   };
 }

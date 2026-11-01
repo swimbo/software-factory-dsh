@@ -521,6 +521,8 @@ One object, exactly mirroring `architecture.md` §4's `{units, waitingOnPerson, 
 }
 ```
 
+**Where the panel's `health` comes from.** The panel derives `health` from the store it can see — pending outbox effects, the last verdict's wall reasons, stale launches, the DSH version read once at startup — because the store and its own probe are the only truth sources a read-only page has. The CLI's `status` additionally _probes_ the local host for `executor`, `wall` and `dsh`, which answers a different question ("could this host dispatch right now?"), so the two can legitimately disagree about the same store. Neither reading is the other's bug: do not "fix" the panel into probing or the CLI into inferring, and read each state as the answer to the question its reader actually asked.
+
 ### 5.2 Verdict object (inside `units[]`)
 
 ```jsonc

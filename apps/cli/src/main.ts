@@ -145,8 +145,14 @@ async function executeCommand(
 
   // `--cold-start` is a per-invocation policy switch, so it has to be decided
   // before the context (and the engine's qualifier closure) is built.
-  const invocationOverrides: CliContextOverrides =
-    options['coldStart'] === true ? { ...overrides, allowColdStart: true } : overrides;
+  const scenarioPath = typeof options['scenario'] === 'string' ? options['scenario'] : undefined;
+  const verdictPath = typeof options['verdict'] === 'string' ? options['verdict'] : undefined;
+  const invocationOverrides: CliContextOverrides = {
+    ...overrides,
+    ...(options['coldStart'] === true ? { allowColdStart: true } : {}),
+    ...(scenarioPath === undefined ? {} : { scenarioPath }),
+    ...(verdictPath === undefined ? {} : { verdictPath }),
+  };
 
   try {
     return await withContextAsync(ui, invocationOverrides, async (ctx) =>

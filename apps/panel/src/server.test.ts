@@ -55,6 +55,40 @@ describe('authentication', () => {
     expect(body.message).toContain('?token=');
   });
 
+  it('negotiates the refusal: HTML for a browser tab, JSON for a tool', async () => {
+    // A person who opens the URL sees the page, not a payload they will paste into a
+    // chat. Same status, same challenge, same rule that nothing about the store leaks.
+    const browser = await fetch(url('/'), {
+      headers: { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+    });
+    expect(browser.status).toBe(401);
+    expect(browser.headers.get('content-type')).toContain('text/html');
+    expect(browser.headers.get('www-authenticate')).toContain('Bearer');
+    expect(browser.headers.get('cache-control')).toBe('no-store');
+    // The document keeps the policy the rest of the panel keeps: nothing to load or run.
+    const csp = browser.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("form-action 'none'");
+    expect(csp).not.toContain('script-src');
+    const html = await browser.text();
+    expect(html).toContain('id="auth-title"');
+    expect(html).toContain('TOKEN REQUIRED');
+    expect(html).toMatch(/authorization: bearer/i);
+    expect(html).not.toContain(TOKEN);
+    // A refusal page is not a status page: no region, no unit, no verdict.
+    expect(html).not.toContain('NEEDS YOU');
+    expect(html).not.toContain('RECENT VERDICTS');
+    expect(html).not.toContain('U-');
+
+    // Tooling keeps the machine-readable body, including when it refuses the type.
+    const json = await fetch(url('/'), { headers: { Accept: 'application/json' } });
+    expect(json.headers.get('content-type')).toContain('application/json');
+    expect((await json.json()) as { code: string }).toMatchObject({ code: 'UNAUTHORIZED' });
+    const refused = await fetch(url('/'), { headers: { Accept: 'text/html;q=0' } });
+    expect(refused.headers.get('content-type')).toContain('application/json');
+    expect((await refused.json()) as { code: string }).toMatchObject({ code: 'UNAUTHORIZED' });
+  });
+
   it('refuses a wrong token, including one of a different length', async () => {
     const short = await fetch(url(`/?token=${'b'.repeat(8)}`));
     expect(short.status).toBe(401);

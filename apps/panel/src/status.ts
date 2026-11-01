@@ -339,6 +339,22 @@ function buildWaitingOnPerson(
         since: unit.updatedAt,
       });
     }
+    // A verified unit that has not been promoted is not done: it is a signature
+    // waiting to happen. The CLI has always said so; omitting it here would let the
+    // page report `0 need you` while a passing unit sits unpromoted (`ux-plan.md` A-1).
+    if (unit.state === 'verified' && unit.promotion === null) {
+      items.push({
+        id: derivedGateId('initial_production_deploy', unit.unitId),
+        kind: 'initial_production_deploy',
+        unitId: unit.unitId,
+        question:
+          `Unit ${unit.unitId} passed but the first promotion needs your signature. ` +
+          'Nothing is pushed or deployed: it writes a signed record.',
+        recommendedCommand: `factory promote ${unit.unitId}`,
+        irreversible: true,
+        since: unit.verdict?.createdAt ?? unit.updatedAt,
+      });
+    }
   }
   const committed = (budget.perDay.spent ?? 0) + (budget.perDay.reserved ?? 0);
   if (budget.perDay.limit > 0 && committed >= budget.perDay.limit) {

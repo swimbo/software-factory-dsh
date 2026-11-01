@@ -479,16 +479,21 @@ The split follows the boundary of what each tool can observe, not a preference.
 
 ### 7.2 Panel suite (Playwright)
 
-| File                                  | Purpose (one line)                                                                                                       |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `e2e/panel/layout.spec.ts`            | Three regions + budget + Δ table render; every `waitingOnPerson` item has its command; zero interactive controls: E2E-35 |
-| `e2e/panel/health-strip.spec.ts`      | Strip absent when all-ok, present worst-first when degraded, each item 3-state: E2E-36                                   |
-| `e2e/panel/unknown-not-green.spec.ts` | `UNKNOWN` + "not a pass" in text; computed colours are the unknown token; no green anywhere in the card: E2E-37          |
-| `e2e/panel/budget-estimated.spec.ts`  | `estimated` as text + dashed fill; greyscale snapshot; `unknownCount` gap + "spend understated": E2E-38                  |
-| `e2e/panel/delta-by-class.spec.ts`    | Per-class Δ rows, `Δ unknown` literal, no blended aggregate: E2E-39                                                      |
-| `e2e/panel/auth.spec.ts`              | 401 without/with a wrong token, 200 with the right one; non-loopback bind refused: E2E-40                                |
-| `e2e/panel/contrast.spec.ts`          | Recompute WCAG ratios from computed styles in both schemes; fails if a token edit breaks a pair: E2E-41                  |
-| `e2e/panel/resilience.spec.ts`        | No-JS / no-CSS / 320 px / 200 % zoom parse identically, no horizontal scroll: E2E-42                                     |
+| File                                 | Purpose (one line)                                                                                                                                                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `e2e/panel/auth.spec.ts`             | 401 for a missing/wrong token with no detail, 200 for the right one by query and header, token never rendered, non-loopback bind refused in a real process: E2E-40                                            |
+| `e2e/panel/status-render.spec.ts`    | Three regions + budget + Δ table, every `waitingOnPerson` item with its command, no interactive control, `~$`+`estimated`+dashed fill+gap, per-class Δ rows, no-JS and 320 px: E2E-35, E2E-38, E2E-39, E2E-42 |
+| `e2e/panel/unknown-not-pass.spec.ts` | `UNKNOWN VERDICT` + literal "not a pass" + reason, `1 unknown (not a pass)` in the aggregate, pill painted `--unknown` (not `--ok`), no green in the card: E2E-37                                             |
+| `e2e/panel/health.spec.ts`           | No health region when every check is ok; when not, worst item first, rest on one line with `since`: E2E-36                                                                                                    |
+| `e2e/panel/readonly.spec.ts`         | `POST`/`PUT`/`PATCH`/`DELETE`/`HEAD` → 405 + `Allow: GET` on every route, CSP forbids script/form/frame, store bit-identical afterwards, no narrative: read-only                                              |
+| `e2e/panel/contrast.spec.ts`         | WCAG ratios recomputed from computed styles in both `prefers-color-scheme` values; ok/unknown pills differ in token and word, both ≥ 4.5:1: E2E-41                                                            |
+
+Notes on what the browser suite can and cannot prove in v1:
+
+- Every spec seeds its own temp `FACTORY_HOME` through the real CLI (`e2e/panel/harness/seed.ts`), then starts the real panel on an ephemeral port — there is no shared server and no mocked HTTP, so a green run is not order-dependent.
+- The verdict fixtures E2E-37/E2E-38 assume have no CLI path in v1: `factory run` records a receipt and exits 4 without recording a verdict, and the `FACTORY_EXECUTOR`/`FACTORY_WALL` env seams are declared but consumed by nothing. Those two specs therefore write the verdict (and the unmeasurable spend row) through `@factory/core` and the store's public API, which is what the wall will do once it is wired; the CLI is used for everything it can produce (units, lanes, aborts, receipts).
+- `factory status --json` exits `5` when a human gate is open (an unknown verdict, a lit unit) while still printing exactly one valid `status.v1` object on stdout — the exit code is the aggregate, the JSON is the payload. `cliStatusJson()` in `e2e/panel/harness/seed.ts` accepts `0` and `5` and refuses anything that is not exactly one JSON object, so a machine-readable surface that answered with prose would fail the suite rather than pass quietly.
+- E2E-38's greyscale-snapshot clause is replaced by the computed-style assertion it was a proxy for: the estimated segment carries a `repeating-linear-gradient`, so provenance survives greyscale by construction. A `measured`-style fixture cannot exist in v1 because no path writes a measured spend.
 
 ### 7.3 Shared harness (not tests)
 

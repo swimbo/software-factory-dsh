@@ -506,6 +506,8 @@ No command may print nothing and exit 0. An operator who types a command and see
 
 Rules: codes are stable and documented; a code never means two different next-actions; `1` is never used as a catch-all for one of the classes above. Scripts may switch on the code alone — that is the contract.
 
+One consequence of that rule looks like a contradiction until it is stated: `--json` is a payload contract, not an exit path. `factory status --json` exits `5` when a human gate is open **and** prints exactly one valid `status.v1` object on stdout, with the human rendering on stderr — so `status --json | jq` keeps working inside a pipeline while `set -e` scripts still see the class. The exit code is the aggregate outcome; the JSON is the payload.
+
 ### 5.2 Full error-code table (from `architecture.md` §4, plus the two gate codes and two integrity codes it names elsewhere)
 
 Every message uses the same five parts, in this order, because that is what makes it diagnosable: **code · what happened · why · what state you are in now · the next command.**

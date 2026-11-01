@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // The panel specs are the one place a DOM is legitimate: Playwright evaluates
+    // inside a page. Kept in a separate project so `document` cannot leak into the
+    // packages, where it would be a lie about which runtime the code runs in.
+    "lib": ["es2025", "dom"],
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"],
+  "exclude": []
+}

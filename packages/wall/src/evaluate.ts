@@ -84,6 +84,10 @@ export interface ScenarioRunInput {
    * independent of the candidate's ability to edit the tests that judge it.
    */
   readonly testRootFrom?: 'base' | 'candidate';
+  /** Container isolation this run requires. The container runner satisfies it; a local runner must refuse. */
+  readonly requires?: 'container';
+  /** An egress-free network this run requires. Same rule: satisfied by a container, refused by a local runner. */
+  readonly network?: 'none';
 }
 
 export interface ScenarioRunResult {
@@ -105,6 +109,22 @@ export interface ScenarioRunResult {
  */
 export interface ScenarioRunner {
   run(input: ScenarioRunInput): Promise<ScenarioRunResult>;
+  /**
+   * What kind of environment this runner provides.
+   *
+   * Not decoration: a verdict produced without container isolation must say so, or two
+   * verdicts that measured different things read as the same evidence. `evaluate` folds
+   * this into `wallVersion` (`+local`) so the label cannot be forgotten by a caller.
+   */
+  readonly kind?: 'container' | 'local';
+}
+
+/** Isolation a run requires, so a runner that cannot provide it can refuse instead of pretending. */
+export interface ScenarioRequirements {
+  /** The scenario must run inside the pinned container image (A4.4). */
+  readonly requires?: 'container';
+  /** The scenario must have no network at all. */
+  readonly network?: 'none';
 }
 
 /** What a single path in the patch did. */
@@ -170,7 +190,7 @@ export interface EvaluateInput {
      * machine-readable summary. Without it the wall has no oracle of its own and cannot
      * pass anything — which is L3 applied to "we have no way to check this".
      */
-    readonly pinnedSuite?: { readonly argv: readonly string[] };
+    readonly pinnedSuite?: { readonly argv: readonly string[]; readonly requires?: 'container' };
     /**
      * Minimum Δ samples for a task class to be *certifiable* (A4.7). Below it, a passing
      * unit still verifies but its promotion needs a human signature. `0` disables the
@@ -347,6 +367,8 @@ async function runForMajority(
     readonly patchFile: string;
     readonly timeoutMs: number;
     readonly testRootFrom?: 'base' | 'candidate';
+    readonly requires?: 'container';
+    readonly network?: 'none';
   },
   argv: readonly string[],
   runs: number,
@@ -365,6 +387,12 @@ async function runForMajority(
         patchFile: checkout.patchFile,
         argv,
         timeoutMs: checkout.timeoutMs,
+        // Isolation requirements travel with the *run*, not with the caller's convenience:
+        // dropping them here would silently downgrade a container scenario to a local one,
+        // which is the failure mode this field exists to prevent.
+        ...(checkout.testRootFrom === undefined ? {} : { testRootFrom: checkout.testRootFrom }),
+        ...(checkout.requires === undefined ? {} : { requires: checkout.requires }),
+        ...(checkout.network === undefined ? {} : { network: checkout.network }),
       });
     } catch {
       // A runner that throws measured nothing; that is `unknown`, never `fail`.
@@ -641,6 +669,18 @@ function scenarioHandle(index: number): string {
   return `holdout:${String(index + 1).padStart(2, '0')}`;
 }
 
+/**
+ * Carry a scenario's declared isolation requirement into the run input.
+ *
+ * Spread rather than assigned, because `exactOptionalPropertyTypes` distinguishes "absent"
+ * from "explicitly undefined" and the runner uses absence as "no requirement".
+ */
+function requirementOf(scenario: HoldoutScenario): ScenarioRequirements {
+  return {
+    ...(scenario.requires === undefined ? {} : { requires: scenario.requires }),
+  };
+}
+
 async function assessHoldout(input: EvaluateInput, runs: number): Promise<HoldoutAssessment> {
   const { holdout, policy, runner, receipt } = input;
   const threshold = policy.deltaThreshold;
@@ -679,7 +719,7 @@ async function assessHoldout(input: EvaluateInput, runs: number): Promise<Holdou
 
     const verdict = await runForMajority(
       runner,
-      { ...checkout, patchFile: receipt.diff.patchFile },
+      { ...checkout, patchFile: receipt.diff.patchFile, ...requirementOf(scenario) },
       scenario.argv,
       runs,
       exitSetJudge(scenario.expectExit),
@@ -713,7 +753,7 @@ async function assessHoldout(input: EvaluateInput, runs: number): Promise<Holdou
   for (const scenario of ordered) {
     const verdict = await runForMajority(
       runner,
-      { ...checkout, patchFile: NO_PATCH },
+      { ...checkout, patchFile: NO_PATCH, ...requirementOf(scenario) },
       scenario.argv,
       runs,
       exitSetJudge(scenario.expectExit),
@@ -943,6 +983,9 @@ async function checkWallSuite(input: EvaluateInput, runs: number): Promise<Check
       patchFile: input.receipt.diff.patchFile,
       timeoutMs: input.policy.commandTimeoutMs,
       testRootFrom: 'base',
+      ...(input.policy.pinnedSuite?.requires === undefined
+        ? {}
+        : { requires: input.policy.pinnedSuite.requires }),
     },
     pinned.argv,
     runs,
@@ -1398,6 +1441,19 @@ function derivePolicyVersion(policy: EvaluateInput['policy']): string {
 }
 
 /**
+ * The `+local` label: a verdict must say whether it was produced in a container.
+ *
+ * Derived from the runner rather than from policy, deliberately. Every other instrument
+ * fact is operator policy (an operator declares the image), but the *kind* of environment is
+ * a property of the object doing the running, and a caller who has to remember to declare it
+ * will eventually forget — producing a verdict that looks like containment and is not.
+ */
+function runnerVersionSuffix(input: EvaluateInput): string {
+  if (input.policy.imageDigest !== undefined) return '';
+  return input.runner.kind === 'local' ? '+local' : '';
+}
+
+/**
  * How many independent Δ measurements this task class has (A4.7).
  *
  * A sample is one code revision for which the log holds both a base and a candidate
@@ -1582,7 +1638,7 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
   // (A4.4): a verdict must name the exact environment that produced it.
   const wallVersion =
     input.policy.imageDigest === undefined
-      ? baseVersion
+      ? `${baseVersion}${runnerVersionSuffix(input)}`
       : `${baseVersion}+img:${input.policy.imageDigest}`;
 
   const candidate: Verdict = {

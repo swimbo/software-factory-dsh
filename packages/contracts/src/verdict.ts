@@ -39,6 +39,14 @@ export const WALL_REASON_CODES = [
   /** The diff was empty. An attempt that changed nothing cannot have fixed anything. */
   'no_change',
   /**
+   * The verdict was supplied by a fake wall (`FACTORY_WALL=fake`) rather than
+   * measured. It exists so a plumbing test can drive the real verdict handling
+   * without pretending a scenario ran: any verdict carrying this code must be
+   * treated as unmeasured, and a `pass` carrying it must never reach promotion
+   * without a human signature.
+   */
+  'fake_verdict_not_measured',
+  /**
    * The change used an operation class that is security-relevant in itself —
    * credential use, network egress, schema migration, data deletion, force-push —
    * even when the change is reversible and every scenario passes. Distinct from

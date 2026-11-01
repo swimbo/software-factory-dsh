@@ -156,8 +156,17 @@ describe('a passed unit', () => {
     expect(unit?.verdict?.delta.value).toBeCloseTo(0.05, 5);
     expect(unit?.verdict?.promotionBlocked).toBe('first promotion requires your signature');
     expect(unit?.promotion).toBeNull();
-    // Nothing needs a person for a verified unit, and nothing is unknown.
-    expect(status.waitingOnPerson).toEqual([]);
+    // A verified unit is not finished: the first promotion is a signature, so the gate
+    // is open and the page must say so instead of reporting `0 need you` (`ux-plan.md`
+    // A-1). This is the gate the CLI has always emitted and the panel used to drop.
+    expect(status.waitingOnPerson).toHaveLength(1);
+    const gate = status.waitingOnPerson[0];
+    expect(gate?.kind).toBe('initial_production_deploy');
+    expect(gate?.unitId).toBe(unit?.unitId);
+    expect(gate?.irreversible).toBe(true);
+    expect(gate?.recommendedCommand).toBe(`factory promote ${unit?.unitId ?? ''}`);
+    expect(gate?.since).toBe(unit?.verdict?.createdAt);
+    expect(gate?.question).toContain('signature');
   });
 
   it('never counts the receipt narrative as a page fact', () => {
@@ -191,6 +200,8 @@ describe('a passed unit', () => {
     expect(unit?.promotion?.signedBy).toBe('operator@example.com');
     expect(unit?.promotion?.signedAt).toBe(LATER);
     expect(unit?.promotion?.id).toMatch(/^P-[0-9a-z]{4,}$/);
+    // A signed gate is not a standing chore: the chore list is empty again.
+    expect(status.waitingOnPerson).toEqual([]);
   });
 });
 
@@ -599,7 +610,11 @@ describe('the projection never throws on a plain store', () => {
       buildStatus(store(), { now: () => new Date(LATER), startedAt: new Date(AT) }),
     );
     expect(status.units).toHaveLength(3);
+    // One per reason, and the kind set is the cross-surface contract: the CLI reports
+    // the same three kinds for the same store (asserted end-to-end in
+    // `e2e/panel/status-render.spec.ts`).
     expect(status.waitingOnPerson.map((item) => item.kind).sort()).toEqual([
+      'initial_production_deploy',
       'lit_unit',
       'unknown_verdict',
     ]);

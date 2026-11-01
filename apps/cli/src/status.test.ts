@@ -99,6 +99,35 @@ describe('status when something is unknown', () => {
   });
 });
 
+describe('status budget and task classes', () => {
+  it('reports the documented daily default instead of a $0 ceiling, and says it is a default', () => {
+    const home = tempHome();
+    const run = runCli(['status', '--json'], { home });
+    const json = jsonOf(run);
+    const budget = json['budget'] as Record<string, unknown>;
+    const perDay = budget['perDay'] as Record<string, unknown>;
+    // $0 would read as "the budget is exhausted". No envelope row means the documented
+    // default applies, and the note says so in words an operator can act on.
+    expect(perDay['limit']).toBe(20);
+    expect(perDay['kind']).toBe('estimated');
+    expect(String(budget['note'])).toContain('documented default');
+    // The marker is render-only: it must not leak into the frozen status contract.
+    expect(perDay['limitIsDefault']).toBeUndefined();
+    expect(run.stderr).toContain('default');
+  });
+
+  it('aggregates Δ per task class from verdicts that measured one, never from a passing suite', () => {
+    const home = tempHome();
+    const json = jsonOf(runCli(['status', '--json'], { home }));
+    const health = json['health'] as Record<string, unknown>;
+    // Nothing has been measured here, and the array says that rather than implying
+    // "everything is stable".
+    expect(health['taskClasses']).toEqual([]);
+    const human = runCli(['status'], { home });
+    expect(human.stderr).toContain('task classes  none measured');
+  });
+});
+
 describe('status of a single unit', () => {
   it('prints the state as a word in a fixed column, and no diff', () => {
     const home = tempHome();

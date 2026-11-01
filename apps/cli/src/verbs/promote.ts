@@ -31,6 +31,28 @@ export function promotionPhrase(unitId: string): string {
   return `${PROMOTION_PHRASE_PREFIX} ${unitId}`;
 }
 
+/**
+ * `--signature <path>` names a **file**, and the help has always said so.
+ *
+ * The value is read when it is an existing file, and otherwise used verbatim so an
+ * operator can paste an armoured signature through a shell variable. Reading first
+ * matters: passing the *path* to the verifier — as this verb used to — fails every real
+ * promotion with `PROMOTION_UNSIGNED`, which is a refusal the operator cannot fix by
+ * doing what the error asks.
+ */
+function resolveSignature(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (existsSync(value)) {
+    try {
+      const text = readFileSync(value, 'utf8').trim();
+      if (text.length > 0) return text;
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
 function operatorPublicKeyPem(ctx: VerbInput['ctx']): string | null {
   const configured = (ctx.env.FACTORY_OPERATOR_KEY ?? '').trim();
   const candidates = [
@@ -48,6 +70,33 @@ function operatorPublicKeyPem(ctx: VerbInput['ctx']): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Reason codes that mean "this pass was not measured".
+ *
+ * `fake_verdict_not_measured` is the explicit one. The rest are the wall's own
+ * vocabulary for a check it could not run: a pass carrying any of them is a
+ * contradiction (the contract refuses to store such a pass today), so this list is
+ * belt-and-braces against a future wall that records an unmeasured check as a note
+ * rather than as `unknown`.
+ */
+const UNMEASURED_REASONS: ReadonlySet<string> = new Set([
+  'fake_verdict_not_measured',
+  'acceptance_unmeasured',
+  'delta_unmeasured',
+  'holdout_unavailable',
+  'receipt_unavailable',
+  'suite_unknown',
+]);
+
+export function isUnmeasuredReason(reason: string): boolean {
+  return UNMEASURED_REASONS.has(reason);
+}
+
+/** A wall version this build stamps on a replayed verdict (`<base>-fake`). */
+export function isFakeWall(wallVersion: string | null | undefined): boolean {
+  return typeof wallVersion === 'string' && wallVersion.endsWith('-fake');
 }
 
 export function runPromote(input: VerbInput): number {
@@ -71,7 +120,7 @@ export function runPromote(input: VerbInput): number {
   }
 
   const verdictRow = ctx.store.latestVerdictForUnit(unitId);
-  const signaturePem = textOption(input.options, 'signature');
+  const signaturePem = resolveSignature(textOption(input.options, 'signature'));
   const phrase = promotionPhrase(unitId);
 
   if (signaturePem === undefined) {
@@ -150,6 +199,40 @@ export function runPromote(input: VerbInput): number {
       { unitId },
     );
   }
+
+  // The unmeasured-evidence gate, and the reason it sits *before* the signature
+  // check: a fake wall can mint a `pass` from a JSON template, and if promotion
+  // accepted it the fake would be the shortest path to a signed artifact — the one
+  // control the design rests on ("a pass is earned") satisfiable by a file. Two
+  // independent markers are refused here, because either one alone is a single
+  // point of failure: an unmeasured reason code, and the `-fake` wall version this
+  // build stamps on every fake verdict.
+  //
+  // Be precise about what each arm does today. The **reason** arm is currently
+  // unreachable by construction: `assertVerdictIsEarned` refuses to store a `pass`
+  // carrying any reason at all, so a passing verdict always arrives with `reasons: []`
+  // — which is why the fake wall labels its pass with `wallVersion: '<base>-fake'`
+  // instead of a caveat string. That is fine, not a hole: the arm is the guard for the
+  // day a real runner can return a *labelled* pass (a pass that measured most of its
+  // scenarios and honestly reported the one it could not), and removing it now would
+  // mean re-deriving the rule under deadline pressure later. It costs one filter over
+  // an array that is usually empty.
+  const unmeasured = verdictRow.verdict.reasons.filter(isUnmeasuredReason);
+  if (unmeasured.length > 0 || isFakeWall(verdictRow.wallVersion)) {
+    throw new FactoryError(
+      'VERDICT_UNKNOWN',
+      `VERDICT_UNKNOWN: verdict ${verdictRow.verdictId} is not evidence. ` +
+        `${unmeasured.length > 0 ? `It carries ${unmeasured.join(', ')}` : `It was produced by ${verdictRow.wallVersion}`}` +
+        `; a pass that no scenario measured cannot promote, and there is no override. ` +
+        `Re-measure with the real wall: factory run ${unitId} --verify-only`,
+      {
+        unitId,
+        verdictId: verdictRow.verdictId,
+        wallVersion: verdictRow.wallVersion,
+        reasons: [...verdictRow.verdict.reasons],
+      },
+    );
+  }
   if (verdictRow.outcome === 'unknown') {
     throw new FactoryError(
       'VERDICT_UNKNOWN',
@@ -211,11 +294,12 @@ export function runPromote(input: VerbInput): number {
     signedBy,
     createdAt: ctx.nowIso(),
   });
-  ctx.store.setUnitState(unitId, 'promoted', 'promotion signed', {
-    actor: 'operator',
-    traceId: ctx.traceId,
-    occurredAt: ctx.nowIso(),
-  });
+  // `insertPromotion` already moved the unit to `promoted` and wrote the
+  // `unit.promoted` event, inside the same transaction as the promotion row. Calling
+  // `setUnitState` here as well was a second, illegal transition: the unit was terminal
+  // by the time it ran, so every *successful* promotion threw `UNIT_ALREADY_TERMINAL`
+  // after writing its artifact — the failure mode that made a real promotion impossible
+  // and left the ledger claiming a promotion the caller believed had failed.
 
   input.emit({
     unitId,
