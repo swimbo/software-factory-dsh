@@ -354,7 +354,14 @@ export function resolvePolicy(
   allowColdStart?: boolean,
 ): QualifierPolicy {
   const enabled = allowColdStart ?? env['FACTORY_POLICY_ALLOW_COLD_START'] === '1';
-  return enabled ? { ...DEFAULT_POLICY, allowColdStart: true } : { ...DEFAULT_POLICY };
+  // Read here, at the composition root, and nowhere else: the worker's process environment
+  // must not be able to switch brokering off for the factory that brokers it.
+  const brokering = env['FACTORY_PRIVILEGED_BROKERING'] === 'on' ? 'on' : 'off';
+  return {
+    ...DEFAULT_POLICY,
+    allowColdStart: enabled,
+    privilegedBrokering: brokering,
+  };
 }
 
 export function newId(prefix: string): string {

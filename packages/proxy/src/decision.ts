@@ -20,6 +20,7 @@
  * caller through the `DecisionSink` port — this package deliberately does not import the
  * store, because a broker that can write the ledger can also lie in it.
  */
+import { keyId, signPayload, verifyPayloadSignature } from '../../gates/src/signing.ts';
 import { contentHash } from '../../contracts/src/index.ts';
 
 import type { Classification } from './classify.ts';
@@ -28,12 +29,15 @@ import type { Classification } from './classify.ts';
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
 const SHA = /^sha256:[0-9a-f]{64}$/u;
 
-export interface PrivilegedDecision {
-  /** `gd_<hash[0:24]>`, derived from the decision content — never minted randomly. */
-  readonly decisionId: string;
+/**
+ * The part of the record that is signed. Everything here is covered by the signature, so
+ * editing *any* field invalidates it — that is the property that makes the artifact a
+ * record rather than a suggestion.
+ */
+export interface DecisionContent {
   /** What the decision is about: the unit id (or task id) the operator was looking at. */
   readonly taskId: string;
-  /** Who decided. A key id or handle, not a claim the worker can assert. */
+  /** Who decided — the *key* identity (`ed25519:ab02…`), not a name the worker can assert. */
   readonly operator: string;
   /** The phrase from the operator's envelope, stored so the decision can be re-read. */
   readonly phrase: string;
@@ -42,16 +46,46 @@ export interface PrivilegedDecision {
   readonly operationSha: string;
   readonly issuedAt: string;
   readonly outcome: 'allow' | 'deny';
+  /** Which operator key signed it, so a retired key can be refused by identity. */
+  readonly keyId: string;
+}
+
+export interface PrivilegedDecision extends DecisionContent {
+  /** `gd_<hash[0:24]>`, derived from the decision content — never minted randomly. */
+  readonly decisionId: string;
+  /**
+   * ed25519 over `sha256:` of the content (armoured PEM), or `null` for an unsigned
+   * record. `null` is a *refusal* in the broker, never a fallback: an artifact whose
+   * authenticity rests on a phrase in `ps` is the appearance of a gate.
+   */
+  readonly signature: string | null;
+}
+
+/** The bytes a signature covers: the hash of the content, ASCII on every platform. */
+export function decisionPayload(content: DecisionContent): string {
+  return contentHash({
+    taskId: content.taskId,
+    operator: content.operator,
+    phrase: content.phrase,
+    expiresAt: content.expiresAt,
+    operationSha: content.operationSha,
+    issuedAt: content.issuedAt,
+    outcome: content.outcome,
+    keyId: content.keyId,
+  });
 }
 
 export interface DecisionInput {
   readonly taskId: string;
-  readonly operator: string;
   readonly phrase: string;
   readonly expiresAt: string;
   readonly issuedAt: string;
   readonly outcome: 'allow' | 'deny';
   readonly classification: Classification;
+  /** The operator's private key. Read by the CLI from `FACTORY_HOME/keys`, never by the worker. */
+  readonly privateKeyPem: string;
+  /** Its public half: the key id is derived from it, so the id cannot be asserted. */
+  readonly publicKeyPem: string;
 }
 
 export class DecisionError extends Error {
@@ -65,8 +99,8 @@ export class DecisionError extends Error {
 }
 
 /** The decision id is a function of the content, so replay cannot mint a second record. */
-function deriveId(fields: Omit<PrivilegedDecision, 'decisionId'>): string {
-  return `gd_${contentHash(fields).slice('sha256:'.length, 'sha256:'.length + 24)}`;
+function deriveId(content: DecisionContent): string {
+  return `gd_${contentHash(content).slice('sha256:'.length, 'sha256:'.length + 24)}`;
 }
 
 /**
@@ -81,9 +115,6 @@ export function buildDecision(input: DecisionInput, operationSha: string): Privi
     throw new DecisionError(
       'a privileged decision needs the operator phrase from the envelope; an empty phrase is not a decision',
     );
-  }
-  if (input.operator.trim() === '') {
-    throw new DecisionError('a privileged decision needs an operator identifier');
   }
   if (!ISO.test(input.expiresAt)) {
     throw new DecisionError(
@@ -100,16 +131,79 @@ export function buildDecision(input: DecisionInput, operationSha: string): Privi
       `operationSha must be a sha256 hash of the normalised operation, got ${JSON.stringify(operationSha)}`,
     );
   }
-  const fields = {
+  let operator: string;
+  try {
+    operator = keyId(input.publicKeyPem);
+  } catch (error) {
+    throw new DecisionError(
+      `the operator public key is not parsable, so the decision cannot name who signed it: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const content: DecisionContent = {
     taskId: input.taskId,
-    operator: input.operator,
+    operator,
     phrase: input.phrase,
     expiresAt: input.expiresAt,
     operationSha,
     issuedAt: input.issuedAt,
     outcome: input.outcome,
-  } as const;
-  return { decisionId: deriveId(fields), ...fields };
+    keyId: operator,
+  };
+  // Signed at mint time, not later: a record that exists unsigned is a record somebody can
+  // edit between two of our own lines.
+  const signature = signPayload(decisionPayload(content), input.privateKeyPem);
+  return { decisionId: deriveId(content), ...content, signature };
+}
+
+/**
+ * Verify the signature, before anything else in the record is believed.
+ *
+ * Three refusals, all exit 5 and all `GATE_REQUIRED`, because each means "a person has to
+ * decide" rather than "the authority ran out": unsigned, signed by a key that is no longer
+ * active (retired/rotated), and signed but edited afterwards.
+ */
+export function signatureFault(
+  decision: PrivilegedDecision,
+  activeKeys: ReadonlyMap<string, string>,
+): DecisionFault | null {
+  if (decision.signature === null || decision.signature.trim() === '') {
+    return {
+      code: 'GATE_REQUIRED',
+      exitCode: 5,
+      detail:
+        'the decision is unsigned. A phrase in `ps` is not proof of a person; without a signature the ' +
+        'artifact is an assertion by whoever wrote it',
+      matchedRule: 'broker.unsigned',
+    };
+  }
+  const publicKeyPem = activeKeys.get(decision.keyId);
+  if (publicKeyPem === undefined) {
+    return {
+      code: 'GATE_REQUIRED',
+      exitCode: 5,
+      detail:
+        `decision ${decision.decisionId} was signed by ${decision.keyId}, which is not an active operator ` +
+        `key (retired or unknown: ${[...activeKeys.keys()].join(', ') || 'no active keys'})`,
+      matchedRule: 'broker.key-unknown',
+    };
+  }
+  const valid = verifyPayloadSignature({
+    payload: decisionPayload(decision),
+    signaturePem: decision.signature,
+    publicKeyPem,
+  });
+  if (!valid) {
+    return {
+      code: 'GATE_REQUIRED',
+      exitCode: 5,
+      detail:
+        `the signature on decision ${decision.decisionId} does not verify against ${decision.keyId}: the ` +
+        'record was edited after it was signed, or signed over different bytes',
+      matchedRule: 'broker.signature-invalid',
+    };
+  }
+  return null;
 }
 
 /**
@@ -132,8 +226,16 @@ export function parseDecision(raw: unknown): PrivilegedDecision {
     'operationSha',
     'issuedAt',
     'outcome',
+    'keyId',
+    'signature',
   ];
   for (const key of keys) {
+    if (key === 'signature') {
+      if (body.signature !== null && typeof body.signature !== 'string') {
+        throw new DecisionError("a privileged decision's signature must be a string or null");
+      }
+      continue;
+    }
     if (typeof body[key] !== 'string') {
       throw new DecisionError(`a privileged decision needs a string '${key}'`);
     }
@@ -157,6 +259,7 @@ export function parseDecision(raw: unknown): PrivilegedDecision {
     operationSha: decision.operationSha,
     issuedAt: decision.issuedAt,
     outcome: decision.outcome,
+    keyId: decision.keyId,
   });
   if (decision.decisionId !== expected) {
     throw new DecisionError(
@@ -187,7 +290,12 @@ export function decisionFault(
   operationSha: string,
   nowIso: string,
   operatorPhrase: string | null,
+  activeKeys: ReadonlyMap<string, string>,
 ): DecisionFault | null {
+  // Signature first: nothing in an unverified record may be believed, including its own
+  // `outcome` field — otherwise a forged record could "decide to deny" and be trusted.
+  const signature = signatureFault(decision, activeKeys);
+  if (signature !== null) return signature;
   if (decision.outcome === 'deny') {
     return {
       code: 'GATE_REQUIRED',
@@ -264,6 +372,11 @@ export function toArtifact(decision: PrivilegedDecision): Record<string, unknown
     decisionId: decision.decisionId,
     taskId: decision.taskId,
     operator: decision.operator,
+    keyId: decision.keyId,
+    // The signature travels with the artifact so a person can verify that the record they
+    // are reading is the record that was signed, with `openssl` and no factory at all.
+    signature: decision.signature,
+    payloadSha: decisionPayload(decision),
     phraseSha: contentHash({ phrase: decision.phrase }),
     operationSha: decision.operationSha,
     issuedAt: decision.issuedAt,

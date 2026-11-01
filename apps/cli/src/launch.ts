@@ -108,6 +108,9 @@ export async function launchAttempt(
       const executor = adapter.createFakeExecutorFromFile(ctx.executor.scenarioPath, {
         factoryHome: ctx.home,
         baseRev,
+        // A scenario stands in for the worker, so its `command` steps are worker output and
+        // pass the broker when the policy says so (`FACTORY_PRIVILEGED_BROKERING=on`).
+        privilegedBrokering: ctx.policy.privilegedBrokering,
         ...(pidFile === '' ? {} : { pidFile }),
         log: {
           info: (fields: Record<string, unknown>, message?: string) =>

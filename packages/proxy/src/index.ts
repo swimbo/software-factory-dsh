@@ -46,6 +46,8 @@ export {
 } from './operations.ts';
 export {
   buildDecision,
+  decisionPayload,
+  signatureFault,
   decisionFault,
   DecisionError,
   parseDecision,

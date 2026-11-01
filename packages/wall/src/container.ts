@@ -34,9 +34,9 @@
  * It is monotonic, it is not a wall clock, and a duration used in a verdict must not
  * jump when the machine's clock is corrected.
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ScenarioRunner, ScenarioRunInput, ScenarioRunResult } from './evaluate.ts';
@@ -94,6 +94,22 @@ export interface ContainerRunnerOptions {
   readonly prepare?: (input: ScenarioRunInput) => string;
   /** Copy the tree before mounting (default true). `false` mounts the source directly. */
   readonly copyCheckout?: boolean;
+  /**
+   * Where `docker run` writes the container id (a `--cidfile`).
+   *
+   * Load-bearing on timeout: killing the `docker run` *client* leaves the container
+   * running, because the client is not the container's parent. The cidfile is how the
+   * wall finds the container it started and kills *it*, so a hung scenario cannot outlive
+   * the run that measured it.
+   */
+  readonly cidFile?: string;
+  /**
+   * A label applied to the container, so an orphan can be found and asserted on.
+   *
+   * `--label org.factory.run=<token>` makes "is anything still running from this suite?"
+   * a query rather than a guess.
+   */
+  readonly label?: string;
 }
 
 const DEFAULT_WORKSPACE = '/workspace';
@@ -113,6 +129,35 @@ export function resolveImage(
     throw new TypeError(`imageDigest must be sha256:<64 hex>, got ${options.imageDigest}`);
   }
   return `${image}@${options.imageDigest}`;
+}
+
+/**
+ * The content address of a **locally built** image (`docker image inspect -f '{{.Id}}'`).
+ *
+ * A locally built image has no registry manifest, so it has no `name@sha256:…` reference
+ * to pin — `docker run img@<imageID>` fails, because digest references resolve through a
+ * registry. The image id *is* a content address though, and it is the only honest pin
+ * available offline: the caller records it in the verdict and this function re-checks, at
+ * run time, that the tag still resolves to it.
+ */
+export function imageContentId(image: string, dockerBin = 'docker'): string | null {
+  const probe = spawnSync(dockerBin, ['image', 'inspect', '--format', '{{.Id}}', image], {
+    encoding: 'utf8',
+  });
+  if (probe.status !== 0) return null;
+  const id = (probe.stdout ?? '').trim();
+  return DIGEST_PATTERN.test(id) ? id : null;
+}
+
+/**
+ * Does the tag still resolve to the digest we measured?
+ *
+ * This is the offline substitute for a registry pin: a tag is mutable, so the wall checks
+ * the mutation rather than trusting the name. `false` means "run nothing" — a scenario run
+ * against an image nobody pinned is a measurement of something else.
+ */
+export function imageIdMatches(image: string, expectedId: string, dockerBin = 'docker'): boolean {
+  return imageContentId(image, dockerBin) === expectedId;
 }
 
 /** Host uid:gid, so the container is non-root and can still write the one mount it is given. */
@@ -149,6 +194,8 @@ export function dockerRunArgv(
     | 'network'
     | 'readOnlyRoot'
     | 'forbidMountsUnder'
+    | 'cidFile'
+    | 'label'
   >,
   mountDir: string,
   argv: readonly string[],
@@ -163,6 +210,9 @@ export function dockerRunArgv(
   return [
     'run',
     '--rm',
+    // Written before the container starts, so a timeout always has a name to kill.
+    ...(options.cidFile === undefined ? [] : ['--cidfile', options.cidFile]),
+    ...(options.label === undefined ? [] : ['--label', `org.factory.run=${options.label}`]),
     // No network, no exceptions: a holdout that can call out is a holdout that can be
     // talked to.
     '--network',
@@ -229,6 +279,29 @@ export async function dockerIsAvailable(dockerBin = 'docker'): Promise<boolean> 
   });
 }
 
+/** The container id from a cidfile, or null when docker never wrote one. */
+function readContainerId(path: string): string | null {
+  try {
+    const id = readFileSync(path, 'utf8').trim();
+    return id === '' ? null : id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Kill a container by id, best-effort.
+ *
+ * `docker kill` and not a signal to the docker client: the container outlives the client,
+ * so without this a timed-out scenario keeps running.
+ */
+function killContainer(dockerBin: string, id: string): void {
+  const killed = spawnSync(dockerBin, ['kill', id], { encoding: 'utf8' });
+  if (killed.status === 0) return;
+  // Already gone, or never started: `rm -f` is the belt to `kill`'s braces.
+  spawnSync(dockerBin, ['rm', '-f', id], { encoding: 'utf8' });
+}
+
 /**
  * Build the runner.
  *
@@ -240,6 +313,7 @@ export async function dockerIsAvailable(dockerBin = 'docker'): Promise<boolean> 
 export function createContainerRunner(options: ContainerRunnerOptions): ScenarioRunner {
   const dockerBin = options.dockerBin ?? 'docker';
   const copyCheckout = options.copyCheckout ?? true;
+  let runs = 0;
 
   return {
     // Container isolation is exactly what this runner provides, so `requires: 'container'`
@@ -252,6 +326,10 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
 
       let mountDir = source;
       let tempDir: string | null = null;
+      runs += 1;
+      const cidFile =
+        options.cidFile ?? join(tmpdir(), `factory-cid-${String(process.pid)}-${String(runs)}.txt`);
+      const label = options.label;
       if (copyCheckout) {
         tempDir = mkdtempSync(join(tmpdir(), 'factory-run-'));
         try {
@@ -282,6 +360,8 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
             if (settled) return;
             settled = true;
             if (timer !== null) clearTimeout(timer);
+            // A cidfile that outlives the run leaks a name; remove it with the run.
+            rmSync(cidFile, { force: true });
             resolvePromise({
               exitCode,
               outputSha: hashOf(chunks),
@@ -292,7 +372,11 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
 
           let args: string[];
           try {
-            args = dockerRunArgv(options, mountDir, input.argv);
+            args = dockerRunArgv(
+              { ...options, ...(label === undefined ? {} : { label }), cidFile },
+              mountDir,
+              input.argv,
+            );
           } catch {
             // Invalid invocation (no image, empty argv): unmeasured, not failed.
             finish(null);
@@ -303,7 +387,13 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
           timer = setTimeout(
             () => {
               timedOut = true;
+              // Kill the client so the promise settles…
               child.kill('SIGKILL');
+              // …and the container, which the client's death does not stop: a hung
+              // scenario would otherwise keep its memory and pid budget after the wall had
+              // already classified the run as timed out.
+              const id = readContainerId(cidFile);
+              if (id !== null) killContainer(dockerBin, id);
             },
             Math.max(1, input.timeoutMs),
           );

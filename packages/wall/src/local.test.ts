@@ -9,11 +9,20 @@
  * 2. the runner reports a summary that disagrees with the exit code and someone believes it;
  * 3. the runner is handed a scenario that asked for isolation and runs it anyway.
  */
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createLocalRunner, LocalRunnerRefusal, parseSummary } from './local.ts';
+import { classify, operationSha } from '../../proxy/src/classify.ts';
+import { buildDecision } from '../../proxy/src/decision.ts';
+import { keyId } from '../../gates/src/signing.ts';
+import {
+  createLocalRunner,
+  LocalRunnerRefusal,
+  PrivilegedBrokerRefusal,
+  parseSummary,
+} from './local.ts';
 import { NO_PATCH, evaluate, type ScenarioRunInput } from './evaluate.ts';
 import {
   sha256Hex,
@@ -21,6 +30,9 @@ import {
   type AcceptanceCriterion,
   type UnitSpec,
 } from '@factory/contracts';
+
+/** A fixed clock: this package must never read the wall clock, and neither do its tests. */
+const NOW = '2026-11-01T12:30:00.000Z';
 
 const scratch: string[] = [];
 afterEach(() => {
@@ -265,5 +277,88 @@ describe('a scenario that needs containment is refused, not degraded', () => {
     expect(verdict.reasons).toContain('holdout_unavailable');
     // The instrument identity says it was not a container run.
     expect(verdict.wallVersion).toContain('+local');
+  });
+});
+
+describe('the broker: a privileged command from a receipt is refused, not re-run', () => {
+  it('refuses a sudo argv before spawning anything', async () => {
+    const runner = createLocalRunner({
+      cwd: worktree(),
+      privilegedBrokering: 'on',
+      nowIso: () => NOW,
+    });
+
+    // `sudo` here stands for "a command a receipt claims the worker ran". The wall cannot
+    // broker it, so it must not measure it: the refusal is typed, and the wall turns it into
+    // `unknown` rather than into an exit code that could be believed.
+    await expect(runner.run(runInput(['sudo', 'ls']))).rejects.toBeInstanceOf(
+      PrivilegedBrokerRefusal,
+    );
+    await expect(runner.run(runInput(['sudo', 'ls']))).rejects.toThrow(/GATE_REQUIRED/u);
+  });
+
+  it('refuses a write into a privileged path, and names the operation', async () => {
+    const runner = createLocalRunner({
+      cwd: worktree(),
+      privilegedBrokering: 'on',
+      nowIso: () => NOW,
+    });
+    // The refusal names the path, not just the rule id: an operator reading the verdict has
+    // to know *which* write was refused.
+    await expect(runner.run(runInput(['cp', '/etc/hosts', '/dev/null']))).rejects.toThrow(
+      /cp writes \/etc\/hosts/u,
+    );
+  });
+
+  it('runs an ordinary command through the same runner', async () => {
+    const runner = createLocalRunner({
+      cwd: worktree(),
+      privilegedBrokering: 'on',
+      nowIso: () => NOW,
+    });
+    const result = await runner.run(runInput(node('process.stdout.write("ran\\n")')));
+    expect(result.exitCode).toBe(0);
+    expect(result.outputSha).toMatch(/^sha256:[0-9a-f]{64}$/u);
+  });
+
+  it('with brokering off, the same privileged argv runs — that is the difference', async () => {
+    // `/etc/hosts` exists on macOS and Linux, and copying it to /dev/null changes nothing,
+    // so this leg proves the *refusal* is what 'on' adds rather than the command failing.
+    const runner = createLocalRunner({ cwd: worktree(), privilegedBrokering: 'off' });
+    const result = await runner.run(runInput(['cp', '/etc/hosts', '/dev/null']));
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('allows the operation when the operator signed a decision for exactly that argv', async () => {
+    const pair = generateKeyPairSync('ed25519', {
+      privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
+      publicKeyEncoding: { format: 'pem', type: 'spki' },
+    });
+    const argv = ['cp', '/etc/hosts', '/dev/null'];
+    const classification = classify(argv, { home: null });
+    const decision = buildDecision(
+      {
+        taskId: 'U-1',
+        phrase: 'copy the hosts file as part of this unit',
+        issuedAt: '2026-11-01T12:00:00.000Z',
+        expiresAt: '2026-11-01T13:00:00.000Z',
+        outcome: 'allow',
+        classification,
+        privateKeyPem: pair.privateKey,
+        publicKeyPem: pair.publicKey,
+      },
+      operationSha(classification),
+    );
+    const runner = createLocalRunner({
+      cwd: worktree(),
+      privilegedBrokering: 'on',
+      nowIso: () => '2026-11-01T12:30:00.000Z',
+      operatorPhrase: 'copy the hosts file as part of this unit',
+      decision,
+      activeKeys: new Map([[keyId(pair.publicKey), pair.publicKey]]),
+      home: null,
+    });
+    const result = await runner.run(runInput(argv));
+    expect(result.exitCode).toBe(0);
   });
 });

@@ -271,6 +271,11 @@ export interface WallInputs {
   readonly policy: WallPolicyEnv;
   readonly nowIso: string;
   readonly policyVersion: string;
+  /**
+   * The operator's home, for `~` expansion in the broker's path rules. `null` means the
+   * classifier cannot expand `~`, which makes it refuse rather than guess.
+   */
+  readonly home?: string | null | undefined;
   /** Where a fake wall's template lives, when `FACTORY_WALL=fake` is not in play this is null. */
   readonly holdoutRoot?: string | undefined;
 }
@@ -296,6 +301,14 @@ export async function evaluateReceipt(input: WallInputs): Promise<WallOutcome> {
   const runner = createLocalRunner({
     cwd: dirname(input.patchFile),
     prepare: makePrepare({ pristineRepo: input.pristineRepo, testRoot: input.policy.testRoot }),
+    // Always on, and deliberately not configurable: this runner re-executes the commands a
+    // receipt *claims* the worker ran. A `sudo` in that list is an operation the factory
+    // cannot broker and therefore cannot verify — the run becomes `unknown`, which never
+    // satisfies the gate. `privilegedBrokering: 'off'` in the qualifier policy governs the
+    // worker's own steps, not the wall's re-execution of them.
+    privilegedBrokering: 'on',
+    home: input.home ?? null,
+    nowIso: () => input.nowIso,
   });
 
   const verdict = await evaluate({

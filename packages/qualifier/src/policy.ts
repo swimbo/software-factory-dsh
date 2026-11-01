@@ -62,6 +62,20 @@ export interface QualifierPolicy {
    * it stops applying the moment a class has samples.
    */
   readonly allowColdStart: boolean;
+  /**
+   * Whether a worker's privileged operations must be brokered.
+   *
+   * `'off'` is the shipped default because turning it **on** for the first time changes
+   * admission behaviour for every unit: a `sudo` in a receipt that used to be re-executed
+   * now becomes `unknown`. That is a separate, separately-tested decision, and an operator
+   * who makes it changes `currentPolicyVersion`, so the verdicts made under it are
+   * distinguishable from the ones made before.
+   *
+   * The factory's *own* re-execution of a receipt's commands (`packages/wall/src/local.ts`)
+   * does not consult this flag: there it is always on. A privilege the factory cannot broker
+   * is a privilege it cannot verify, and that is not a policy choice.
+   */
+  readonly privilegedBrokering: 'off' | 'on';
 }
 
 /**
@@ -81,6 +95,7 @@ export const DEFAULT_POLICY: QualifierPolicy = Object.freeze({
   maxLines: 400,
   maxFiles: 25,
   restateOverlapMin: 0.5,
+  privilegedBrokering: 'off',
   weights: Object.freeze({
     intent_derivability: 30,
     reversibility: 20,
@@ -120,6 +135,11 @@ function requireCount(name: string, value: number, minimum: number): void {
  */
 export function assertPolicy(policy: QualifierPolicy): void {
   const { weights } = policy;
+  if (policy.privilegedBrokering !== 'off' && policy.privilegedBrokering !== 'on') {
+    fail(
+      `privilegedBrokering must be 'off' or 'on', got ${JSON.stringify(policy.privilegedBrokering)}`,
+    );
+  }
   if (weights === null || typeof weights !== 'object') fail('weights must be an object');
 
   const declared = new Set<string>(SIGNAL_NAMES);

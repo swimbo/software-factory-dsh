@@ -59,6 +59,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { FactoryError, sha256Hex, WorkerReceipt } from '@factory/contracts';
+import { broker, createMemoryRegistry, describeRefusal } from '../../proxy/src/broker.ts';
 import type { z } from 'zod';
 
 import {
@@ -121,6 +122,19 @@ export interface FakeScenario {
 }
 
 export interface FakeExecutorOptions {
+  /**
+   * Broker a `command` step's argv before spawning it.
+   *
+   * A scenario is a fixture *standing in for the worker*, so its `command` steps are worker
+   * output: the factory is about to run an argv it did not write. With this `'on'` a
+   * privileged (or unclassifiable) command fails the attempt with `GATE_REQUIRED` instead of
+   * running — a scenario cannot launder a `sudo` through a green spec. Defaults to `'off'`,
+   * because the fake is a test seam and the shipped qualifier policy defaults off; the CLI
+   * passes the policy value (`FACTORY_PRIVILEGED_BROKERING=on`).
+   */
+  readonly privilegedBrokering?: 'off' | 'on';
+  /** The operator's home, for `~` expansion in the broker's path rules. */
+  readonly home?: string | null;
   /** Parsed scenario. `createFakeExecutorFromFile` reads one from disk. */
   readonly scenario: FakeScenario;
   /** Factory root; the attempt record is written under it, never inside the clone. */
@@ -292,6 +306,25 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
             break;
           }
           case 'command': {
+            if ((options.privilegedBrokering ?? 'off') === 'on') {
+              const brokered = broker(step.argv, {
+                nowIso: (options.now?.() ?? new Date()).toISOString(),
+                home: options.home ?? null,
+                operatorPhrase: null,
+                decision: null,
+                sink: null,
+                registry: createMemoryRegistry(),
+                activeKeys: new Map<string, string>(),
+              });
+              if (brokered.kind === 'refuse') {
+                // Fail the attempt rather than the step: a refused operation is not a command
+                // that ran and exited 1, and the receipt must not claim it did.
+                throw new FactoryError('GATE_REQUIRED', describeRefusal(brokered), {
+                  argv: [...step.argv],
+                  matchedRule: brokered.matchedRule,
+                });
+              }
+            }
             const started = Date.now();
             const result = spawnSync(step.argv[0] as string, step.argv.slice(1), {
               cwd: payload.attemptDir,

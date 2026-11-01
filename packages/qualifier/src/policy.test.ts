@@ -142,6 +142,7 @@ describe('currentPolicyVersion', () => {
       minPassRate: 0.95,
       minSamples: 10,
       allowColdStart: false,
+      privilegedBrokering: 'off',
       darkThreshold: 90,
     };
     // Same content, different literal order: the version must not move, or every

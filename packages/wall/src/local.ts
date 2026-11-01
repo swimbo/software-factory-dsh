@@ -31,6 +31,9 @@
  * the same reason as the container runner — a duration in a verdict must not jump when
  * the machine's clock is corrected.
  */
+import { broker, createMemoryRegistry, describeRefusal } from '../../proxy/src/broker.ts';
+import type { BrokerRefusal } from '../../proxy/src/broker.ts';
+import type { PrivilegedDecision } from '../../proxy/src/decision.ts';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
@@ -55,6 +58,27 @@ import type {
 export const SUMMARY_LINE_PREFIX = 'FACTORY_SUMMARY ';
 
 export interface LocalRunnerOptions {
+  /**
+   * Broker the privileged operations the factory is about to re-execute.
+   *
+   * `'on'` means: a command the broker classifies as privileged (or cannot classify) is
+   * **not spawned**. The runner throws {@link PrivilegedBrokerRefusal}, the wall turns the
+   * resulting run into `unknown`, and `unknown` never satisfies the gate. `'off'` exists
+   * only for callers that are not running worker-declared commands (and for tests that
+   * assert the difference); the CLI's wall passes `'on'` and has no flag to turn it off.
+   */
+  readonly privilegedBrokering?: 'off' | 'on';
+  /** The operator's home, for `~` expansion in the broker's path rules. */
+  readonly home?: string | null;
+  /** Injected clock for decision expiry; the runner never reads the system time itself. */
+  readonly nowIso?: () => string;
+  /** A decision the operator signed for one specific operation, or `null`. */
+  readonly decision?: PrivilegedDecision | null;
+  /** The phrase the operator supplied on this invocation's envelope, or `null`. */
+  readonly operatorPhrase?: string | null;
+  /** The operator keys the factory currently trusts, `keyId → publicKeyPem`. */
+  readonly activeKeys?: ReadonlyMap<string, string>;
+
   /** The prepared checkout. Copied per run unless `copyCheckout` is false. */
   readonly cwd: string;
   /**
@@ -85,6 +109,23 @@ export interface LocalRunnerOptions {
  * The message names the requirement, because an operator reading the audit log needs to
  * know which isolation the wall could not deliver.
  */
+/**
+ * The broker refused an operation this runner was about to spawn.
+ *
+ * Typed separately from {@link LocalRunnerRefusal} so the wall can tell "this runner cannot
+ * meet the isolation requirement" from "this command needed a person and had no decision":
+ * they are both `unknown`, but only one of them is about the instrument.
+ */
+export class PrivilegedBrokerRefusal extends Error {
+  readonly refusal: BrokerRefusal;
+
+  constructor(refusal: BrokerRefusal) {
+    super(describeRefusal(refusal));
+    this.name = 'PrivilegedBrokerRefusal';
+    this.refusal = refusal;
+  }
+}
+
 export class LocalRunnerRefusal extends Error {
   readonly requirement: string;
 
@@ -166,6 +207,30 @@ export function createLocalRunner(options: LocalRunnerOptions): ScenarioRunner {
       // meet must not produce a partial run that looks like a measurement.
       if (input.requires === 'container') throw new LocalRunnerRefusal("requires: 'container'");
       if (input.network === 'none') throw new LocalRunnerRefusal("network: 'none'");
+
+      // The same discipline for authority: this argv came from a receipt, i.e. from the
+      // worker. A privileged operation with no recorded decision is refused *here*, before
+      // a temp copy is made, so no part of it runs.
+      if ((options.privilegedBrokering ?? 'off') === 'on') {
+        // The clock is the caller's, never this package's: `evaluate.test.ts` proves that
+        // `src/` contains no wall-clock read, and a default `new Date()` would break that
+        // promise for the one call site where expiry actually matters.
+        if (options.nowIso === undefined) {
+          throw new TypeError(
+            "privileged brokering needs an injected clock (`nowIso`): a decision's expiry cannot be judged by this package's own reading of the wall clock",
+          );
+        }
+        const brokered = broker(input.argv, {
+          nowIso: options.nowIso(),
+          home: options.home ?? null,
+          operatorPhrase: options.operatorPhrase ?? null,
+          decision: options.decision ?? null,
+          sink: null,
+          registry: createMemoryRegistry(),
+          activeKeys: options.activeKeys ?? new Map<string, string>(),
+        });
+        if (brokered.kind === 'refuse') throw new PrivilegedBrokerRefusal(brokered);
+      }
 
       const started = performance.now();
       if (!Array.isArray(input.argv) || input.argv.length === 0 || input.argv[0] === '') {

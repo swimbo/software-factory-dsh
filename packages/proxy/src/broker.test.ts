@@ -10,12 +10,23 @@
  * refusal with a stable rule id, because the audit quotes rule ids and an exit code alone
  * cannot be re-read six months later.
  */
+import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { broker, createMemoryRegistry, describeRefusal, type DecisionSink } from './broker.ts';
 import { classify, operationSha } from './classify.ts';
 import { buildDecision, toArtifact, type PrivilegedDecision } from './decision.ts';
+import { keyId } from '../../gates/src/signing.ts';
 
 const HOME = '/Users/operator';
+
+const OPERATOR = (() => {
+  const pair = generateKeyPairSync('ed25519', {
+    privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
+    publicKeyEncoding: { format: 'pem', type: 'spki' },
+  });
+  return { privateKeyPem: pair.privateKey, publicKeyPem: pair.publicKey };
+})();
+const ACTIVE_KEYS = new Map([[keyId(OPERATOR.publicKeyPem), OPERATOR.publicKeyPem]]);
 const PHRASE = 'allow sudo to install the build toolchain';
 const ISSUED_AT = '2026-11-01T12:00:00.000Z';
 const EXPIRES_AT = '2026-11-01T13:00:00.000Z';
@@ -25,12 +36,13 @@ function decideFor(argv: readonly string[]): PrivilegedDecision {
   return buildDecision(
     {
       taskId: 'U-7f3a9c',
-      operator: 'operator-key-1',
       phrase: PHRASE,
       issuedAt: ISSUED_AT,
       expiresAt: EXPIRES_AT,
       outcome: 'allow',
       classification,
+      privateKeyPem: OPERATOR.privateKeyPem,
+      publicKeyPem: OPERATOR.publicKeyPem,
     },
     operationSha(classification),
   );
@@ -46,6 +58,7 @@ const baseOptions = {
   home: HOME,
   operatorPhrase: PHRASE,
   registry: createMemoryRegistry(),
+  activeKeys: ACTIVE_KEYS,
 } as const;
 
 describe('an ordinary operation is not brokered', () => {
@@ -243,6 +256,71 @@ describe('a valid decision allows exactly one operation', () => {
       });
       expect(outcome.kind, argv.join(' ')).toBe('allow');
     }
+  });
+
+  it('refuses an unsigned decision even when every other field is right', () => {
+    const argv = ['sudo', 'install', 'build-tool'];
+    const decision = { ...decideFor(argv), signature: null };
+    const outcome = broker(argv, {
+      ...baseOptions,
+      registry: createMemoryRegistry(),
+      decision,
+      sink: null,
+    });
+    expect(outcome.kind).toBe('refuse');
+    if (outcome.kind !== 'refuse') throw new Error('expected a refusal');
+    // Before signatures this record was *accepted*: correct command, live expiry, right
+    // phrase. That acceptance was the laundering route.
+    expect(outcome.matchedRule).toBe('broker.unsigned');
+    expect(outcome.exitCode).toBe(5);
+  });
+
+  it('refuses a decision edited after signing, even when the edit only extends the expiry', () => {
+    const argv = ['sudo', 'install', 'build-tool'];
+    const decision = { ...decideFor(argv), expiresAt: '2030-01-01T00:00:00.000Z' };
+    const outcome = broker(argv, {
+      ...baseOptions,
+      registry: createMemoryRegistry(),
+      decision,
+      sink: null,
+    });
+    expect(outcome.kind).toBe('refuse');
+    if (outcome.kind !== 'refuse') throw new Error('expected a refusal');
+    expect(outcome.matchedRule).toBe('broker.signature-invalid');
+  });
+
+  it('refuses a decision signed by a key that is no longer active', () => {
+    const retired = (() => {
+      const pair = generateKeyPairSync('ed25519', {
+        privateKeyEncoding: { format: 'pem', type: 'pkcs8' },
+        publicKeyEncoding: { format: 'pem', type: 'spki' },
+      });
+      return { privateKeyPem: pair.privateKey, publicKeyPem: pair.publicKey };
+    })();
+    const argv = ['sudo', 'ls'];
+    const classification = classify(argv, { home: HOME });
+    const decision = buildDecision(
+      {
+        taskId: 'U-7f3a9c',
+        phrase: PHRASE,
+        issuedAt: ISSUED_AT,
+        expiresAt: EXPIRES_AT,
+        outcome: 'allow',
+        classification,
+        privateKeyPem: retired.privateKeyPem,
+        publicKeyPem: retired.publicKeyPem,
+      },
+      operationSha(classification),
+    );
+    const outcome = broker(argv, {
+      ...baseOptions,
+      registry: createMemoryRegistry(),
+      decision,
+      sink: null,
+    });
+    expect(outcome.kind).toBe('refuse');
+    if (outcome.kind !== 'refuse') throw new Error('expected a refusal');
+    expect(outcome.matchedRule).toBe('broker.key-unknown');
   });
 
   it('names the operation and the reason in the artifact an operator reads', () => {

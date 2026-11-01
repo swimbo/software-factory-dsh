@@ -14,7 +14,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createContainerRunner, dockerIsAvailable, dockerRunArgv } from './container.ts';
+import {
+  createContainerRunner,
+  dockerIsAvailable,
+  dockerRunArgv,
+  imageContentId,
+  imageIdMatches,
+} from './container.ts';
 import { NO_PATCH, type ScenarioRunInput } from './evaluate.ts';
 
 const TEST_IMAGE = process.env['FACTORY_TEST_IMAGE'];
@@ -142,6 +148,36 @@ describe('the docker invocation is physical, not aspirational', () => {
       'alpha',
     ]);
     expect(args.slice(-3)).toEqual(['node', '.holdout/run.js', 'alpha']);
+  });
+
+  it('records a cidfile and a run label, so a container can be found and killed', () => {
+    const args = dockerRunArgv(
+      { image: 'factory-env', cidFile: '/tmp/cid-1', label: 'suite-1' },
+      '/tmp/copy',
+      ['true'],
+    );
+
+    // The cidfile is how the timeout kills the *container*: killing the `docker run` client
+    // leaves the container running, because the client is not its parent.
+    expect(args[args.indexOf('--cidfile') + 1]).toBe('/tmp/cid-1');
+    expect(args[args.indexOf('--label') + 1]).toBe('org.factory.run=suite-1');
+    // Absent when not asked for: no empty flags.
+    expect(dockerRunArgv({ image: 'factory-env' }, '/tmp/copy', ['true'])).not.toContain(
+      '--cidfile',
+    );
+  });
+
+  it('pins a locally built image by content id, because a tag is mutable', () => {
+    // A local build has no registry manifest, so `name@sha256:…` cannot resolve; the content
+    // id is the only honest pin available offline.
+    expect(imageContentId('definitely-not-an-image-here')).toBeNull();
+    if (!dockerReady) return;
+    const image = TEST_IMAGE ?? 'factory-env:e2e';
+    const id = imageContentId(image);
+    if (id === null) return;
+    expect(id).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(imageIdMatches(image, id)).toBe(true);
+    expect(imageIdMatches(image, `sha256:${'0'.repeat(64)}`)).toBe(false);
   });
 
   it('refuses an empty image or an empty argv instead of running something arbitrary', () => {

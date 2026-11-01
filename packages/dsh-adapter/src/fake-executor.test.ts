@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { WorkerReceipt } from '@factory/contracts';
+import { FactoryError, WorkerReceipt } from '@factory/contracts';
 import {
   createFakeExecutor,
   createFakeExecutorFromFile,
@@ -214,5 +214,60 @@ describe('createFakeExecutor', () => {
     expect(() => createFakeExecutorFromFile(scenarioPath, { factoryHome })).toThrow(
       /could not be read as JSON/,
     );
+  });
+});
+
+describe('the broker: a scenario cannot launder a privileged command', () => {
+  /** A scenario whose whole purpose is to run `sudo` without a decision. */
+  function scenarioWith(argv: readonly string[]): FakeScenario {
+    return {
+      steps: [
+        { kind: 'command', argv: [...argv] },
+        { kind: 'emit', events: [{ type: 'turn_end', reason: { kind: 'completed' } }] },
+        { kind: 'exit', code: 0 },
+      ],
+    };
+  }
+
+  it('fails the attempt with GATE_REQUIRED when brokering is on', async () => {
+    const factoryHome = home();
+    const executor = createFakeExecutor({
+      scenario: scenarioWith(['sudo', 'ls']),
+      factoryHome,
+      privilegedBrokering: 'on',
+    });
+    const error = await executor
+      .run({ ...payload, attemptDir: cloneDir(factoryHome) }, ctx)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FactoryError);
+    expect((error as FactoryError).code).toBe('GATE_REQUIRED');
+    // The step is named, so a reader of the failure knows which line of the scenario was the
+    // privileged one — not merely that "the attempt failed".
+    expect((error as FactoryError).details['argv']).toEqual(['sudo', 'ls']);
+  });
+
+  it('runs an ordinary command step with brokering on', async () => {
+    const factoryHome = home();
+    const executor = createFakeExecutor({
+      scenario: scenarioWith(['node', '-e', 'process.stdout.write("ok\\n")']),
+      factoryHome,
+      privilegedBrokering: 'on',
+    });
+    const receipt = await executor.run({ ...payload, attemptDir: cloneDir(factoryHome) }, ctx);
+    expect(WorkerReceipt.safeParse(receipt).success).toBe(true);
+    expect(receipt.commands).toHaveLength(1);
+    expect(receipt.commands[0]?.exitCode).toBe(0);
+  });
+
+  it('with brokering off, the same command runs — off is the default, not an accident', async () => {
+    // Pins the default: turning brokering on is a policy decision, and the fake must not
+    // quietly become a broker because a test forgot to say so.
+    const factoryHome = home();
+    const executor = createFakeExecutor({
+      scenario: scenarioWith(['node', '-e', 'process.exit(0)']),
+      factoryHome,
+    });
+    const receipt = await executor.run({ ...payload, attemptDir: cloneDir(factoryHome) }, ctx);
+    expect(receipt.commands[0]?.exitCode).toBe(0);
   });
 });

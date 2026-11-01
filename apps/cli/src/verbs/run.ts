@@ -608,6 +608,7 @@ async function evaluateRealWall(
     policy,
     nowIso: ctx.nowIso(),
     policyVersion: ctx.policyVersion,
+    home: ctx.env['HOME'] ?? null,
   });
   if (!outcome.holdoutLoaded) {
     ctx.ui.err(

@@ -19,6 +19,7 @@
  * | the decision is for a different argv   | `MANDATE_EXPIRED`   | 3    |
  * | the decision has expired               | `MANDATE_EXPIRED`   | 3    |
  * | the decision was already used          | `GATE_REQUIRED`     | 5    |
+ * | the decision is unsigned/invalid/retired key | `GATE_REQUIRED` | 5    |
  *
  * Two of those are exit 5 because a *person* has to decide (there is no decision, or the
  * one presented is not the operator's), and one because the authority they gave has run
@@ -65,6 +66,14 @@ export interface BrokerOptions {
   readonly home: string | null;
   /** The phrase the operator supplied on this invocation's envelope, or `null`. */
   readonly operatorPhrase: string | null;
+  /**
+   * The operator keys the factory currently trusts, `keyId → publicKeyPem`.
+   *
+   * A decision signed by a key that is not in this map is refused, which is what makes key
+   * rotation and retirement real: the old artifact stays on disk and stays readable, and
+   * it stops working on the day the key is retired.
+   */
+  readonly activeKeys: ReadonlyMap<string, string>;
   /** The decision presented for this operation, or `null`. */
   readonly decision: PrivilegedDecision | null;
   readonly sink: DecisionSink | null;
@@ -152,7 +161,13 @@ export function broker(argv: readonly string[], options: BrokerOptions): BrokerO
     );
   }
 
-  const fault = decisionFault(presented, sha, options.nowIso, options.operatorPhrase);
+  const fault = decisionFault(
+    presented,
+    sha,
+    options.nowIso,
+    options.operatorPhrase,
+    options.activeKeys,
+  );
   if (fault !== null) {
     return refuse(classification, fault.code, fault.exitCode, fault.matchedRule, fault.detail);
   }
