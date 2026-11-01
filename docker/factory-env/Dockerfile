@@ -12,17 +12,20 @@
 # reproducible; a floating tag would make every receipt a claim about "whatever
 # was current".
 #
-#   docker build -t factory-env:0.2.1-rc.3 docker/factory-env
+#   docker build -t factory-env:0.2.1-rc.5 docker/factory-env
 #
-# The base digest is the multi-arch index for node:22.19-bookworm-slim as published
-# by Docker Hub; pinning the index keeps one Dockerfile valid on amd64 and arm64.
+# The base digest is the multi-arch index as published by Docker Hub; pinning the index
+# keeps one Dockerfile valid on amd64 and arm64. The tag is the exact runtime `.nvmrc`
+# pins (26.12.1), not merely "some Node 26": an image that ran a different Node than the
+# host refuses would make "the worker ran under the factory's runtime" a claim about a
+# string in a file rather than about the process.
 
-FROM node:22.19-bookworm-slim@sha256:4a4884e8a44826194dff92ba316264f392056cbe243dcc9fd3551e71cea02b90
+FROM node:26.12.1-bookworm-slim@sha256:88e480776c6149ff1d098cd304f44bf18057fb5d284a3329b78162d29821e28c
 
 # The single source of truth for the harness build. Keep in sync with
 # `PINNED_DSH_VERSION` in packages/dsh-adapter/src/executor.ts — a mismatch is a
 # build failure here and a `DSH_VERSION_MISMATCH` refusal at run time.
-ARG DSH_VERSION=0.2.1-rc.3
+ARG DSH_VERSION=0.2.1-rc.5
 
 SHELL ["/bin/sh", "-ec"]
 

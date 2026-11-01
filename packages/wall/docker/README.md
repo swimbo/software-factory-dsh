@@ -33,7 +33,10 @@ when docker or the base image is unavailable.
 ## Pinning, offline
 
 The base is pinned by registry manifest digest in the `FROM` line, so a rebuild of this image
-cannot silently move to a different Node.
+cannot silently move to a different Node. The tag is the runtime `.nvmrc` pins —
+`node:26.12.1-alpine`, the exact patch release — so `docker run factory-env:e2e node -v` and
+`cat .nvmrc` are the same string. An image on a different Node would make "the scenario ran under
+the factory's runtime" a claim about a Dockerfile line rather than about the process.
 
 The image _this_ Dockerfile produces is a local build, and a local build has no registry
 manifest — `docker run factory-env:e2e@sha256:<id>` fails, because digest references resolve
@@ -44,6 +47,7 @@ and the suite asserts the tag still resolves to the id it measured.
 
 ## Platform note
 
-On arm64 hosts the base is `linux/amd64`, so the container runs under emulation. That works
-(the suite passes in ~6s) and the cgroup and network assertions are unaffected, but it is
-emulation: a scenario's timing under it is not a benchmark.
+On arm64 hosts the suite builds `--platform linux/amd64`, so the container runs under emulation.
+That works — the suite passes, 6–16 s depending on how cold the E2E-44 directory walk is — and the
+cgroup and network assertions are unaffected, but it is emulation: a scenario's timing under it is
+not a benchmark.
