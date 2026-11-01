@@ -1,10 +1,15 @@
 # Changelog
 
-## Unreleased — the four ND decisions, implemented
+## v0.3.0 — 2026-11-01
 
 The operator ratified all four `NEEDS_HUMAN_DECISION` answers on 2026-11-01
 (`docs/planning/dark-factory-dsh/findings.md` § DECIDED). This release is what "ratified" means in code,
 and each item ends where the claim ends. Evidence: `evidence/phase-13-nd-decisions.md`.
+
+**Verified with the live stage included:** `8 passed, 0 skipped, 0 failed` on 2026-11-01
+(`docs/verification/2026-11-01T21-09-39Z/`), the paid pair taking 19.7 s with the gateway reporting
+`8247` total tokens and the refusal path exiting 5 in 4.6 s. The proxy now reads those numbers instead of
+discarding them, which is what ND3 bought.
 
 - **ND1 — a published certification operating point.** Certification is per **task class** at
   **m = 20 attempts / k = 18 passes**, and the number published is
