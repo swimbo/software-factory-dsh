@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { readTurn } from './turn-facts.ts';
+import { readTurn } from '../../harness/turn-facts.ts';
 
 /**
  * A turn that spent 43,680 tokens is not reported as zero.
@@ -15,7 +15,14 @@ import { readTurn } from './turn-facts.ts';
  * "usage > 0" assertion failed on a model turn that had actually completed.
  */
 describe('a real dsh transcript is read as a turn, not as silence', () => {
-  const recordDir = join(import.meta.dirname, '__fixtures__', 'dsh-live-turn');
+  const recordDir = join(
+    import.meta.dirname,
+    '..',
+    '..',
+    'harness',
+    '__fixtures__',
+    'dsh-live-turn',
+  );
 
   it('[a turn that spent 43,680 tokens is not reported as zero]', () => {
     const turn = readTurn(recordDir);
