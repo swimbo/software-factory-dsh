@@ -4,6 +4,12 @@
 **Exit codes you will see:** `9` (`STORE_QUARANTINED`) from every writing command, `factory recover`
 included; `0` from the read-only surfaces (`status`, `audit`, `receipts`).
 
+One ordering trap, found by the offline soak (`scripts/soak.sh`) rather than by reasoning: on a host
+with **no executor installed**, `factory run` refuses at `EXECUTOR_UNAVAILABLE` (exit `8`) _before_ it
+reaches the quarantined store's write refusal, so you see the environment problem and not the storage
+problem. Both are true; the store is still read-only. Reach the exit-9 refusal through `factory
+recover`, `factory status` or `factory audit`, which do not need an executor.
+
 ## Symptom
 
 Any write is refused with exit `9` and a runbook line that points at this file:
