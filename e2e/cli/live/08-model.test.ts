@@ -118,31 +118,33 @@ function readTurn(recordDir: string): {
   return { completed, usage, errors };
 }
 
-let fixture: WallFixture | null = null;
-let provisioned = '';
-
-beforeAll(() => {
-  if (!READY) return;
-  fixture = createWallFixture();
-  // Provisioning inside the spec, against the fixture's own home: a live run that depended on
-  // an operator's `dsh-home` would pass on one machine and nowhere else. `--dump-config` is what
-  // makes this free — it composes the profile instead of booting it, so no turn can start here.
-  provisioned = execFileSync(
+/**
+ * One fixture home per spec.
+ *
+ * The first version shared one home between the two specs, and the second spec died with
+ * `UNIT_ALREADY_TERMINAL`: the happy path had already run that home's only unit. A live pair
+ * that can only run one at a time is not a suite, and reusing a terminal unit would also have
+ * meant measuring a store that already held a verdict.
+ */
+function liveFixture(): WallFixture {
+  const created = createWallFixture();
+  // Provisioning against the fixture's own home: a live run that depended on an operator's
+  // `dsh-home` would pass on one machine and nowhere else. `--dump-config` composes the profile
+  // instead of booting it, so no turn can start here — the claim below is that it did not.
+  const output = execFileSync(
     'bash',
-    ['scripts/provision-dsh-home.sh', '--root', fixture.home, '--dsh', DSH_BIN],
+    ['scripts/provision-dsh-home.sh', '--root', created.home, '--dsh', DSH_BIN],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   );
-  // The claim, not the exit code: provisioning must have produced no model call at all.
-  expect(provisioned).not.toMatch(/"usage"|turn_end/u);
-}, 600_000);
-
-afterAll(() => {
-  fixture?.cleanup();
-});
+  expect(output).not.toMatch(/"usage"|turn_end/u);
+  return created;
+}
 
 /** The live environment: the wall's knobs, plus the one thing that makes a call possible. */
-function liveEnv(overrides: Record<string, string | undefined> = {}): Record<string, string> {
-  if (fixture === null) throw new Error('fixture missing');
+function liveEnv(
+  fixture: WallFixture,
+  overrides: Record<string, string | undefined> = {},
+): Record<string, string> {
   return fixture.wallEnv({
     // Absent, so the CLI takes the real executor path instead of the scripted one.
     FACTORY_EXECUTOR: undefined,
@@ -162,178 +164,196 @@ describe.skipIf(!READY)(
   'live model [@live] — skipped unless BIFROST_API_KEY and DSH_BIN are both set',
   () => {
     it('[@live] a one-shot turn through the factory completes and leaves a reproducible receipt', () => {
-      if (fixture === null) throw new Error('fixture missing');
-      const unitId = fixture.submit({ intent: LIVE_INTENT, restateBack: LIVE_RESTATE });
-      const run = runFactory(['run', unitId, '--json'], {
-        home: fixture.home,
-        env: liveEnv(),
-        timeoutMs: 300_000,
-      });
-
-      // Assert the CLI's own account first: everything below reads files the run writes, and
-      // an ENOENT on `receipt.json` says nothing about why the launch failed.
-      const verdict = jsonOf(run);
-      const attemptId = String(verdict['attemptId']);
-      const recordDir = join(fixture.home, 'attempts', unitId, attemptId);
-      const turn = readTurn(recordDir);
-      // Before parsing: a run that stops in `launching` writes no receipt, and an ENOENT is not an
-      // account of what happened. The guard carries the CLI's exit code, its last status line and
-      // the attempt state, so a missing file is reported as a missing receipt — the same class of
-      // defect as a verdict that cites a table nobody created.
-      const receiptMissing = !existsSync(join(recordDir, 'receipt.json'));
-      if (receiptMissing) {
-        const lastStatus = run.stderr
-          .split('\n')
-          .map((line) => line.trim())
-          .filter((line) => line !== '')
-          .slice(-1)[0];
-        expect.fail(
-          'the launch produced no receipt for this attempt — nothing was measured and nothing was ' +
-            'spent that can be checked\n' +
-            `  cli exit code   ${String(run.code)}\n` +
-            `  attempt state   ${String(verdict['attemptState'])} (unit state ${String(
-              verdict['state'],
-            )})\n` +
-            `  last status     ${String(lastStatus ?? '(stderr was empty)')}\n` +
-            `  record dir      ${recordDir}\n` +
-            `  stdout          ${run.stdout.trim().split('\n').slice(-1)[0] ?? ''}`,
-        );
-      }
-      const receipt = JSON.parse(readFileSync(join(recordDir, 'receipt.json'), 'utf8')) as {
-        exitCode: number | null;
-        ceilings: { hit: string[]; turnsUsed: number };
-        diff: { filesChanged: number };
-        commands: {
-          argv: string[];
-          cwd: string;
-          exitCode: number | null;
-          source?: string;
-          replayable?: boolean;
-          replaySkipReason?: string;
-        }[];
-      };
-      const launch = JSON.parse(readFileSync(join(recordDir, 'launch.json'), 'utf8')) as {
-        profile: { requested: string; effective: string | null };
-        overlay: { sha256: string | null };
-        credentialsForwarded: string[];
-      };
-
-      // Printed so the evidence file can cite the real model, the real spend and the outcome.
-      console.log(
-        `[@live] run exit ${String(run.code)} · requested model ${MODEL_ID} → reported ${
-          turn.usage?.raw ?? '(none)'
-        } · tokens in ${String(turn.usage?.inputTokens ?? 0)} / out ${String(
-          turn.usage?.outputTokens ?? 0,
-        )} / total ${String(turn.usage?.totalTokens ?? 0)} · outcome ${String(verdict['outcome'])}`,
-      );
-
-      // 1. a real attempt is promotable: the wall replayed the factory-verification group in
-      //    recorded order from the receipt's base (7 of 8 commands), the launch was not replayed
-      //    because it is the attempt under test, and nothing mismatched. A verdict of `unknown`
-      //    here would mean every real worker is unpromotable, which is not caution, it is a wall
-      //    that can never open.
-      expect(verdict['outcome']).toBe('pass');
-      expect(run.code).toBe(0);
-      expect(verdict['reasons']).not.toContain('faithfulness_partial');
-
-      // 2. the scope line, read from the stored verdict rather than from stdout: it must say how
-      //    much was replayed, and that the one command left out is the launch.
-      const store = openStore({ dir: join(fixture.home, 'state') });
-      let scope = '';
+      const fixture = liveFixture();
       try {
-        const row = store.latestVerdictForUnit(unitId);
-        expect(row).not.toBeNull();
-        const faithfulness = (row?.verdict.scenarios ?? []).filter(
-          (scenario) => scenario.source === 'faithfulness',
+        const unitId = fixture.submit({ intent: LIVE_INTENT, restateBack: LIVE_RESTATE });
+        const run = runFactory(['run', unitId, '--json'], {
+          home: fixture.home,
+          env: liveEnv(fixture),
+          timeoutMs: 300_000,
+        });
+
+        // Assert the CLI's own account first: everything below reads files the run writes, and
+        // an ENOENT on `receipt.json` says nothing about why the launch failed.
+        const verdict = jsonOf(run);
+        const attemptId = String(verdict['attemptId']);
+        const recordDir = join(fixture.home, 'attempts', unitId, attemptId);
+        const turn = readTurn(recordDir);
+        // Before parsing: a run that stops in `launching` writes no receipt, and an ENOENT is not an
+        // account of what happened. The guard carries the CLI's exit code, its last status line and
+        // the attempt state, so a missing file is reported as a missing receipt — the same class of
+        // defect as a verdict that cites a table nobody created.
+        const receiptMissing = !existsSync(join(recordDir, 'receipt.json'));
+        if (receiptMissing) {
+          const lastStatus = run.stderr
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line !== '')
+            .slice(-1)[0];
+          expect.fail(
+            'the launch produced no receipt for this attempt — nothing was measured and nothing was ' +
+              'spent that can be checked\n' +
+              `  cli exit code   ${String(run.code)}\n` +
+              `  attempt state   ${String(verdict['attemptState'])} (unit state ${String(
+                verdict['state'],
+              )})\n` +
+              `  last status     ${String(lastStatus ?? '(stderr was empty)')}\n` +
+              `  record dir      ${recordDir}\n` +
+              `  stdout          ${run.stdout.trim().split('\n').slice(-1)[0] ?? ''}`,
+          );
+        }
+        const receipt = JSON.parse(readFileSync(join(recordDir, 'receipt.json'), 'utf8')) as {
+          exitCode: number | null;
+          ceilings: { hit: string[]; turnsUsed: number };
+          diff: { filesChanged: number };
+          commands: {
+            argv: string[];
+            cwd: string;
+            exitCode: number | null;
+            source?: string;
+            replayable?: boolean;
+            replaySkipReason?: string;
+          }[];
+        };
+        const launch = JSON.parse(readFileSync(join(recordDir, 'launch.json'), 'utf8')) as {
+          profile: { requested: string; effective: string | null };
+          overlay: { sha256: string | null };
+          credentialsForwarded: string[];
+        };
+
+        // Printed so the evidence file can cite the real model, the real spend and the outcome.
+        console.log(
+          `[@live] run exit ${String(run.code)} · requested model ${MODEL_ID} → reported ${
+            turn.usage?.raw ?? '(none)'
+          } · tokens in ${String(turn.usage?.inputTokens ?? 0)} / out ${String(
+            turn.usage?.outputTokens ?? 0,
+          )} / total ${String(turn.usage?.totalTokens ?? 0)} · outcome ${String(verdict['outcome'])}`,
         );
-        expect(faithfulness.every((scenario) => scenario.outcome === 'pass')).toBe(true);
-        scope = faithfulness
-          .map((scenario) => `${scenario.id} ${scenario.observed ?? ''}`)
-          .join(' | ');
+
+        // 1. a real attempt is promotable: the wall replayed the factory-verification group in
+        //    recorded order from the receipt's base (7 of 8 commands), the launch was not replayed
+        //    because it is the attempt under test, and nothing mismatched. A verdict of `unknown`
+        //    here would mean every real worker is unpromotable, which is not caution, it is a wall
+        //    that can never open.
+        expect(verdict['outcome']).toBe('pass');
+        expect(run.code).toBe(0);
+        expect(verdict['reasons']).not.toContain('faithfulness_partial');
+
+        // 2. the scope line, read from the stored verdict rather than from stdout: it must say how
+        //    much was replayed, and that the one command left out is the launch.
+        const store = openStore({ dir: join(fixture.home, 'state') });
+        let scope = '';
+        try {
+          const row = store.latestVerdictForUnit(unitId);
+          expect(row).not.toBeNull();
+          const faithfulness = (row?.verdict.scenarios ?? []).filter(
+            (scenario) => scenario.source === 'faithfulness',
+          );
+          expect(faithfulness.every((scenario) => scenario.outcome === 'pass')).toBe(true);
+          scope = faithfulness
+            .map((scenario) => `${scenario.id} ${scenario.observed ?? ''}`)
+            .join(' | ');
+        } finally {
+          store.close();
+        }
+        expect(scope).toMatch(/replayed\s+5\s+of\s+8/u);
+        expect(scope).toMatch(/commands\[0\]|worker-launch/u);
+        expect(scope).toMatch(/0\s+mismatched/u);
+
+        // 3. the turn completed, by the model's own event stream, and it cost tokens: a
+        //    "completed" turn with no usage would be a fabricated receipt.
+        expect(turn.completed).toBe(true);
+        expect(turn.usage?.totalTokens ?? 0).toBeGreaterThan(0);
+
+        // 4. the receipt is faithful about the process and the change
+        expect(receipt.exitCode).toBe(0);
+        expect(receipt.ceilings.hit).toStrictEqual([]);
+        expect(receipt.diff.filesChanged).toBeGreaterThan(0);
+
+        // 5. every recorded command carries provenance, and the kinds that cannot be replayed say
+        //    why: this is the adapter half of the replay contract.
+        for (const command of receipt.commands) {
+          expect(['worker-launch', 'worker-command', 'factory-verification']).toContain(
+            command.source,
+          );
+          if (command.replayable !== true) expect(command.replaySkipReason).toBeTruthy();
+        }
+        expect(receipt.commands[0]?.source).toBe('worker-launch');
+        expect(receipt.commands[0]?.replayable).toBe(false);
+        expect(receipt.commands[0]?.replaySkipReason).toMatch(/paid|money|spend/iu);
+        const verification = receipt.commands.filter(
+          (command) => command.source === 'factory-verification',
+        );
+        expect(verification.length).toBeGreaterThan(0);
+        // Replayable as a sequence, from the receipt's base — never independently.
+        expect(verification.filter((command) => command.replayable === true)).toHaveLength(5);
+        // The two `status` reads also depend on untracked/ignored working-tree contents, which a
+        // replay cannot reconstruct from a commit. They are evidence, not claims: measured, the
+        // first replay reproduced everything else and mismatched exactly these two.
+        const worktreeReads = verification.filter((command) => command.replayable !== true);
+        expect(worktreeReads).toHaveLength(2);
+        for (const read of worktreeReads) {
+          expect(read.argv.join(' ')).toMatch(/status/u);
+          expect(read.replaySkipReason).toMatch(/untracked|ignored/iu);
+        }
+
+        // 6. the overlay is the factory's, and the credential reached the child by name only
+        expect(launch.profile.effective).not.toBeNull();
+        expect(launch.overlay.sha256).toMatch(/^sha256:[0-9a-f]{64}$/u);
+        expect(launch.credentialsForwarded).toStrictEqual(['BIFROST_API_KEY']);
+        expect(JSON.stringify(launch)).not.toContain(KEY);
+
+        // 7. the suite the receipt names still passes when re-run by hand, in the directory the
+        //    receipt says it ran in
+        const oracle = receipt.commands.find((command) => command.argv.join(' ').includes('suite'));
+        const argv = oracle?.argv ?? ['node', 'tests/suite.js'];
+        const cwd = oracle?.cwd ?? join(fixture.home, 'state', 'attempts', attemptId);
+        expect(() =>
+          execFileSync(argv[0] ?? 'node', argv.slice(1), { cwd, encoding: 'utf8' }),
+        ).not.toThrow();
       } finally {
-        store.close();
+        fixture.cleanup();
       }
-      expect(scope).toMatch(/replayed\s+7\s+of\s+8/u);
-      expect(scope).toMatch(/commands\[0\]|worker-launch/u);
-
-      // 3. the turn completed, by the model's own event stream, and it cost tokens: a
-      //    "completed" turn with no usage would be a fabricated receipt.
-      expect(turn.completed).toBe(true);
-      expect(turn.usage?.totalTokens ?? 0).toBeGreaterThan(0);
-
-      // 4. the receipt is faithful about the process and the change
-      expect(receipt.exitCode).toBe(0);
-      expect(receipt.ceilings.hit).toStrictEqual([]);
-      expect(receipt.diff.filesChanged).toBeGreaterThan(0);
-
-      // 5. every recorded command carries provenance, and the kinds that cannot be replayed say
-      //    why: this is the adapter half of the replay contract.
-      for (const command of receipt.commands) {
-        expect(['worker-launch', 'worker-command', 'factory-verification']).toContain(
-          command.source,
-        );
-        if (command.replayable !== true) expect(command.replaySkipReason).toBeTruthy();
-      }
-      expect(receipt.commands[0]?.source).toBe('worker-launch');
-      expect(receipt.commands[0]?.replayable).toBe(false);
-      expect(receipt.commands[0]?.replaySkipReason).toMatch(/paid|money|spend/iu);
-      const verification = receipt.commands.filter(
-        (command) => command.source === 'factory-verification',
-      );
-      expect(verification.length).toBeGreaterThan(0);
-      // Replayable as a sequence, from the receipt's base — never independently.
-      expect(verification.every((command) => command.replayable === true)).toBe(true);
-
-      // 6. the overlay is the factory's, and the credential reached the child by name only
-      expect(launch.profile.effective).not.toBeNull();
-      expect(launch.overlay.sha256).toMatch(/^sha256:[0-9a-f]{64}$/u);
-      expect(launch.credentialsForwarded).toStrictEqual(['BIFROST_API_KEY']);
-      expect(JSON.stringify(launch)).not.toContain(KEY);
-
-      // 7. the suite the receipt names still passes when re-run by hand, in the directory the
-      //    receipt says it ran in
-      const oracle = receipt.commands.find((command) => command.argv.join(' ').includes('suite'));
-      const argv = oracle?.argv ?? ['node', 'tests/suite.js'];
-      const cwd = oracle?.cwd ?? join(fixture.home, 'state', 'attempts', attemptId);
-      expect(() =>
-        execFileSync(argv[0] ?? 'node', argv.slice(1), { cwd, encoding: 'utf8' }),
-      ).not.toThrow();
     });
 
     it('[@live] a model that cannot answer is recorded as a failure, never as a pass', () => {
-      if (fixture === null) throw new Error('fixture missing');
-      const unitId = fixture.submit({ intent: LIVE_INTENT, restateBack: LIVE_RESTATE });
-      // Provoked honestly: the overlay asks the gateway for a model id it cannot resolve, so
-      // the failure comes from the real provider handshake rather than from a stubbed error.
-      const run = runFactory(['run', unitId, '--json'], {
-        home: fixture.home,
-        env: liveEnv({ FACTORY_MODEL_ID: 'factory-worker-tier-that-does-not-exist' }),
-        timeoutMs: 300_000,
-      });
-      // Assert the CLI's own account first: everything below reads files the run writes, and
-      // an ENOENT on `receipt.json` says nothing about why the launch failed.
+      const fixture = liveFixture();
+      try {
+        const unitId = fixture.submit({ intent: LIVE_INTENT, restateBack: LIVE_RESTATE });
+        // Provoked honestly: the overlay asks the gateway for a model id it cannot resolve, so
+        // the failure comes from the real provider handshake rather than from a stubbed error.
+        const run = runFactory(['run', unitId, '--json'], {
+          home: fixture.home,
+          env: liveEnv(fixture, { FACTORY_MODEL_ID: 'factory-worker-tier-that-does-not-exist' }),
+          timeoutMs: 300_000,
+        });
+        // Assert the CLI's own account first: everything below reads files the run writes, and
+        // an ENOENT on `receipt.json` says nothing about why the launch failed.
 
-      // The failure path asserts the opposite: exit 0 here would be the bug.
-      const attemptId = String(jsonOf(run)['attemptId']);
-      const recordDir = join(fixture.home, 'attempts', unitId, attemptId);
-      const turn = readTurn(recordDir);
-      const hasReceipt = existsSync(join(recordDir, 'receipt.json'));
+        // The failure path asserts the opposite: exit 0 here would be the bug.
+        const attemptId = String(jsonOf(run)['attemptId']);
+        const recordDir = join(fixture.home, 'attempts', unitId, attemptId);
+        const turn = readTurn(recordDir);
+        const hasReceipt = existsSync(join(recordDir, 'receipt.json'));
 
-      console.log(
-        `[@live] refusal: run exit ${String(run.code)} · receipt ${
-          hasReceipt ? 'written' : 'absent'
-        } · errors ${String(turn.errors.length)}`,
-      );
+        console.log(
+          `[@live] refusal: run exit ${String(run.code)} · receipt ${
+            hasReceipt ? 'written' : 'absent'
+          } · errors ${String(turn.errors.length)}`,
+        );
 
-      // No completed turn anywhere in the evidence, and the run did not claim success.
-      expect(turn.completed).toBe(false);
-      expect(run.code).not.toBe(0);
-      if (hasReceipt) {
-        const receipt = JSON.parse(readFileSync(join(recordDir, 'receipt.json'), 'utf8')) as {
-          exitCode: number | null;
-        };
-        // A failed launch is a non-zero child, not a clean exit with an empty diff.
-        expect(receipt.exitCode === 0 && turn.completed).toBe(false);
+        // No completed turn anywhere in the evidence, and the run did not claim success.
+        expect(turn.completed).toBe(false);
+        expect(run.code).not.toBe(0);
+        if (hasReceipt) {
+          const receipt = JSON.parse(readFileSync(join(recordDir, 'receipt.json'), 'utf8')) as {
+            exitCode: number | null;
+          };
+          // A failed launch is a non-zero child, not a clean exit with an empty diff.
+          expect(receipt.exitCode === 0 && turn.completed).toBe(false);
+        }
+      } finally {
+        fixture.cleanup();
       }
     }, 420_000);
   },
