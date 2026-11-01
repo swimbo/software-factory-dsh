@@ -557,9 +557,9 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
         ),
         ...diff.commands,
       ];
-      // The contract cannot carry provenance yet (the receipt schema strips unknown keys), so the
-      // table is also written as a sidecar: index-aligned with `receipt.commands`, same argv. The
-      // wall can consume either the widened contract field or this file; both say the same thing.
+      // `CommandRecord` now carries provenance, so these records reach the wall through the
+      // receipt itself. The sidecar stays as a forensic copy for a reader without the ledger — the
+      // wall does not read it, and nothing here depends on it existing.
       writeFileSync(
         join(recordDir, 'command-provenance.json'),
         `${JSON.stringify(

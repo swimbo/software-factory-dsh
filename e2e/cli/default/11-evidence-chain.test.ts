@@ -72,7 +72,7 @@ describe('receipts (E2E-13)', () => {
     expect(human.stderr).not.toMatch(/^\+\+\+ |^--- /mu);
   });
 
-  it('[@default] every recorded command is re-executed by the wall, and all of them pass', () => {
+  it('[@default] every replayable command is re-executed, and the verdict says what it skipped', () => {
     const unitId = verifiedUnit();
     const receipts = jsonOf(runFactory(['receipts', unitId, '--json'], { home: fixture.home }));
     const commandCount = Number(
@@ -86,10 +86,21 @@ describe('receipts (E2E-13)', () => {
       const faithful = (row?.verdict.scenarios ?? []).filter(
         (scenario) => scenario.source === 'faithfulness',
       );
-      // One faithfulness row per recorded command: that is the measurement, and it is why
-      // "faithful: N/N" cannot be a claim the worker makes about itself.
-      expect(faithful).toHaveLength(commandCount);
+      // The wall replays the replayable subset and *records the scope* rather than pretending it
+      // re-ran everything: a command whose provenance says "the worker launch, index-state
+      // dependent, or not observed" is listed as not replayed with its own reason.
+      // One row per replayed command, plus one scope row saying how much was replayed — the
+      // second is what stops "faithful" from silently meaning "we re-ran everything".
+      expect(faithful.length).toBeGreaterThan(0);
       expect(faithful.every((scenario) => scenario.outcome === 'pass')).toBe(true);
+      // The scope line is the honest part: "replayed N of M", and M is every recorded command.
+      const scope = faithful.find((scenario) =>
+        /replayed\s+\d+\s+of\s+\d+/u.test(JSON.stringify(scenario)),
+      );
+      expect(scope).toBeDefined();
+      const text = `${scope?.id ?? ''} ${scope?.observed ?? ''}`;
+      expect(text).toMatch(/replayed\s+\d+\s+of\s+\d+/u);
+      expect(text).toContain(String(commandCount));
     } finally {
       store.close();
     }

@@ -172,15 +172,25 @@ describe.skipIf(!READY)(
 
       // Assert the CLI's own account first: everything below reads files the run writes, and
       // an ENOENT on `receipt.json` says nothing about why the launch failed.
-      expect(run.code, `${run.stdout}${run.stderr}`).toBe(0);
-      const attemptId = String(jsonOf(run)['attemptId']);
+      const verdict = jsonOf(run);
+      const attemptId = String(verdict['attemptId']);
       const recordDir = join(fixture.home, 'attempts', unitId, attemptId);
       const turn = readTurn(recordDir);
+      // Before parsing: a run that stopped in `launching` writes no receipt, and the CLI's own
+      // account is the only thing that explains why (a paid turn must never fail on an ENOENT).
+      expect(existsSync(join(recordDir, 'receipt.json')), `${run.stdout}${run.stderr}`).toBe(true);
       const receipt = JSON.parse(readFileSync(join(recordDir, 'receipt.json'), 'utf8')) as {
         exitCode: number | null;
         ceilings: { hit: string[]; turnsUsed: number };
         diff: { filesChanged: number };
-        commands: { argv: string[]; cwd: string; exitCode: number | null }[];
+        commands: {
+          argv: string[];
+          cwd: string;
+          exitCode: number | null;
+          source?: string;
+          replayable?: boolean;
+          replaySkipReason?: string;
+        }[];
       };
       const launch = JSON.parse(readFileSync(join(recordDir, 'launch.json'), 'utf8')) as {
         profile: { requested: string; effective: string | null };
@@ -188,38 +198,63 @@ describe.skipIf(!READY)(
         credentialsForwarded: string[];
       };
 
-      // Printed so the evidence file can cite the real model and the real spend.
+      // Printed so the evidence file can cite the real model, the real spend and the outcome.
       console.log(
         `[@live] run exit ${String(run.code)} · requested model ${MODEL_ID} → reported ${
           turn.usage?.raw ?? '(none)'
         } · tokens in ${String(turn.usage?.inputTokens ?? 0)} / out ${String(
           turn.usage?.outputTokens ?? 0,
-        )} / total ${String(turn.usage?.totalTokens ?? 0)}`,
+        )} / total ${String(turn.usage?.totalTokens ?? 0)} · outcome ${String(verdict['outcome'])}`,
       );
 
-      // 1. the turn completed, by the model's own event stream
+      // 1. `unknown`, needing a person — not a pass, and not the `receipt_unfaithful` failure this
+      //    started with. Everything measurable was measured; what stops a verdict is that no
+      //    recorded command is replayable (the launch and index-dependent git reads are the only
+      //    ones), and the wall now says exactly that instead of replaying what cannot be replayed.
+      expect(verdict['outcome']).toBe('unknown');
+      expect(verdict['reasons']).toStrictEqual(['faithfulness_partial']);
+      expect(run.code).toBe(5);
+
+      // 2. the turn completed, by the model's own event stream, and it cost tokens: a
+      //    "completed" turn with no usage would be a fabricated receipt.
       expect(turn.completed).toBe(true);
-      // 2. and it cost tokens: a "completed" turn with no usage is a fabricated receipt
       expect(turn.usage?.totalTokens ?? 0).toBeGreaterThan(0);
+
       // 3. the receipt is faithful about the process and the change
       expect(receipt.exitCode).toBe(0);
       expect(receipt.ceilings.hit).toStrictEqual([]);
       expect(receipt.diff.filesChanged).toBeGreaterThan(0);
-      // 4. the overlay is the factory's, and the credential reached the child by name only
+
+      // 4. every recorded command carries provenance, and the kinds that cannot be replayed say
+      //    why: this is the adapter half of the replay contract.
+      for (const command of receipt.commands) {
+        expect(['worker-launch', 'worker-command', 'factory-verification']).toContain(
+          command.source,
+        );
+        if (command.replayable !== true) expect(command.replaySkipReason).toBeTruthy();
+      }
+      expect(receipt.commands[0]?.source).toBe('worker-launch');
+      expect(receipt.commands[0]?.replayable).toBe(false);
+      expect(receipt.commands[0]?.replaySkipReason).toMatch(/paid|money|spend/iu);
+      expect(
+        receipt.commands.filter((command) => command.source === 'factory-verification').length,
+      ).toBeGreaterThan(0);
+
+      // 5. the overlay is the factory's, and the credential reached the child by name only
       expect(launch.profile.effective).not.toBeNull();
       expect(launch.overlay.sha256).toMatch(/^sha256:[0-9a-f]{64}$/u);
       expect(launch.credentialsForwarded).toStrictEqual(['BIFROST_API_KEY']);
       expect(JSON.stringify(launch)).not.toContain(KEY);
 
-      // 5. the recorded command reproduces: re-run what the receipt says was run, in the
-      //    directory it says it ran in. The oracle is the one the acceptance names.
+      // 6. the suite the receipt names still passes when re-run by hand, in the directory the
+      //    receipt says it ran in
       const oracle = receipt.commands.find((command) => command.argv.join(' ').includes('suite'));
       const argv = oracle?.argv ?? ['node', 'tests/suite.js'];
       const cwd = oracle?.cwd ?? join(fixture.home, 'state', 'attempts', attemptId);
       expect(() =>
         execFileSync(argv[0] ?? 'node', argv.slice(1), { cwd, encoding: 'utf8' }),
       ).not.toThrow();
-    }, 420_000);
+    });
 
     it('[@live] a model that cannot answer is recorded as a failure, never as a pass', () => {
       if (fixture === null) throw new Error('fixture missing');

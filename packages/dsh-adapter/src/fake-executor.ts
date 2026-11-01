@@ -512,6 +512,9 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
       writeFileSync(patchFile, patch);
 
       const commands = [
+        // A scenario step is a fixed script, so its commands are deterministic by construction:
+        // replayable, and the wall can re-execute them without spending anything. This is the one
+        // source the wall's replay path exists for.
         ...ran.map((command) => ({
           argv: command.argv,
           cwd: command.cwd,
@@ -519,7 +522,11 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
           timedOut: command.timedOut,
           outputSha: `sha256:${sha256Hex(command.output)}`,
           durationMs: command.durationMs,
+          source: 'worker-command' as const,
+          replayable: true,
         })),
+        // A declared command the scenario did not actually run is a statement about the worker, so
+        // it is not replayable evidence: the fixture asserted the outcome, nothing observed it.
         ...(declared.commands ?? []).map((command) => ({
           argv: [...command.argv],
           cwd: payload.attemptDir,
@@ -527,6 +534,11 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
           timedOut: command.timedOut ?? false,
           outputSha: `sha256:${sha256Hex(command.output ?? '')}`,
           durationMs: command.durationMs ?? 0,
+          // Replayable on purpose: a declared command is the fixture *claiming* the worker ran
+          // something, and replaying it is exactly how the wall catches a fabricated claim
+          // (E2E-30). Marking it non-replayable would have hidden the lie instead of checking it.
+          source: 'worker-command' as const,
+          replayable: true,
         })),
       ];
 
