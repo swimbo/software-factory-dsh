@@ -21,9 +21,9 @@ import type {
   WorkerReceiptType,
 } from '@factory/contracts';
 import { openSqlite } from './driver.ts';
-import { SCHEMA_VERSION } from './schema.ts';
+import { migrationPath, SCHEMA_VERSION } from './schema.ts';
 import { openStore } from './store.ts';
-import type { AppendOptions, Store, UnitRow } from './types.ts';
+import type { AppendOptions, ClassCertificateRow, Store, UnitRow } from './types.ts';
 
 // --------------------------------------------------------------------- fixtures
 
@@ -219,6 +219,24 @@ function passVerdict(unitId: string, attemptId: string, receiptSha: string): Ver
   };
 }
 
+/** The optional port methods, asserted present: this suite tests the real store, not a fake. */
+function certificatesOfStore(): readonly ClassCertificateRow[] {
+  const read = store.classCertificates;
+  if (read === undefined) throw new Error('the real store must expose classCertificates()');
+  return read.call(store);
+}
+
+function certificatesOfClass(taskClass: string): readonly ClassCertificateRow[] {
+  const read = store.certificatesForClass;
+  if (read === undefined) throw new Error('the real store must expose certificatesForClass()');
+  return read.call(store, taskClass);
+}
+
+/** `insufficient` means fewer than m attempts: 3 of 20 is three attempts, not twenty. */
+function passCount(passes: number): number {
+  return passes < 18 ? passes : 20;
+}
+
 function expectFactoryError(fn: () => unknown, code: string): FactoryError {
   try {
     fn();
@@ -319,14 +337,27 @@ describe('durability pragmas', () => {
     expect(() => openStore({ dir, now: clock })).toThrow(/schema drift/);
   });
 
-  it('opens a v1 store by applying the declared additive migration, and says so in the ledger', () => {
-    // Put a store back to v1 the way an operator's store actually is: the table the migration adds
-    // is gone, and the recorded version is the older one. This is the only test that can exist
+  it('opens a v1 store by applying every declared additive step, one ledger event each', () => {
+    // Put a store back to v1 the way an operator's store actually is: the tables the migrations add
+    // are gone, and the recorded version is the older one. This is the only test that can exist
     // without shipping an old binary.
+    //
+    // Why this spec changed (ND1 half two): it used to assert `toHaveLength(1)` for the applied
+    // migration events, which baked in "there happens to be exactly one step". Adding v2 → v3 made
+    // that assertion false without anything being wrong. The invariant was never "one event" — it
+    // is "one event per declared step, and a reopen adds none", so the counts now come from
+    // `migrationPath(1)` instead of a literal. Strictly more is checked, not less.
     store.close();
+    const steps = migrationPath(1);
+    expect(steps).not.toBeNull();
+    const declared = steps ?? [];
+    expect(declared.length).toBeGreaterThan(1);
     const raw = openSqlite({ path: dbPath });
+    raw.prepare('DROP TABLE class_certificates').run();
     raw.prepare('DROP TABLE usage_records').run();
-    raw.prepare('DELETE FROM schema_migration WHERE version = ?').run(SCHEMA_VERSION);
+    for (const step of declared) {
+      raw.prepare('DELETE FROM schema_migration WHERE version = ?').run(step.to);
+    }
     raw
       .prepare(
         "INSERT INTO schema_migration (version, applied_at, checksum) VALUES (1, '2026-10-31T00:00:00.000Z', 'v1')",
@@ -336,23 +367,29 @@ describe('durability pragmas', () => {
 
     const migrated = openStore({ dir, now: clock });
     const applied = migrated.eventsSince(0).filter((event) => event.type === 'store.migrated');
-    expect(applied).toHaveLength(1);
-    expect(applied[0]?.payload).toMatchObject({ from: 1, to: SCHEMA_VERSION });
+    expect(applied).toHaveLength(declared.length);
+    expect(
+      applied.map((event) => {
+        const payload = event.payload as { from?: unknown; to?: unknown };
+        return [payload.from, payload.to];
+      }),
+    ).toEqual(declared.map((step) => [step.from, step.to]));
     const raw2 = openSqlite({ path: dbPath });
     const versions = raw2
       .prepare('SELECT version FROM schema_migration ORDER BY version')
       .all<{ version: number }>()
       .map((row) => row.version);
     // The v1 row stays: history is not rewritten by a migration, it is appended to.
-    expect(versions).toEqual([1, SCHEMA_VERSION]);
+    expect(versions).toEqual([1, ...declared.map((step) => step.to)]);
     raw2.close();
 
     // Reopening a migrated store must not migrate it again: the version row is now current, so the
-    // ledger still carries exactly one `store.migrated` event when the next process opens it.
+    // ledger still carries exactly one `store.migrated` event per step when the next process opens
+    // it.
     migrated.close();
     const reopened = openStore({ dir, now: clock });
     const again = reopened.eventsSince(0).filter((event) => event.type === 'store.migrated');
-    expect(again).toHaveLength(1);
+    expect(again).toHaveLength(declared.length);
     expect(reopened.migrationsApplied()).toEqual([]);
     // Teardown closes whatever `store` points at, so hand it the live handle rather than leaving it
     // holding a closed one.
@@ -844,6 +881,146 @@ describe('verdicts: unknown is not pass', () => {
     const event = store.eventsSince(before).at(0);
     expect(event?.type).toBe('unit.verified');
     expect(event?.payload).toMatchObject({ unitId: 'U-7f3a9c', verdictId: 'V-1', outcome: 'pass' });
+  });
+
+  it('records the class certificate the verdict carried, with a digest the ledger agrees with', () => {
+    const { receiptSha } = receiptedUnit();
+    const verdict: VerdictType = {
+      ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+      modelId: 'auto',
+      certification: {
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        p0: 0.95,
+        alpha: 0.07548367378849634,
+        samples: 20,
+        passes: 18,
+        outcome: 'certified',
+      },
+    };
+    const before = store.eventCount();
+    store.insertVerdict(verdictRow(verdict, 'R-1'), options('tr-verify'));
+
+    const [certificate] = certificatesOfStore();
+    expect(certificate).toMatchObject({
+      verdictId: 'V-1',
+      unitId: 'U-7f3a9c',
+      taskClass: 'refactor-extract-helper',
+      m: 20,
+      k: 18,
+      p0: 0.95,
+      alpha: 0.07548367378849634,
+      samples: 20,
+      passes: 18,
+      outcome: 'certified',
+      policyVersion: 'policy/2026-11-01',
+      modelId: 'auto',
+      recordedAt: AT,
+    });
+    expect(certificate?.certificateId).toBe('cert:V-1');
+    expect(certificate?.certificateSha).toMatch(/^sha256:[0-9a-f]{64}$/u);
+
+    // The ledger event and the table row are the same fact, digest included: a reader who trusts
+    // only the ledger can still prove what was certified.
+    const events = store.eventsSince(before);
+    const certified = events.find((event) => event.type === 'wall.class_certified');
+    expect(certified?.actor).toBe('wall');
+    expect(certified?.payload).toMatchObject({
+      certificateId: certificate?.certificateId,
+      verdictId: 'V-1',
+      taskClass: 'refactor-extract-helper',
+      outcome: 'certified',
+      samples: 20,
+      passes: 18,
+      alpha: 0.07548367378849634,
+      policyVersion: 'policy/2026-11-01',
+      modelId: 'auto',
+      certificateSha: certificate?.certificateSha,
+    });
+  });
+
+  it('stores 17 of 20 as not-certified and 3 of 20 as insufficient, never as a certificate', () => {
+    const { receiptSha } = receiptedUnit();
+    const base = passVerdict('U-7f3a9c', 'A-1', receiptSha);
+    for (const [passes, outcome] of [
+      [17, 'not-certified'],
+      [3, 'insufficient'],
+    ] as const) {
+      store.insertVerdict(
+        {
+          ...verdictRow(
+            {
+              ...base,
+              certification: {
+                taskClass: `class-${passes.toString()}`,
+                m: 20,
+                k: 18,
+                p0: 0.95,
+                alpha: 0.07548367378849634,
+                samples: passCount(passes),
+                passes,
+                outcome,
+              },
+            },
+            'R-1',
+          ),
+          verdictId: `V-${passes.toString()}`,
+        },
+        options(),
+      );
+      const stored = certificatesOfClass(`class-${passes.toString()}`);
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.outcome).toBe(outcome);
+      expect(stored[0]?.passes).toBe(passes);
+    }
+  });
+
+  it('refuses a certificate that claims certified on evidence below its own operating point', () => {
+    const { receiptSha } = receiptedUnit();
+    const error = expectFactoryError(
+      () =>
+        store.insertVerdict(
+          {
+            ...verdictRow(
+              {
+                ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+                certification: {
+                  taskClass: 'tiny-class',
+                  m: 20,
+                  k: 18,
+                  p0: 0.95,
+                  alpha: 0.07548367378849634,
+                  samples: 3,
+                  passes: 3,
+                  outcome: 'certified',
+                },
+              },
+              'R-1',
+            ),
+            verdictId: 'V-liar',
+          },
+          options(),
+        ),
+      'INTERNAL',
+    );
+    expect(error.message).toContain('cannot be stored as certified');
+    expect(certificatesOfClass('tiny-class')).toEqual([]);
+  });
+
+  it('writes no certificate for a verdict that carried none, and one per verdict on reopen', () => {
+    const { receiptSha } = receiptedUnit();
+    // No `certification` field: a cold start measured no class. Absence must not become a row.
+    store.insertVerdict(verdictRow(passVerdict('U-7f3a9c', 'A-1', receiptSha), 'R-1'), options());
+    expect(certificatesOfStore()).toEqual([]);
+
+    // Reopening the store must not duplicate or re-derive anything: the projection is written once,
+    // inside the verdict's transaction.
+    const before = certificatesOfStore().length;
+    store.close();
+    store = openStore({ dir, now: clock });
+    expect(certificatesOfStore()).toHaveLength(before);
+    expect(store.migrationsApplied()).toEqual([]);
   });
 
   it('records an unknown verdict without inventing a pass', () => {

@@ -104,6 +104,40 @@ export const Delta = z.object({
 });
 export type Delta = z.infer<typeof Delta>;
 
+/**
+ * The class certificate: the operating point the wall judged a *task class* against, as data
+ * rather than as prose in a scenario line.
+ *
+ * ND1 published α inside the `class-certification` scenario's `observed` text, which made a
+ * re-certification job impossible: there was nothing to compare a stored judgement against. This
+ * object is the record. `taskClass` rides here — and not only on the verdict — because the class,
+ * not the unit, is what gets certified, and a projection keyed by class must be able to read the
+ * key off the evidence itself.
+ *
+ * `alpha` is the published false-refusal risk of the operating point, not a measurement of this
+ * class: it is `P(X <= k-1)` under `p0`, identical for every class at the same point.
+ */
+export const ClassCertificate = z.object({
+  taskClass: z.string().min(1),
+  /** Attempts required before the class can be judged at all. */
+  m: z.number().int().positive(),
+  /** Passes required among those attempts. */
+  k: z.number().int().positive(),
+  /** The true pass rate the certification is calibrated against. */
+  p0: z.number().min(0).max(1),
+  alpha: z.number().min(0).max(1),
+  /** Attempts observed for this class, and how many of them passed. */
+  samples: z.number().int().nonnegative(),
+  passes: z.number().int().nonnegative(),
+  /**
+   * `insufficient` and `never-certified` are not "probably fine": fewer than `m` attempts is
+   * unknown, and unknown never satisfies a gate. A certificate that does not say `certified`
+   * cannot make a class current, whatever a reader wishes it said.
+   */
+  outcome: z.enum(['certified', 'not-certified', 'insufficient']),
+});
+export type ClassCertificate = z.infer<typeof ClassCertificate>;
+
 export const Verdict = z.object({
   unitId: z.string().min(1),
   attemptId: z.string().min(1),
@@ -124,6 +158,18 @@ export const Verdict = z.object({
    * on `fail` or `unknown`.
    */
   promotionRequiresHumanSignature: z.boolean().optional(),
+  /**
+   * The class judgement this verdict carried, when the wall had a holdout to judge against.
+   * Absent for a cold start with no holdout: absence means "no class was measured", never
+   * "the class is fine".
+   */
+  certification: ClassCertificate.optional(),
+  /**
+   * The model id the attempt ran under, when the caller knew it. Optional and nullable on
+   * purpose: an offline attempt has no model, and `null` (unknown) must not be read as "no
+   * change since" — re-certification treats a null as "cannot prove it is current".
+   */
+  modelId: z.string().min(1).nullable().optional(),
   evaluatedAt: z.string().datetime(),
 });
 export type Verdict = z.infer<typeof Verdict>;

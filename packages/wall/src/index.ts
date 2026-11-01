@@ -99,6 +99,13 @@ export {
 
 export { main as cliMain, defaultCorpusDir } from './cli.ts';
 export {
+  certificateRecency,
+  certificatesRecency,
+  type CertificateRecency,
+  type RunningCertificationBasis,
+  type StoredCertificate,
+} from './certificate-recency.ts';
+export {
   binomialCdfAtMost,
   certificationAlpha,
   certificationForClass,

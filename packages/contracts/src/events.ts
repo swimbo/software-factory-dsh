@@ -98,6 +98,30 @@ export const EventPayload = z.discriminatedUnion('type', [
   }),
   z.object({
     // A metered usage fact, observed by the credential proxy from the gateway's own response.
+    /**
+     * ND1 half two: a class certificate was recorded. It carries the operating point and the
+     * observed counts, because the ledger is what a re-certification job reads — a projection
+     * row without a ledger event would be the only un-audited fact in the store.
+     *
+     * `modelId` is nullable: an offline attempt has no model, and `null` must be read as
+     * "unknown", never as "unchanged since".
+     */
+    type: z.literal('wall.class_certified'),
+    certificateId: z.string(),
+    verdictId: z.string(),
+    unitId: z.string(),
+    taskClass: z.string().min(1),
+    m: z.number().int().positive(),
+    k: z.number().int().positive(),
+    samples: z.number().int().nonnegative(),
+    passes: z.number().int().nonnegative(),
+    alpha: z.number().min(0).max(1),
+    outcome: z.enum(['certified', 'not-certified', 'insufficient']),
+    policyVersion: z.string().min(1),
+    modelId: z.string().nullable(),
+    certificateSha: z.string(),
+  }),
+  z.object({
     // `costUsd` is `null` when the gateway reported tokens but no price: an unpriced call is
     // `unknown`, never a measured zero. `recordSha` is the digest of the row as written, so a
     // reader can prove the ledger entry and the table row are the same fact.
@@ -187,6 +211,7 @@ export const LedgerEvent = z.object({
     'spend.reserved',
     'spend.recorded',
     'usage.recorded',
+    'wall.class_certified',
     'envelope.raised',
     'privileged.decided',
     'credential.issued',
@@ -206,13 +231,18 @@ export type LedgerEvent = z.infer<typeof LedgerEvent>;
 /** Which aggregate each event belongs to; used by `audit` to rebuild projections. */
 export function aggregateOf(
   type: EventType,
-): 'unit' | 'attempt' | 'spend' | 'envelope' | 'credential' | 'store' {
+): 'unit' | 'attempt' | 'spend' | 'envelope' | 'credential' | 'wall' | 'store' {
   if (type.startsWith('unit.')) return 'unit';
   if (type.startsWith('attempt.')) return 'attempt';
   if (type.startsWith('spend.')) return 'spend';
   // `usage.recorded` is the measured half of spend: same aggregate, because a reader asking
   // "what did this unit cost" must not have to visit two projections to find out.
   if (type.startsWith('usage.')) return 'spend';
+  // A class certificate is a wall judgement, and it gets its own aggregate rather than being
+  // folded into `store`: `audit`'s re-certification surface asks "what has the wall certified",
+  // which is a different question from "what happened to the ledger", and a reader should not have
+  // to filter one out of the other.
+  if (type.startsWith('wall.')) return 'wall';
   if (type.startsWith('envelope.')) return 'envelope';
   if (type.startsWith('credential.')) return 'credential';
   // `privileged.decided` reuses the credential aggregate: both are authorization facts.

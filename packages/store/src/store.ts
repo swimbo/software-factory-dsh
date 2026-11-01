@@ -43,6 +43,7 @@ import type {
   WorkerReceiptType,
 } from '@factory/contracts';
 
+import type { ClassCertificateRow } from './types.ts';
 import { openSqlite } from './driver.ts';
 import type { SqliteDriver, SqliteStatement } from './driver.ts';
 import { migrationPath, SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
@@ -254,6 +255,55 @@ interface UsageRecordRowRow {
   signed_at: string;
   record_sha: string;
   ceiling_crossed: number;
+}
+
+interface ClassCertificateDbRow {
+  certificate_id: string;
+  verdict_id: string;
+  unit_id: string;
+  task_class: string;
+  m: number;
+  k: number;
+  p0: number;
+  alpha: number;
+  samples: number;
+  passes: number;
+  outcome: string;
+  policy_version: string;
+  model_id: string | null;
+  recorded_at: string;
+  certificate_sha: string;
+}
+
+function certificateFromRow(row: ClassCertificateDbRow): ClassCertificateRow {
+  if (
+    row.outcome !== 'certified' &&
+    row.outcome !== 'not-certified' &&
+    row.outcome !== 'insufficient'
+  ) {
+    throw new FactoryError(
+      'INTERNAL',
+      `class certificate ${row.certificate_id} has outcome ${row.outcome}, which is not a certification outcome`,
+      { certificateId: row.certificate_id },
+    );
+  }
+  return {
+    certificateId: row.certificate_id,
+    verdictId: row.verdict_id,
+    unitId: row.unit_id,
+    taskClass: row.task_class,
+    m: row.m,
+    k: row.k,
+    p0: Number(row.p0),
+    alpha: Number(row.alpha),
+    samples: row.samples,
+    passes: row.passes,
+    outcome: row.outcome,
+    policyVersion: row.policy_version,
+    modelId: row.model_id,
+    recordedAt: row.recorded_at,
+    certificateSha: row.certificate_sha,
+  };
 }
 
 function usageFromRow(row: UsageRecordRowRow): UsageRow {
@@ -1850,6 +1900,93 @@ export function openStore(options: OpenStoreOptions): Store {
           }
           throw error;
         }
+        // ND1 half two: a class certificate is written here, inside the same transaction as the
+        // verdict that produced it — never by the CLI, and never by a later job. If the verdict is
+        // not stored, the certificate must not be either: a certificate that outlives its evidence
+        // is exactly the kind of fact this store exists to prevent.
+        //
+        // The certificate id is derived from the verdict id, so "one certificate per verdict" is a
+        // primary-key fact. A verdict without a class judgement (no holdout, cold start) writes no
+        // row at all: absence means "no class was measured", and the audit reports that as
+        // never-certified rather than as a pass.
+        const certificate = verdict.certification;
+        if (certificate !== undefined) {
+          // The store re-checks the certificate's own arithmetic rather than trusting the wall's
+          // label. A row that says `certified` on three of twenty attempts would be the cold-start
+          // hole stored as a fact — and once it is a row, the audit would report it as current.
+          // This is not a second judgement, it is the same one, made where the evidence is written.
+          if (
+            certificate.outcome === 'certified' &&
+            (certificate.samples < certificate.m || certificate.passes < certificate.k)
+          ) {
+            throw new FactoryError(
+              'INTERNAL',
+              `verdict ${row.verdictId} certifies class ${certificate.taskClass} on ` +
+                `${certificate.passes.toString()} of ${certificate.m.toString()} attempts, which does not ` +
+                'reach the operating point; an uncertifiable class cannot be stored as certified',
+              { verdictId: row.verdictId, taskClass: certificate.taskClass },
+            );
+          }
+          const certificateId = `cert:${row.verdictId}`;
+          const modelId = verdict.modelId ?? null;
+          const certificateSha = contentHash({
+            certificateId,
+            verdictId: row.verdictId,
+            unitId: row.unitId,
+            taskClass: certificate.taskClass,
+            m: certificate.m,
+            k: certificate.k,
+            p0: certificate.p0,
+            alpha: certificate.alpha,
+            samples: certificate.samples,
+            passes: certificate.passes,
+            outcome: certificate.outcome,
+            policyVersion: row.policyVersion,
+            modelId,
+            recordedAt: row.evaluatedAt,
+          });
+          stmt(
+            `INSERT INTO class_certificates (certificate_id, verdict_id, unit_id, task_class, m, k, p0,
+               alpha, samples, passes, outcome, policy_version, model_id, recorded_at, certificate_sha)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            certificateId,
+            row.verdictId,
+            row.unitId,
+            certificate.taskClass,
+            certificate.m,
+            certificate.k,
+            certificate.p0,
+            certificate.alpha,
+            certificate.samples,
+            certificate.passes,
+            certificate.outcome,
+            row.policyVersion,
+            modelId,
+            row.evaluatedAt,
+            certificateSha,
+          );
+          writeEvent(
+            {
+              type: 'wall.class_certified',
+              certificateId,
+              verdictId: row.verdictId,
+              unitId: row.unitId,
+              taskClass: certificate.taskClass,
+              m: certificate.m,
+              k: certificate.k,
+              samples: certificate.samples,
+              passes: certificate.passes,
+              alpha: certificate.alpha,
+              outcome: certificate.outcome,
+              policyVersion: row.policyVersion,
+              modelId,
+              certificateSha,
+            },
+            { actor: 'wall', traceId: certificateId, occurredAt: row.evaluatedAt },
+          );
+        }
+
         // A verdict is evidence first and a state change second.
         //
         //  * `pass`    — the unit advances to `verified` (and only along an edge the
@@ -1914,6 +2051,31 @@ export function openStore(options: OpenStoreOptions): Store {
     getVerdict(verdictId: string): VerdictRow | null {
       const row = stmt('SELECT * FROM verdicts WHERE verdict_id = ?').get<VerdictDbRow>(verdictId);
       return row ? mapVerdict(row) : null;
+    },
+
+    // --- class certificates (ND1 half two) -----------------------------------
+    //
+    // Read-only projections of `insertVerdict`'s write. There is deliberately no
+    // `recordClassCertificate`: a certificate is not something an operator or a job may assert, it
+    // is something a verdict carries.
+    classCertificates(): readonly ClassCertificateRow[] {
+      return stmt(
+        `SELECT certificate_id, verdict_id, unit_id, task_class, m, k, p0, alpha, samples, passes,
+                outcome, policy_version, model_id, recorded_at, certificate_sha
+           FROM class_certificates ORDER BY recorded_at DESC, rowid DESC`,
+      )
+        .all<ClassCertificateDbRow>()
+        .map(certificateFromRow);
+    },
+
+    certificatesForClass(taskClass: string): readonly ClassCertificateRow[] {
+      return stmt(
+        `SELECT certificate_id, verdict_id, unit_id, task_class, m, k, p0, alpha, samples, passes,
+                outcome, policy_version, model_id, recorded_at, certificate_sha
+           FROM class_certificates WHERE task_class = ? ORDER BY recorded_at DESC, rowid DESC`,
+      )
+        .all<ClassCertificateDbRow>(taskClass)
+        .map(certificateFromRow);
     },
 
     // --- promotions ----------------------------------------------------------

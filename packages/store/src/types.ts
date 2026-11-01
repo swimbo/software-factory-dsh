@@ -257,6 +257,17 @@ export interface Store {
     ceilingCrossed: boolean;
   }): UsageRow;
   usageForAttempt(attemptId: string): readonly UsageRow[];
+  // --- class certificates (ND1 half two)
+  /**
+   * Every stored certificate, newest first. Read-only and projection-only: the write happens inside
+   * `insertVerdict`, so a certificate cannot exist for a verdict the store does not hold.
+   *
+   * Optional on the port so a fake store that predates ND1 stays structurally valid; a caller that
+   * finds it absent has *no* evidence of certification and must say `never-certified`, not skip the
+   * question (L3).
+   */
+  classCertificates?(): readonly ClassCertificateRow[];
+  certificatesForClass?(taskClass: string): readonly ClassCertificateRow[];
   listUsage(): readonly UsageRow[];
   usageForUnit(unitId: string): {
     tokensIn: number;
@@ -329,6 +340,29 @@ export interface Store {
  * shown to be the same fact; it is **not** a signature over a claim the gateway made — that
  * comparison is `factory budget reconcile`, against the gateway's own export.
  */
+/**
+ * One class certificate, as stored. Append-only: a certificate is a fact about a verdict, so it is
+ * never updated in place — a re-certification adds a row. `modelId` is `null` when the attempt did
+ * not record one, which reads as "unknown", never as "unchanged since".
+ */
+export interface ClassCertificateRow {
+  readonly certificateId: string;
+  readonly verdictId: string;
+  readonly unitId: string;
+  readonly taskClass: string;
+  readonly m: number;
+  readonly k: number;
+  readonly p0: number;
+  readonly alpha: number;
+  readonly samples: number;
+  readonly passes: number;
+  readonly outcome: 'certified' | 'not-certified' | 'insufficient';
+  readonly policyVersion: string;
+  readonly modelId: string | null;
+  readonly recordedAt: string;
+  readonly certificateSha: string;
+}
+
 export interface UsageRow {
   readonly usageId: string;
   readonly unitId: string;

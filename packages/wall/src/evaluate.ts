@@ -50,6 +50,8 @@ import { replayArgv, verificationReadProblem, verificationSequenceProblem } from
 import type { CriteriaLogEntry, CriteriaLogPort, DiscriminationReport } from './criteria-log.ts';
 import type { HoldoutScenario, HoldoutStore } from './holdout.ts';
 import { assessSecurityPaths, SENSITIVE_OPERATION_CLASSES } from './security-path.ts';
+import type { ClassCertificate } from '@factory/contracts';
+
 import { certificationForClass, type ClassCertification } from './operating-point.ts';
 import { normalisePath, pathIsInScope } from './scope.ts';
 
@@ -167,6 +169,14 @@ export interface EvaluateInput {
   readonly receipt: DecisionReceipt;
   readonly holdout: HoldoutStore | null;
   readonly runner: ScenarioRunner;
+  /**
+   * The model id this attempt ran under, when the caller knows it. It is *recorded*, never judged:
+   * it rides on the verdict so a class certificate can be checked against the model that produced
+   * it (`re-certify: model changed`), and it is absent for an offline attempt rather than being
+   * invented — L2 forbids a model anywhere on a decision path, and this is metadata about a
+   * measurement, not an input to one.
+   */
+  readonly modelId?: string | undefined;
   readonly policy: {
     readonly deltaThreshold: number;
     readonly commandTimeoutMs: number;
@@ -1711,9 +1721,13 @@ function checkClassCertification(
   log: readonly CriteriaLogEntry[],
   minSamples: number,
   operatingPoint: { readonly m?: number; readonly k?: number; readonly p0?: number } | undefined,
-): { readonly outcome: CheckOutcome; readonly requiresHuman: boolean } {
+): {
+  readonly outcome: CheckOutcome;
+  readonly requiresHuman: boolean;
+  readonly certificate: ClassCertificate | null;
+} {
   if (holdout === null) {
-    return { outcome: { scenarios: [], reasons: [] }, requiresHuman: false };
+    return { outcome: { scenarios: [], reasons: [] }, requiresHuman: false, certificate: null };
   }
 
   const samples = countDeltaSamples(holdout, live, log);
@@ -1757,6 +1771,16 @@ function checkClassCertification(
       reasons: [],
     },
     requiresHuman,
+    certificate: {
+      taskClass: holdout.taskClass,
+      m: certification.m,
+      k: certification.k,
+      p0: certification.p0,
+      alpha: certification.alpha,
+      samples: certification.samples,
+      passes: certification.passes,
+      outcome: certification.outcome,
+    },
   };
 }
 
@@ -1903,6 +1927,10 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
     ...(outcome === 'pass' && certification.requiresHuman
       ? { promotionRequiresHumanSignature: true }
       : {}),
+    // The class judgement, as data. Absent — never `certified` — when there was no holdout to
+    // judge the class against, so a reader cannot mistake a cold start for a certificate.
+    ...(certification.certificate === null ? {} : { certification: certification.certificate }),
+    ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
     evaluatedAt: input.nowIso,
   };
 

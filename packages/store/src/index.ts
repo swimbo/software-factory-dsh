@@ -71,6 +71,7 @@ export type {
   Store,
   StoreRefusal,
   UnitRow,
+  ClassCertificateRow,
   UsageRow,
   VerdictRow,
 } from './types.ts';

@@ -145,6 +145,22 @@ const VALID_PAYLOADS: Readonly<Record<EventType, unknown>> = {
     to: 2,
     note: 'ND3: append-only usage_records',
   },
+  'wall.class_certified': {
+    type: 'wall.class_certified',
+    certificateId: 'cert:V-1a2b3c',
+    verdictId: 'V-1a2b3c',
+    unitId: 'U-7f3a9c',
+    taskClass: 'refactor-extract-helper',
+    m: 20,
+    k: 18,
+    samples: 20,
+    passes: 18,
+    alpha: 0.07548367378849634,
+    outcome: 'certified',
+    policyVersion: 'policy/2026-11-01',
+    modelId: 'auto',
+    certificateSha: 'sha256:1f4c',
+  },
   'recovery.completed': {
     type: 'recovery.completed',
     recoveryRunId: 'R-91ab',
@@ -175,12 +191,15 @@ const EXPECTED_AGGREGATE: Readonly<Record<EventType, ReturnType<typeof aggregate
   // `audit`'s projection switch does not grow a second case for one event type.
   'privileged.decided': 'credential',
   'credential.issued': 'credential',
+  // A wall judgement gets its own aggregate: `audit --certifications` asks "what has the wall
+  // certified", which is not a question about the ledger's own state.
+  'wall.class_certified': 'wall',
   'store.quarantined': 'store',
   'store.migrated': 'store',
   'recovery.completed': 'store',
 };
 
-describe('each of the 18 event types', () => {
+describe('each of the 20 event types', () => {
   for (const [type, payload] of Object.entries(VALID_PAYLOADS)) {
     it(`accepts a valid ${type} payload`, () => {
       expect(EventPayload.parse(payload).type).toBe(type);
@@ -189,11 +208,13 @@ describe('each of the 18 event types', () => {
 });
 
 describe('EventPayload', () => {
-  it('covers 19 event types', () => {
+  it('covers 20 event types', () => {
     // 19 since ND3 added `usage.recorded` (spend as the gateway reported it) and `store.migrated`
-    // (an additive schema migration ran on open). A count that drifts from the union is the point of
-    // this spec; the number moves when a fact becomes worth recording, never to make a suite green.
-    expect(Object.keys(VALID_PAYLOADS)).toHaveLength(19);
+    // (an additive schema migration ran on open); 20 since ND1 half two added
+    // `wall.class_certified` (a class judgement exists as a record, not as prose in a scenario
+    // line). A count that drifts from the union is the point of this spec; the number moves when a
+    // fact becomes worth recording, never to make a suite green.
+    expect(Object.keys(VALID_PAYLOADS)).toHaveLength(20);
   });
 
   it('rejects an unknown event type', () => {

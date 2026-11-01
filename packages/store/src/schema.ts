@@ -8,7 +8,7 @@
  * enforced at this layer rather than in code.
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * Declared migrations. A store one version behind is opened only when a migration here says how to
@@ -45,12 +45,47 @@ const USAGE_RECORDS_DDL = `CREATE TABLE IF NOT EXISTS usage_records (
 CREATE INDEX IF NOT EXISTS usage_attempt ON usage_records(attempt_id);
 CREATE INDEX IF NOT EXISTS usage_unit ON usage_records(unit_id);`;
 
+/**
+ * v2 → v3 (ND1 half two): `class_certificates`, the append-only projection of the wall's class
+ * judgement. Additive: nothing existing changed, and the DDL is written out here rather than
+ * re-running `SCHEMA_SQL` for the reason the header gives — a migration that executes "the current
+ * schema" silently changes whenever someone adds a table.
+ *
+ * One row per verdict that carries a certificate. The primary key is derived from the verdict id, so
+ * "one certificate per verdict" is a schema fact rather than a promise the insert path keeps.
+ */
+const CLASS_CERTIFICATES_DDL = `CREATE TABLE IF NOT EXISTS class_certificates (
+  certificate_id      TEXT PRIMARY KEY,
+  verdict_id          TEXT NOT NULL REFERENCES verdicts(verdict_id),
+  unit_id             TEXT NOT NULL REFERENCES units(unit_id),
+  task_class          TEXT NOT NULL,
+  m                   INTEGER NOT NULL CHECK (m > 0),
+  k                   INTEGER NOT NULL CHECK (k > 0 AND k <= m),
+  p0                  REAL NOT NULL CHECK (p0 >= 0 AND p0 <= 1),
+  alpha               REAL NOT NULL CHECK (alpha >= 0 AND alpha <= 1),
+  samples             INTEGER NOT NULL CHECK (samples >= 0),
+  passes              INTEGER NOT NULL CHECK (passes >= 0 AND passes <= samples),
+  outcome             TEXT NOT NULL CHECK (outcome IN ('certified','not-certified','insufficient')),
+  policy_version      TEXT NOT NULL,
+  model_id            TEXT,
+  recorded_at         TEXT NOT NULL,
+  certificate_sha     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS certificates_class ON class_certificates(task_class, recorded_at);
+CREATE INDEX IF NOT EXISTS certificates_verdict ON class_certificates(verdict_id);`;
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     from: 1,
     to: 2,
     note: 'ND3: append-only usage_records, so spend is recorded as the gateway reported it',
     statements: [USAGE_RECORDS_DDL],
+  },
+  {
+    from: 2,
+    to: 3,
+    note: 'ND1 half two: append-only class_certificates, so a class judgement can be re-checked',
+    statements: [CLASS_CERTIFICATES_DDL],
   },
 ];
 
@@ -284,6 +319,12 @@ CREATE INDEX IF NOT EXISTS spend_unit ON spend_ledger(unit_id);
 -- (tokens were reported, no price was), which is why the column is nullable and the check does
 -- not default it to zero.
 ${USAGE_RECORDS_DDL}
+
+-- --------------------------------------------------------- class certificates
+-- ND1 half two: the wall's per-class judgement as an append-only projection. One row
+-- per verdict that carried one; the digest lets a reader prove the row and the
+-- wall.class_certified event are the same fact.
+${CLASS_CERTIFICATES_DDL}
 
 CREATE TABLE IF NOT EXISTS envelopes (
   envelope_id     TEXT PRIMARY KEY,

@@ -61,6 +61,8 @@ export {
   type WallReasonCode,
   ScenarioResult,
   Delta,
+  ClassCertificate,
+  type ClassCertificate as ClassCertificateType,
   Verdict,
   type Verdict as VerdictType,
   assertVerdictIsEarned,
