@@ -1,6 +1,6 @@
 # Phase 9d — Harness efficiency and bounded execution
 
-Status: planned, implementation not started. Added October 30, 2026.
+Status: scoped implementation and pilot evaluation complete through 9d.5. Retain the baseline/default; candidate profiles remain opt-in and broader promotion is not qualified. Updated October 31, 2026.
 
 ## Purpose and placement
 
@@ -60,11 +60,15 @@ Acceptance: repeated errors and A→B→A edit loops trigger bounded interventio
 
 ## Completion evidence
 
-- [ ] Baseline and supported-extension audit, including upstream documentation checked.
-- [ ] Versioned prompt/tool/profile and receipt contracts; controlled cache evidence or explicit telemetry limitation.
-- [ ] Batched execution reuse/extension decision with bounded-output and isolation evidence.
-- [ ] Stall, cancellation, crash/replay and malicious-output regression results.
-- [ ] Paired comparison, independent acceptance and explicit promote/retain-baseline decision.
-- [ ] Signed canary/rollback evidence if runtime rollout is authorized; otherwise mark rollout pending.
+- [x] Baseline and supported-extension audit, including upstream documentation checked.
+- [x] Versioned prompt/tool/profile and receipt contracts; controlled cache evidence or explicit telemetry limitation.
+- [x] Batched execution reuse/extension decision with bounded-output and isolation evidence.
+- [x] Stall, cancellation, crash/replay and malicious-output regression results.
+- [x] Paired comparison, independent acceptance and explicit promote/retain-baseline decision.
+- [x] Signed canary/rollback evidence if runtime rollout is authorized; otherwise mark rollout pending.
 
-Local tests and documentation completion do not establish live cache behavior, actual-charge savings or deployed readiness. Phase 9d remains pending until required evidence and any authorized rollout are complete.
+Local tests and documentation do not establish actual-charge savings or production readiness. The scoped implementation and evaluation ended with a retain-baseline decision; broader promotion remains held pending complete telemetry, aligned graders and a fresh held-out qualification cohort.
+
+Latest 9d.3 rollout and comparison: [bounded native pilot](../../verification/harness-bounded-native-2026-10-31/report.md). The profile remains opt-in; historical development pairs do not establish production or held-out acceptance.
+
+Latest execution evidence: [stall qualification](../../verification/harness-stall-2026-10-31/report.md) and [held-out evaluation and retain-baseline decision](../../verification/harness-evaluation-2026-10-31/report.md). Earlier status statements in dated progress entries describe their historical checkpoints.
