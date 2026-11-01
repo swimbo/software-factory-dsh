@@ -2,8 +2,11 @@
 
 ## Symptom
 
-`factory ledger verify` prints `MISSING`, `STALE` or `ROLLBACK` and exits **9** (`integrity`). Or you
-read `README.md`'s claim "detectable within 48 h" and want to know whether it is true _right now_.
+`factory ledger verify` prints `MISSING`, `STALE` or `ROLLBACK` and exits **9** (`integrity`). It exits
+**8** (`ANCHOR_UNAVAILABLE`) when it could not look at all — no target configured, or the host did not
+answer. **That difference is the point:** `9` is a fact about the ledger, `8` is a fact about your
+network, and `8` must never be mistaken for `MISSING`. Or you read `README.md`'s claim "detectable within
+48 h" and want to know whether it is true _right now_.
 
 ```
 $ factory ledger verify
@@ -82,10 +85,20 @@ than an anchor that was already written, before any verdict from it is trusted.
 
 ## When it does not work
 
-- **`verify` says `MISSING` after a successful `anchor`** — the transport wrote somewhere else or the
-  `ssh` command failed silently. Run `ssh -o BatchMode=yes <host> 'tail -1 <path>'` by hand; the anchor
-  command surfaces a non-zero exit but not a host that answers and discards.
+- **`verify` says `MISSING` after a successful `anchor`** — the read succeeded and there is no record
+  there, so the transport wrote somewhere else (`FACTORY_ANCHOR_PATH` vs the path your `ssh` reads) or
+  the host answered and discarded the append. Run `ssh -o BatchMode=yes <host> 'tail -1 <path>'` by
+  hand. A host that cannot be reached is no longer one of the causes: that exits **8** with ssh's own
+  message (`Host key verification failed`, `Connection refused`, …).
+- **The host did not answer** — exit **8**, `ANCHOR_UNAVAILABLE`, message
+  `the anchor at ssh host:path could not be read (exit 255): …`. Nothing is known about the ledger until
+  this is fixed, and `factory alerts` reports it as exit 8 (never 0) for the same reason. Test it in the
+  context the job runs in — `ssh -o BatchMode=yes <host> true` — because launchd has no ssh-agent: a key
+  with a passphrase works in your terminal and fails at 03:00.
 - **No anchor target configured** — exit **8** naming both variables. Set `FACTORY_ANCHOR_SSH` (off-host)
   or accept the weaker local anchor explicitly.
-- **This is not built:** rotation of the anchor file, alerting on staleness, and any automatic
-  reconciliation. `verify` is the whole mechanism; a human schedules it and a human reads it.
+- **Alerting is built now, notification is not:** `factory alerts` (daily 04:00 → `~/.factory/alerts.log`)
+  reports a stale, missing or rolled-back anchor as exit `9` and an unreachable host as exit `8` — see
+  [evidence-expiry.md](evidence-expiry.md). Nothing reaches a phone or an inbox; the log is the page.
+- **Still not built:** rotation of the anchor file, and any automatic reconciliation. `verify` remains
+  the whole verification mechanism; a human schedules it and a human reads it.
