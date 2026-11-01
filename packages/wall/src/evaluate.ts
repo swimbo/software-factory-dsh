@@ -45,6 +45,7 @@ import {
   type WallReasonCode,
 } from '@factory/contracts';
 import { assessDiscrimination } from './criteria-log.ts';
+import { PrivilegedBrokerRefusal } from './local.ts';
 import type { CriteriaLogEntry, CriteriaLogPort, DiscriminationReport } from './criteria-log.ts';
 import type { HoldoutScenario, HoldoutStore } from './holdout.ts';
 import { assessSecurityPaths, SENSITIVE_OPERATION_CLASSES } from './security-path.ts';
@@ -501,11 +502,22 @@ async function checkFaithfulness(input: EvaluateInput): Promise<CheckOutcome> {
         argv: command.argv,
         timeoutMs: policy.commandTimeoutMs,
       });
-    } catch {
+    } catch (error) {
+      // A brokered refusal is not a transport failure: the command was not re-run
+      // because a person had not approved it, and the operator has to see that
+      // distinction. Collapsing it into `receipt_unavailable` would report a gate as
+      // an accident -- the same shape of lie as the outbox comment.
+      const refused = error instanceof PrivilegedBrokerRefusal;
       scenarios.push(
-        result(id, 'faithfulness', 'unknown', 'recorded command could not be re-executed'),
+        result(
+          id,
+          'faithfulness',
+          'unknown',
+          refused ? error.message : 'recorded command could not be re-executed',
+        ),
       );
-      if (!reasons.includes('receipt_unavailable')) reasons.push('receipt_unavailable');
+      const reason = refused ? 'privileged_unbrokered' : 'receipt_unavailable';
+      if (!reasons.includes(reason)) reasons.push(reason);
       continue;
     }
 

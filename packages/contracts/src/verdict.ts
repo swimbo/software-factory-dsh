@@ -16,6 +16,13 @@ export const WALL_REASON_CODES = [
   'acceptance_unmeasured',
   'receipt_unfaithful',
   'receipt_unavailable',
+  /**
+   * A recorded command needed a person's decision and had none. The factory will not
+   * re-run what it cannot broker, so the verdict stays `unknown` -- and the operator
+   * is told which command and which rule, instead of being handed the generic
+   * "could not be re-executed" that hides a gate refusal behind a transport failure.
+   */
+  'privileged_unbrokered',
   'delta_regression',
   'delta_unmeasured',
   'holdout_failed',

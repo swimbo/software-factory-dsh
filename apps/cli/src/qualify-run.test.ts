@@ -12,6 +12,7 @@
  * the policy version, and must never be mistakable for a measurement.
  */
 import { describe, expect, it } from 'vitest';
+import { resolvePolicy } from './context.ts';
 
 import { EXIT } from './exit.ts';
 import { jsonOf, runCli, seedUnit, tempHome, writeSpec } from './testing.ts';
@@ -126,6 +127,23 @@ describe('cold start', () => {
     expect(result.status).toBe(EXIT.ok);
     expect(result.stderr).toMatch(/LANE\s+dark/u);
     expect(result.stderr).toContain('TASK_CLASS_COLD_START');
+  });
+
+  it('leaves privileged brokering off by default, and takes it from the environment', () => {
+    // Both halves matter: the shipped default must not change admission behaviour for every
+    // existing unit, and the one place an operator can turn it on is the composition root —
+    // never the worker's environment.
+    const home = tempHome();
+    const file = writeSpec(home);
+    const unitId = String(jsonOf(runCli(['intent', '--file', file, '--json'], { home }))['unitId']);
+    const shipped = jsonOf(runCli(['qualify', unitId, '--json'], { home }));
+    const brokered = jsonOf(
+      runCli(['qualify', unitId, '--json'], { home, env: { FACTORY_PRIVILEGED_BROKERING: 'on' } }),
+    );
+    expect(resolvePolicy({}).privilegedBrokering).toBe('off');
+    expect(resolvePolicy({ FACTORY_PRIVILEGED_BROKERING: 'on' }).privilegedBrokering).toBe('on');
+    // Turning it on is a *policy* fact, so it changes the version every decision records.
+    expect(brokered['policyVersion']).not.toBe(shipped['policyVersion']);
   });
 
   it('does not enable cold start for any value other than 1', () => {
