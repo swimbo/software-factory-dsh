@@ -100,7 +100,11 @@ function readTurn(recordDir: string): {
       const reason = (event['reason'] ?? {}) as { kind?: unknown };
       if (reason.kind === 'completed') completed = true;
     }
-    if (type === 'step_end' || isTurnEnd) {
+    // `dsh` emits `{"type":"status","phase":"step_end"}` — the phase carries step_end, not the
+    // type. Matching on `type === 'step_end'` alone found no usage at all, which is why a real
+    // paid turn reported "0 tokens" while its transcript held 6,089 and 6,617.
+    const isStepEnd = type === 'step_end' || (type === 'status' && phase === 'step_end');
+    if (isStepEnd || isTurnEnd) {
       const raw = (event['usage'] ?? {}) as Record<string, unknown>;
       const total = typeof raw['totalTokens'] === 'number' ? raw['totalTokens'] : undefined;
       if (total !== undefined && total > 0) {
@@ -168,6 +172,9 @@ describe.skipIf(!READY)(
   () => {
     it('[@live] a one-shot turn through the factory completes and leaves a reproducible receipt', () => {
       const fixture = liveFixture();
+      // A red run keeps its home: a spec that deletes its own evidence turns a diagnosis into a
+      // guess (it cost one paid call already). Green removes it.
+      let passed = false;
       try {
         const unitId = fixture.submit({ intent: LIVE_INTENT, restateBack: LIVE_RESTATE });
         const run = runFactory(['run', unitId, '--json'], {
@@ -253,6 +260,11 @@ describe.skipIf(!READY)(
         } finally {
           verdictStore.close();
         }
+        console.log(
+          `[@live] verdict ${String(verdict['outcome'])} · reasons [${String(
+            (verdict['reasons'] as string[]).join(', '),
+          )}] · ${scope} · exit ${String(run.code)}`,
+        );
         expect(scope).toMatch(/replayed\s+5\s+of\s+8/u);
         expect(scope).toMatch(/commands\[0\]|worker-launch/u);
         expect(scope).toMatch(/0\s+mismatched/u);
@@ -308,13 +320,18 @@ describe.skipIf(!READY)(
         expect(() =>
           execFileSync(argv[0] ?? 'node', argv.slice(1), { cwd, encoding: 'utf8' }),
         ).not.toThrow();
+        passed = true;
       } finally {
-        fixture.cleanup();
+        if (passed) fixture.cleanup();
+        else console.error(`[@live] fixture retained for post-mortem: ${fixture.home}`);
       }
     });
 
     it('[@live] a model that cannot answer is recorded as a failure, never as a pass', () => {
       const fixture = liveFixture();
+      // A red run keeps its home: a spec that deletes its own evidence turns a diagnosis into a
+      // guess (it cost one paid call already). Green removes it.
+      let passed = false;
       try {
         const unitId = fixture.submit({ intent: LIVE_INTENT, restateBack: LIVE_RESTATE });
         // Provoked honestly: the overlay asks the gateway for a model id it cannot resolve, so
@@ -350,7 +367,8 @@ describe.skipIf(!READY)(
           expect(receipt.exitCode === 0 && turn.completed).toBe(false);
         }
       } finally {
-        fixture.cleanup();
+        if (passed) fixture.cleanup();
+        else console.error(`[@live] fixture retained for post-mortem: ${fixture.home}`);
       }
     }, 420_000);
   },
