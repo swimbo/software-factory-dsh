@@ -106,3 +106,24 @@ def test_observe_only_without_original_intent_creates_no_binding_or_dispatch(tmp
  assert service.read_bytes()==before and not (root/'operator-active.json').exists()
  assert not (trial/'baseline.previous.service').exists() and not (trial/'baseline.desired.service').exists()
  assert not (setup/'results/u.json').exists()
+
+
+def test_reconciliation_is_not_terminal_while_original_sdk_is_running(tmp_path,monkeypatch):
+ import baseline_trials
+ monkeypatch.setattr(baseline_trials,'command',lambda *a,**k:'')
+ cfg,root,setup,trial,service=fixture(tmp_path,monkeypatch);stages=[];calls=[]
+ monkeypatch.setattr(mod,'command',lambda *a,**k:'')
+ def post(*args):
+  route=args[1]
+  if not (trial/'baseline.dispatch-intent.json').exists():return {'stage':'unclaimed'}
+  stage='needs_reconciliation' if not stages else 'needs_validation';stages.append(stage);return {'stage':stage}
+ monkeypatch.setattr(mod,'post',post)
+ def dispatch(intent,*args):
+  mod.write_new(intent,{'started_at_unix':__import__('time').time()});calls.append('dispatch');return {'stage':'needs_reconciliation'}
+ monkeypatch.setattr(mod,'dispatch_once',dispatch);monkeypatch.setattr(mod.time,'sleep',lambda *a:None)
+ def collect(*args):
+  assert stages==['needs_reconciliation','needs_validation'],'active SDK was cancelled before read-only reconciliation completed'
+  return {'accepted':True}
+ monkeypatch.setattr(mod,'collect',collect)
+ assert mod.run(cfg,'u')['accepted'] is True
+ assert calls==['dispatch']

@@ -297,7 +297,7 @@ def run(config, unit, *, observe_only=False):
             started = json.loads(intent.read_text())['started_at_unix']
             while time.time()-started < 240:
                 state = post(root, 'WorkUnit/' + unit + '/getState', {})
-                if state['stage'] in ('needs_validation', 'validated', 'failed', 'needs_reconciliation'): break
+                if state['stage'] in ('needs_validation', 'validated', 'failed'): break
                 time.sleep(2)
         except OSError:
             write_new(trial/'evaluation.poll-failure.json', {'original_dispatch_retained': True,
