@@ -114,6 +114,8 @@ export function exitCodeOf(code: string): ExitCode {
  * "printed runbook line" for the class-8 and class-9 refusals.
  */
 const RUNBOOKS: Readonly<Record<string, string>> = {
+  ANCHOR_UNAVAILABLE:
+    'runbook: docs/runbooks/ledger-anchor.md — set FACTORY_ANCHOR_SSH (+ FACTORY_ANCHOR_PATH) for an off-host anchor, or FACTORY_ANCHOR_DIR to accept a local one',
   EXECUTOR_UNAVAILABLE:
     'runbook: install the pinned dsh on PATH and start a docker daemon, then re-run: factory run <unitId>',
   DSH_VERSION_MISMATCH:

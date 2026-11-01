@@ -16,6 +16,7 @@
  *
  * Test-only. It is deliberately *not* exported from the package entry point.
  */
+import { createHash } from 'node:crypto';
 import {
   EventPayload,
   FactoryError,
@@ -50,6 +51,20 @@ interface LeaseRow {
   readonly acquiredAt: string;
   readonly expiresAt: string;
   releasedAt: string | null;
+}
+
+/** The shape `recordUsage` returns; identical to the real store's `UsageRow`. */
+interface UsageRowLike {
+  usageId: string;
+  unitId: string;
+  attemptId: string;
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number | null;
+  gatewayRequestId: string | null;
+  signedAt: string;
+  recordSha: string;
+  ceilingCrossed: boolean;
 }
 
 interface SpendRow {
@@ -126,6 +141,8 @@ export class FakeStore implements Store {
   private readonly verdicts = new Map<string, VerdictRow>();
   private readonly effects = new Map<string, EffectRow>();
   private readonly spend: SpendRow[] = [];
+  /** ND3: metered usage facts, appended in order like the real table. */
+  private readonly usage: UsageRowLike[] = [];
   private readonly promotions: PromotionRow[] = [];
   private readonly credentials = new Map<string, CredentialRow>();
   private readonly recoveryRuns = new Map<string, RecoveryRunRow>();
@@ -469,6 +486,11 @@ export class FakeStore implements Store {
     this.tick('appendEvent');
     this.assertWritable('appendEvent');
     return this.record(event, options);
+  }
+
+  /** A fake opens no files, so it never migrates; the seam exists because `Store` requires it. */
+  migrationsApplied(): { from: number; to: number; note: string }[] {
+    return [];
   }
 
   eventsSince(seq: number, limit?: number): LedgerEvent[] {
@@ -1138,6 +1160,69 @@ export class FakeStore implements Store {
       else if (row.kind === 'unknown' || row.amountUsd === null) unknownRows += 1;
     }
     return { reservedUsd, recordedUsd, unknownRows };
+  }
+
+  // ------------------------------------------------------- metered usage (ND3)
+  // Mechanical mirror of the real store's four methods. `recordUsage` computes the digest the
+  // same way (`sha256` over the row) because a fake whose digest disagreed with the real one
+  // would let a spec pass that proves nothing.
+
+  recordUsage(row: {
+    usageId: string;
+    unitId: string;
+    attemptId: string;
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number | null;
+    gatewayRequestId: string | null;
+    signedAt: string;
+    ceilingCrossed: boolean;
+  }): UsageRowLike {
+    this.tick('recordUsage');
+    this.assertWritable('recordUsage');
+    this.unit(row.unitId);
+    this.attempt(row.attemptId);
+    const recordSha = `sha256:${createHash('sha256')
+      .update(JSON.stringify([row.usageId, row.tokensIn, row.tokensOut, row.costUsd]))
+      .digest('hex')}`;
+    const stored: UsageRowLike = { ...row, recordSha };
+    this.usage.push(stored);
+    return stored;
+  }
+
+  usageForAttempt(attemptId: string): readonly UsageRowLike[] {
+    this.tick('usageForAttempt');
+    return this.usage.filter((row) => row.attemptId === attemptId);
+  }
+
+  listUsage(): readonly UsageRowLike[] {
+    this.tick('listUsage');
+    return [...this.usage];
+  }
+
+  usageForUnit(unitId: string): {
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+    unpricedRows: number;
+    rows: number;
+    ceilingCrossed: boolean;
+  } {
+    this.tick('usageForUnit');
+    const rows = this.usage.filter((row) => row.unitId === unitId);
+    let tokensIn = 0;
+    let tokensOut = 0;
+    let costUsd = 0;
+    let unpricedRows = 0;
+    let ceilingCrossed = false;
+    for (const row of rows) {
+      tokensIn += row.tokensIn;
+      tokensOut += row.tokensOut;
+      if (row.costUsd === null) unpricedRows += 1;
+      else costUsd += row.costUsd;
+      if (row.ceilingCrossed) ceilingCrossed = true;
+    }
+    return { tokensIn, tokensOut, costUsd, unpricedRows, rows: rows.length, ceilingCrossed };
   }
 
   // --------------------------------------------------------------- envelopes

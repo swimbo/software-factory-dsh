@@ -28,10 +28,25 @@ export const ERROR_CODES = [
   'VERDICT_UNKNOWN',
   // 6 — budget
   'BUDGET_EXCEEDED',
+  /**
+   * Metered spend could not be reconciled against the gateway: either the gateway's own
+   * export was missing/unreadable, or a recorded usage fact disagrees with it. Exit 6 with
+   * `BUDGET_EXCEEDED`'s family, because the subject is spend — but distinct, because
+   * "we overspent" and "we cannot account for what we spent" are different sentences and an
+   * operator needs to know which one they are being told.
+   */
+  'USAGE_UNRECONCILED',
   // 7 — concurrency / conflict
   'LEASE_HELD',
   'RECEIPT_CONFLICT',
   // 8 — environment
+  /**
+   * No ledger anchor target is configured (or the configured one cannot be reached). Exit 8, not 9:
+   * the ledger may be perfectly intact — nobody has told the factory where the off-host copy lives, so
+   * "is this ledger anchored?" has no answer yet. The distinction matters because exit 9 tells an
+   * operator to stop and investigate, while 8 tells them to finish configuring.
+   */
+  'ANCHOR_UNAVAILABLE',
   'EXECUTOR_UNAVAILABLE',
   'DSH_VERSION_MISMATCH',
   'CONTAINER_UNAVAILABLE',
@@ -69,8 +84,10 @@ const EXIT: Record<ErrorCode, number> = {
   VERDICT_STALE: 5,
   VERDICT_UNKNOWN: 5,
   BUDGET_EXCEEDED: 6,
+  USAGE_UNRECONCILED: 6,
   LEASE_HELD: 7,
   RECEIPT_CONFLICT: 7,
+  ANCHOR_UNAVAILABLE: 8,
   EXECUTOR_UNAVAILABLE: 8,
   DSH_VERSION_MISMATCH: 8,
   CONTAINER_UNAVAILABLE: 8,

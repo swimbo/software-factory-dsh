@@ -31,6 +31,7 @@ import {
 import { limitsFor } from './render/limits.ts';
 import { abortVerb } from './verbs/abort.ts';
 import { auditVerb } from './verbs/audit.ts';
+import { ledgerVerb } from './verbs/ledger.ts';
 import { budgetVerb } from './verbs/budget.ts';
 import { credentialVerb } from './verbs/credential.ts';
 import { intentVerb } from './verbs/intent.ts';
@@ -55,6 +56,7 @@ export const VERB_SPECS: readonly VerbSpec[] = [
   promoteVerb,
   budgetVerb,
   credentialVerb,
+  ledgerVerb,
   versionVerb,
 ];
 

@@ -22,6 +22,7 @@ import type {
 } from '@factory/contracts';
 import { openSqlite } from './driver.ts';
 import type { SqliteDriver } from './driver.ts';
+import { SCHEMA_VERSION } from './schema.ts';
 import { openStore } from './store.ts';
 import type { AppendOptions, Store, UnitRow } from './types.ts';
 
@@ -535,7 +536,7 @@ describe('schema guard', () => {
     }
     expect(caught).not.toBeNull();
     expect(caught?.message).toContain('schema version 99');
-    expect(caught?.message).toContain('expects 1');
+    expect(caught?.message).toContain(`expects ${String(SCHEMA_VERSION)}`);
   });
 
   it('reports the configured pragmas it actually runs with', () => {

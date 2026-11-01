@@ -32,6 +32,18 @@ export {
   type UpstreamTarget,
 } from './server.ts';
 export {
+  foldUsage,
+  isEventStream,
+  observeUsage,
+  parseSseUsage,
+  usageOf,
+  MAX_PARSE_BYTES,
+  type ParsedUsage,
+  type PriceTable,
+  type UsageObservation,
+  type UsageTotals,
+} from './usage.ts';
+export {
   createTokenRegistry,
   TOKEN_BYTES,
   TOKEN_REFUSALS,

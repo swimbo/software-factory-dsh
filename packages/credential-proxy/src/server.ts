@@ -49,6 +49,14 @@ import {
   type TokenRefusal,
   type TokenRegistry,
 } from './tokens.ts';
+import {
+  foldUsage,
+  MAX_PARSE_BYTES,
+  observeUsage,
+  type PriceTable,
+  type UsageObservation,
+  type UsageTotals,
+} from './usage.ts';
 
 /** Refusals the proxy can make. Each is a different fact, so each has a different reason. */
 export const PROXY_REFUSALS = [
@@ -77,17 +85,50 @@ export interface CredentialProxyOptions {
   readonly maxBodyBytes?: number;
   /** Upstream timeout. Default 10 minutes, matching a long streaming completion. */
   readonly requestTimeoutMs?: number;
-  /** Structured refusal/forward events. Never contains the key or a full token. */
+  /**
+   * The operator's price table, for a gateway that reports tokens without a price.
+   *
+   * Optional on purpose: without it, an unpriced response is recorded as *unknown* cost rather
+   * than guessed, and a ceiling over unknown costs cannot fire — which is the honest outcome,
+   * not a silent one (the observation says `costSource: 'unknown'`).
+   */
+  readonly priceTable?: PriceTable | undefined;
+  /**
+   * The spend ceiling for this attempt, in USD. When the **observed** cost crosses it, the
+   * attempt's token is revoked: the request that crossed is served (the money is spent), and
+   * the *next* one is answered `token-revoked`. This is ND3's "enforce, do not negotiate": a
+   * ceiling that only refuses the next attempt is a suggestion, because the attempt already
+   * running never asks again.
+   *
+   * Revocation is not a retry: the attempt that owned the token fails, and the launcher records
+   * the failure. Nothing redispatches it — a ceiling that redispached would spend past itself.
+   */
+  readonly spendCeilingUsd?: number | undefined;
+  /** Called once per attempt when the ceiling is crossed, after the token is revoked. */
+  readonly onCeilingReached?: (input: {
+    readonly attemptId: string;
+    readonly spendUsd: number;
+    readonly ceilingUsd: number;
+  }) => void;
+  /** Structured refusal/forward/usage/ceiling events. Never contains the key or a full token. */
   readonly onEvent?: (event: ProxyEvent) => void;
 }
 
 export interface ProxyEvent {
-  readonly kind: 'forward' | 'refuse';
+  /**
+   * `usage` is the observation, `ceiling` the enforcement: both on the same channel as
+   * forward/refuse, because a second channel would be a second thing to keep in sync.
+   */
+  readonly kind: 'forward' | 'refuse' | 'usage' | 'ceiling';
+  /** The metered fact, present on `usage` and on the `ceiling` that followed it. */
+  readonly usage?: UsageObservation | undefined;
   readonly reason?: ProxyRefusal | undefined;
   readonly method?: string | undefined;
   readonly path?: string | undefined;
   readonly status?: number | undefined;
   readonly durationMs?: number | undefined;
+  /** One line of English for the log: what happened, in the operator's terms. */
+  readonly detail?: string | undefined;
 }
 
 export interface CredentialProxy {
@@ -95,6 +136,12 @@ export interface CredentialProxy {
   readonly baseUrl: string;
   readonly port: number;
   readonly tokens: TokenRegistry;
+  /**
+   * What the gateway reported for this token so far, or `undefined` before the first response.
+   * The launcher reads this after the attempt to write the usage record; it is *observed* data,
+   * not an estimate, and `costUsd: null` means "no priced call yet".
+   */
+  usageFor(token: string): UsageTotals | undefined;
   /**
    * What `launch.json` records about the credential: that it is scoped and when it dies.
    * Never the token itself — a launch record is evidence and gets copied around.
@@ -172,6 +219,32 @@ export async function startCredentialProxy(
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const tokens = createTokenRegistry({ now: options.now });
+  const usageByToken = new Map<string, UsageTotals>();
+  const ceilingCrossed = new Set<string>();
+
+  /** Fold an observation into the token's totals and enforce the ceiling when it is crossed. */
+  const meter = (token: string, attemptId: string, observation: UsageObservation): void => {
+    const totals = foldUsage(usageByToken.get(token), observation);
+    usageByToken.set(token, totals);
+    options.onEvent?.({ kind: 'usage', usage: observation });
+    const ceiling = options.spendCeilingUsd;
+    if (ceiling === undefined || ceiling <= 0) return;
+    if (totals.costUsd === null || totals.costUsd < ceiling) return;
+    if (ceilingCrossed.has(token)) return;
+    ceilingCrossed.add(token);
+    // The crossing request has already been served; from here the token is dead. This is the
+    // enforcement ND3 asked for: the next request is refused, so the attempt stops instead of
+    // spending the rest of its budget politely.
+    tokens.revoke(token);
+    usageByToken.set(token, { ...totals, ceilingCrossed: true });
+    options.onEvent?.({
+      kind: 'ceiling',
+      usage: observation,
+      status: 401,
+      detail: `observed spend $${totals.costUsd.toFixed(4)} crossed the $${ceiling.toFixed(2)} ceiling; the token is revoked`,
+    });
+    options.onCeilingReached?.({ attemptId, spendUsd: totals.costUsd, ceilingUsd: ceiling });
+  };
   const send = upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest;
   // Every upstream request that is still streaming. A proxy that forgets one keeps a socket
   // open for the gateway's full timeout, and an open socket keeps *this* process alive: the
@@ -287,6 +360,29 @@ export async function startCredentialProxy(
           const headers = { ...upstreamRes.headers };
           delete headers['authorization'];
           res.writeHead(upstreamRes.statusCode ?? 502, headers);
+          // A tee, not a buffer: the same bytes go to the worker immediately and to the
+          // meter, which keeps at most MAX_PARSE_BYTES for parsing. A stream larger than that
+          // is metered as `truncated` (unknown), never as a confident zero.
+          const tapped: Buffer[] = [];
+          let tappedBytes = 0;
+          upstreamRes.on('data', (chunk: Buffer) => {
+            if (tappedBytes >= MAX_PARSE_BYTES) return;
+            tapped.push(chunk);
+            tappedBytes += chunk.length;
+          });
+          upstreamRes.on('end', () => {
+            const truncated = tappedBytes > MAX_PARSE_BYTES;
+            const bodyText = Buffer.concat(tapped).subarray(0, MAX_PARSE_BYTES).toString('utf8');
+            const requestId = upstreamRes.headers['x-request-id'];
+            const observation = observeUsage({
+              body: bodyText,
+              headers: upstreamRes.headers,
+              requestIdHeader: typeof requestId === 'string' ? requestId : null,
+              priceTable: options.priceTable,
+              truncated,
+            });
+            meter(verdict.token.token, verdict.token.attemptId, observation);
+          });
           upstreamRes.pipe(res);
           upstreamRes.on('error', () => res.destroy());
         },
@@ -354,6 +450,9 @@ export async function startCredentialProxy(
     port,
     baseUrl: `http://127.0.0.1:${String(port)}${prefix}`,
     tokens,
+    usageFor(token) {
+      return usageByToken.get(token);
+    },
     describe(token) {
       return { token: 'scoped', expiresAt: token.expiresAt };
     },

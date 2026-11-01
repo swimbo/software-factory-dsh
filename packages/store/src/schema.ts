@@ -8,7 +8,66 @@
  * enforced at this layer rather than in code.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+
+/**
+ * Declared migrations. A store one version behind is opened only when a migration here says how to
+ * get from its version to this one — never by guessing, and never by rewriting a ledger.
+ *
+ * v1 → v2 is **additive**: ND3 added `usage_records` (and its two indexes) so spend could be recorded
+ * as the gateway reported it. Nothing existing changed, which is why the migration is exactly the new
+ * table's DDL. It is written out here rather than "just run SCHEMA_SQL", because a migration that runs
+ * the current schema is a migration whose effect depends on what the current schema happens to be
+ * today — the next person to add a table would silently change this one.
+ *
+ * A destructive change (dropping or reshaping a column) must never appear here: an operator's ledger
+ * is evidence, and there is no `--force` in this CLI.
+ */
+export interface Migration {
+  readonly from: number;
+  readonly to: number;
+  readonly note: string;
+  readonly statements: readonly string[];
+}
+
+const USAGE_RECORDS_DDL = `CREATE TABLE IF NOT EXISTS usage_records (
+  usage_id            TEXT PRIMARY KEY,
+  unit_id             TEXT NOT NULL REFERENCES units(unit_id),
+  attempt_id          TEXT NOT NULL REFERENCES attempts(attempt_id),
+  tokens_in           INTEGER NOT NULL CHECK (tokens_in >= 0),
+  tokens_out          INTEGER NOT NULL CHECK (tokens_out >= 0),
+  cost_usd            REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+  gateway_request_id  TEXT,
+  signed_at           TEXT NOT NULL,
+  record_sha          TEXT NOT NULL,
+  ceiling_crossed     INTEGER NOT NULL DEFAULT 0 CHECK (ceiling_crossed IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS usage_attempt ON usage_records(attempt_id);
+CREATE INDEX IF NOT EXISTS usage_unit ON usage_records(unit_id);`;
+
+export const MIGRATIONS: readonly Migration[] = [
+  {
+    from: 1,
+    to: 2,
+    note: 'ND3: append-only usage_records, so spend is recorded as the gateway reported it',
+    statements: [USAGE_RECORDS_DDL],
+  },
+];
+
+/** A one-way path from `from` to `SCHEMA_VERSION`, or `null` when there is none. */
+export function migrationPath(from: number): readonly Migration[] | null {
+  if (from >= SCHEMA_VERSION) return from === SCHEMA_VERSION ? [] : null;
+  const path: Migration[] = [];
+  let version = from;
+  for (;;) {
+    const step = MIGRATIONS.find((candidate) => candidate.from === version);
+    if (step === undefined) return null;
+    path.push(step);
+    version = step.to;
+    if (version === SCHEMA_VERSION) return path;
+    if (version > SCHEMA_VERSION) return null;
+  }
+}
 
 /** Pragmas that are mandatory, not advisory (`tech-guide.md` §10). */
 export const REQUIRED_PRAGMAS: ReadonlyArray<readonly [string, string]> = [
@@ -218,6 +277,13 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
   CHECK (kind <> 'reserved' OR amount_usd IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS spend_unit ON spend_ledger(unit_id);
+
+-- Metered usage, observed by the credential proxy from the gateway's own response.
+-- Append-only like the ledger: a usage row is a fact about one upstream call, so a second row
+-- for the same call would be a second call, never an update. A NULL cost_usd is 'unknown'
+-- (tokens were reported, no price was), which is why the column is nullable and the check does
+-- not default it to zero.
+${USAGE_RECORDS_DDL}
 
 CREATE TABLE IF NOT EXISTS envelopes (
   envelope_id     TEXT PRIMARY KEY,

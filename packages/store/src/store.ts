@@ -45,7 +45,7 @@ import type {
 
 import { openSqlite } from './driver.ts';
 import type { SqliteDriver, SqliteStatement } from './driver.ts';
-import { SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
+import { migrationPath, SCHEMA_SQL, SCHEMA_VERSION } from './schema.ts';
 import type {
   AppendOptions,
   AttemptRow,
@@ -54,6 +54,7 @@ import type {
   ReceiptRow,
   Store,
   UnitRow,
+  UsageRow,
   VerdictRow,
 } from './types.ts';
 
@@ -242,6 +243,34 @@ const ALL_UNIT_STATES: readonly UnitState[] = [
 
 // ------------------------------------------------------------------ openStore
 
+interface UsageRecordRowRow {
+  usage_id: string;
+  unit_id: string;
+  attempt_id: string;
+  tokens_in: number;
+  tokens_out: number;
+  cost_usd: number | null;
+  gateway_request_id: string | null;
+  signed_at: string;
+  record_sha: string;
+  ceiling_crossed: number;
+}
+
+function usageFromRow(row: UsageRecordRowRow): UsageRow {
+  return {
+    usageId: row.usage_id,
+    unitId: row.unit_id,
+    attemptId: row.attempt_id,
+    tokensIn: row.tokens_in,
+    tokensOut: row.tokens_out,
+    costUsd: row.cost_usd === null ? null : Number(row.cost_usd),
+    gatewayRequestId: row.gateway_request_id,
+    signedAt: row.signed_at,
+    recordSha: row.record_sha,
+    ceilingCrossed: row.ceiling_crossed === 1,
+  };
+}
+
 export function openStore(options: OpenStoreOptions): Store {
   if (options.dir === ':memory:') {
     throw new FactoryError(
@@ -284,6 +313,7 @@ export function openStore(options: OpenStoreOptions): Store {
   // ------------------------------------------------------------ schema migration
 
   const schemaChecksum = sha256Hex(SCHEMA_SQL);
+  const migrationsApplied: { from: number; to: number; note: string }[] = [];
   inTransaction(() => {
     const rows = stmt(
       'SELECT version, checksum FROM schema_migration ORDER BY version DESC LIMIT 1',
@@ -301,12 +331,31 @@ export function openStore(options: OpenStoreOptions): Store {
       return;
     }
     if (existing.version !== SCHEMA_VERSION) {
-      throw new FactoryError(
-        'INTERNAL',
-        `store: ${location} is at schema version ${existing.version}; this binary expects ${SCHEMA_VERSION} — ` +
-          'refusing to open across a schema change (migrate explicitly, do not guess)',
-        { location, foundVersion: existing.version, expectedVersion: SCHEMA_VERSION },
-      );
+      // A declared, additive path is applied here; anything else is a refusal. This is the one place
+      // the store rewrites its own metadata, so it says exactly what it did in the ledger afterwards.
+      const path = migrationPath(existing.version);
+      if (path === null) {
+        throw new FactoryError(
+          'INTERNAL',
+          `store: ${location} is at schema version ${existing.version}; this binary expects ${SCHEMA_VERSION} and ` +
+            'declares no migration from there — refusing to open across a schema change (migrate explicitly, do not guess)',
+          { location, foundVersion: existing.version, expectedVersion: SCHEMA_VERSION },
+        );
+      }
+      for (const step of path) {
+        for (const statement of step.statements) stmt(statement).run();
+        stmt('INSERT INTO schema_migration (version, applied_at, checksum) VALUES (?, ?, ?)').run(
+          step.to,
+          now(),
+          // The current binary's checksum, not the step's: this row asserts "this store now
+          // conforms to SCHEMA_SQL", which is what the next open compares against.
+          step.to === SCHEMA_VERSION ? schemaChecksum : sha256Hex(step.statements.join('\n')),
+        );
+        migrationsApplied.push({ from: step.from, to: step.to, note: step.note });
+      }
+      // The drift check below is for a store already at this version; a just-migrated store has
+      // nothing to compare yet.
+      return;
     }
     if (existing.checksum !== schemaChecksum) {
       throw new FactoryError(
@@ -317,6 +366,16 @@ export function openStore(options: OpenStoreOptions): Store {
       );
     }
   });
+
+  // A migration is a change to the shape of history, so it goes on the ledger like any other fact:
+  // one event per step, written after the DDL committed. A reader can therefore tell a store that was
+  // opened fresh from one that was upgraded, without trusting a comment in a changelog.
+  for (const step of migrationsApplied) {
+    writeEvent(
+      { type: 'store.migrated', from: step.from, to: step.to, note: step.note },
+      { actor: 'store', traceId: `migration:v${String(step.from)}-v${String(step.to)}` },
+    );
+  }
 
   // ---------------------------------------------------------------- quarantine
 
@@ -856,6 +915,11 @@ export function openStore(options: OpenStoreOptions): Store {
     // --- ledger --------------------------------------------------------------
     appendEvent(event: LedgerEvent['payload'], opts: AppendOptions): LedgerEvent {
       return mutate('appendEvent', () => writeEvent(event as EventPayload, opts));
+    },
+
+    /** Declared migrations applied when this store was opened. Empty for a store already current. */
+    migrationsApplied(): { from: number; to: number; note: string }[] {
+      return [...migrationsApplied];
     },
 
     eventsSince(seq: number, limit?: number): LedgerEvent[] {
@@ -2061,6 +2125,141 @@ export function openStore(options: OpenStoreOptions): Store {
         reservedUsd: Number(reserved?.n ?? 0),
         recordedUsd: Number(recorded?.n ?? 0),
         unknownRows: Number(unknown?.n ?? 0),
+      };
+    },
+
+    // --- metered usage ------------------------------------------------------
+    recordUsage(row: {
+      usageId: string;
+      unitId: string;
+      attemptId: string;
+      tokensIn: number;
+      tokensOut: number;
+      /** `null` when the gateway reported tokens but no price: unknown, never a zero. */
+      costUsd: number | null;
+      gatewayRequestId: string | null;
+      signedAt: string;
+      ceilingCrossed: boolean;
+    }): UsageRow {
+      return mutate('recordUsage', () => {
+        requireUnit(row.unitId);
+        requireAttempt(row.attemptId);
+        // The digest is computed here, from the row as stored, so a later reader can prove the
+        // table row and the ledger event are the same fact. It is *not* a signature over a
+        // claim the gateway made — that is what `budget reconcile` exists for. Stating the
+        // limit in the code is cheaper than a reader discovering it in an incident review.
+        const recordSha = contentHash({
+          usageId: row.usageId,
+          unitId: row.unitId,
+          attemptId: row.attemptId,
+          tokensIn: row.tokensIn,
+          tokensOut: row.tokensOut,
+          costUsd: row.costUsd,
+          gatewayRequestId: row.gatewayRequestId,
+          signedAt: row.signedAt,
+          ceilingCrossed: row.ceilingCrossed,
+        });
+        stmt(
+          `INSERT INTO usage_records (usage_id, unit_id, attempt_id, tokens_in, tokens_out, cost_usd,
+             gateway_request_id, signed_at, record_sha, ceiling_crossed)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          row.usageId,
+          row.unitId,
+          row.attemptId,
+          row.tokensIn,
+          row.tokensOut,
+          row.costUsd,
+          row.gatewayRequestId,
+          row.signedAt,
+          recordSha,
+          row.ceilingCrossed ? 1 : 0,
+        );
+        writeEvent(
+          {
+            type: 'usage.recorded',
+            usageId: row.usageId,
+            unitId: row.unitId,
+            attemptId: row.attemptId,
+            tokensIn: row.tokensIn,
+            tokensOut: row.tokensOut,
+            costUsd: row.costUsd,
+            gatewayRequestId: row.gatewayRequestId,
+            ceilingCrossed: row.ceilingCrossed,
+            recordSha,
+          },
+          { actor: 'worker-proxy', traceId: row.usageId, occurredAt: row.signedAt },
+        );
+        return {
+          usageId: row.usageId,
+          unitId: row.unitId,
+          attemptId: row.attemptId,
+          tokensIn: row.tokensIn,
+          tokensOut: row.tokensOut,
+          costUsd: row.costUsd,
+          gatewayRequestId: row.gatewayRequestId,
+          signedAt: row.signedAt,
+          recordSha,
+          ceilingCrossed: row.ceilingCrossed,
+        };
+      });
+    },
+
+    usageForAttempt(attemptId: string): readonly UsageRow[] {
+      return stmt(
+        `SELECT usage_id, unit_id, attempt_id, tokens_in, tokens_out, cost_usd,
+                gateway_request_id, signed_at, record_sha, ceiling_crossed
+           FROM usage_records WHERE attempt_id = ? ORDER BY signed_at, rowid`,
+      )
+        .all<UsageRecordRowRow>(attemptId)
+        .map(usageFromRow);
+    },
+
+    listUsage(): readonly UsageRow[] {
+      return stmt(
+        `SELECT usage_id, unit_id, attempt_id, tokens_in, tokens_out, cost_usd,
+                gateway_request_id, signed_at, record_sha, ceiling_crossed
+           FROM usage_records ORDER BY signed_at, rowid`,
+      )
+        .all<UsageRecordRowRow>()
+        .map(usageFromRow);
+    },
+
+    usageForUnit(unitId: string): {
+      tokensIn: number;
+      tokensOut: number;
+      costUsd: number;
+      unpricedRows: number;
+      rows: number;
+      ceilingCrossed: boolean;
+    } {
+      const rows = stmt(
+        `SELECT tokens_in, tokens_out, cost_usd, ceiling_crossed FROM usage_records WHERE unit_id = ?`,
+      ).all<{
+        tokens_in: number;
+        tokens_out: number;
+        cost_usd: number | null;
+        ceiling_crossed: number;
+      }>(unitId);
+      let tokensIn = 0;
+      let tokensOut = 0;
+      let costUsd = 0;
+      let unpricedRows = 0;
+      let crossed = false;
+      for (const row of rows) {
+        tokensIn += row.tokens_in;
+        tokensOut += row.tokens_out;
+        if (row.cost_usd === null) unpricedRows += 1;
+        else costUsd += row.cost_usd;
+        if (row.ceiling_crossed === 1) crossed = true;
+      }
+      return {
+        tokensIn,
+        tokensOut,
+        costUsd,
+        unpricedRows,
+        rows: rows.length,
+        ceilingCrossed: crossed,
       };
     },
 

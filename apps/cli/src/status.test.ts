@@ -11,6 +11,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { SINGLE_UID_CLAIM, TWO_UID_CLAIM } from '@factory/store';
+
 import { EXIT } from './exit.ts';
 import { jsonOf, runCli, seedStaleAttempt, seedUnit, tempHome } from './testing.ts';
 
@@ -146,5 +148,53 @@ describe('status of a single unit', () => {
     const result = runCli(['status', '--all'], { home });
     expect(result.stderr).toContain('UNITS');
     expect(result.stderr).toContain(unitId);
+  });
+});
+
+describe('status reports the topology it is running under (ND2)', () => {
+  it('answers with the topology the store was provisioned under, not with a constant', () => {
+    const home = tempHome();
+    const json = jsonOf(runCli(['status', '--json'], { home }));
+    const factory = json['factory'] as Record<string, unknown>;
+    const topology = factory['topology'] as {
+      kind: string;
+      reason: string;
+      claim: string;
+    };
+    // This host is macOS, so it can only be single-uid: the assertion is a property of the host,
+    // not of a build flag. On a provisioned Linux target the same spec accepts two-uid below.
+    if (process.platform !== 'linux') expect(topology.kind).toBe('single-uid');
+    expect(['single-uid', 'two-uid']).toContain(topology.kind);
+    // The claim is the exact ratified sentence for the kind that was found — never the other one.
+    expect(topology.claim).toBe(topology.kind === 'two-uid' ? TWO_UID_CLAIM : SINGLE_UID_CLAIM);
+    expect(topology.reason.length).toBeGreaterThan(20);
+  });
+
+  it('puts the principal in the aggregate line, so it cannot be missed in the morning read', () => {
+    const home = tempHome();
+    const { stderr } = runCli(['status'], { home });
+    expect(stderr).toMatch(/principals (single-uid|two-uid)/u);
+  });
+
+  it('prints the scoped claim and its reason when there is only one uid', () => {
+    const home = tempHome();
+    const { stderr } = runCli(['status'], { home });
+    if (process.platform !== 'linux') {
+      expect(stderr).toContain(SINGLE_UID_CLAIM);
+      expect(stderr).toContain('why:');
+      expect(stderr).toContain('no file mode can separate them');
+      // And it never makes the two-uid claim it cannot support.
+      expect(stderr).not.toContain(TWO_UID_CLAIM);
+    }
+  });
+
+  it('keeps every line inside the 80-column rule', () => {
+    const home = tempHome();
+    const { stderr } = runCli(['status'], { home });
+    const offenders = stderr
+      .split('\n')
+      .filter((line) => line.trimStart().startsWith('principals') || line.includes('why:'))
+      .filter((line) => line.length > 80);
+    expect(offenders).toEqual([]);
   });
 });

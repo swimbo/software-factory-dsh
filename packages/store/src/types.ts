@@ -128,6 +128,8 @@ export interface Store {
 
   // --- ledger
   appendEvent(event: LedgerEvent['payload'], options: AppendOptions): LedgerEvent;
+  /** Additive migrations this open applied. Empty when the store was already current. */
+  migrationsApplied(): { from: number; to: number; note: string }[];
   eventsSince(seq: number, limit?: number): LedgerEvent[];
   eventCount(): number;
   /** Rebuilds aggregates from the ledger and reports divergence instead of hiding it. */
@@ -237,6 +239,34 @@ export interface Store {
   }): void;
   spendForUnit(unitId: string): { reservedUsd: number; recordedUsd: number; unknownRows: number };
 
+  // --- metered usage (ND3: the gateway's own numbers, not an estimate)
+  /**
+   * Append one usage fact. The store computes `recordSha` from the row it writes, so the table
+   * and the `usage.recorded` ledger event cannot disagree without a visible edit.
+   */
+  recordUsage(row: {
+    usageId: string;
+    unitId: string;
+    attemptId: string;
+    tokensIn: number;
+    tokensOut: number;
+    /** `null` when the gateway reported tokens but no price: unknown, never a zero. */
+    costUsd: number | null;
+    gatewayRequestId: string | null;
+    signedAt: string;
+    ceilingCrossed: boolean;
+  }): UsageRow;
+  usageForAttempt(attemptId: string): readonly UsageRow[];
+  listUsage(): readonly UsageRow[];
+  usageForUnit(unitId: string): {
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+    unpricedRows: number;
+    rows: number;
+    ceilingCrossed: boolean;
+  };
+
   // --- envelopes
   currentEnvelope(scope: 'per-unit' | 'daily'): { envelopeId: string; amountUsd: number } | null;
   raiseEnvelope(row: {
@@ -289,4 +319,25 @@ export interface Store {
     at: string,
     counts: { orphanedAttempts: number; ambiguous: number },
   ): void;
+}
+
+/**
+ * One metered usage fact, as observed by the credential proxy from the gateway's response.
+ *
+ * `costUsd: null` means "tokens were reported, no price was": unknown, never a zero. The
+ * `recordSha` is the digest of the row as written, so the table and its ledger event can be
+ * shown to be the same fact; it is **not** a signature over a claim the gateway made — that
+ * comparison is `factory budget reconcile`, against the gateway's own export.
+ */
+export interface UsageRow {
+  readonly usageId: string;
+  readonly unitId: string;
+  readonly attemptId: string;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly costUsd: number | null;
+  readonly gatewayRequestId: string | null;
+  readonly signedAt: string;
+  readonly recordSha: string;
+  readonly ceilingCrossed: boolean;
 }

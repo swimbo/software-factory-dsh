@@ -476,7 +476,9 @@ function renderFooter(status: StatusV1): string {
     factory.policyVersion,
   )} · holdout ${escapeHtml(factory.holdoutRevision ?? 'unknown')} · dsh ${escapeHtml(
     factory.dshVersionExpected,
-  )} (observed ${escapeHtml(factory.dshVersionObserved ?? 'unknown')})</p>
+  )} (observed ${escapeHtml(factory.dshVersionObserved ?? 'unknown')}) · ${escapeHtml(
+    factory.topology.claim,
+  )}</p>
   <p>read-only · loopback + token · no scripts, no external assets, no telemetry · generated ${escapeHtml(
     status.generatedAt,
   )}</p>

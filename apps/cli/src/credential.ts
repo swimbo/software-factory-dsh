@@ -13,7 +13,12 @@
  * revokes it, and `launch.ts` calls it in a `finally` **before** the verdict is written — the
  * verdict is the record that the attempt is over, so the credential must be dead by then.
  */
-import { startCredentialProxy, type CredentialProxy } from '@factory/credential-proxy';
+import {
+  startCredentialProxy,
+  type CredentialProxy,
+  type PriceTable,
+  type UsageTotals,
+} from '@factory/credential-proxy';
 import type { ErrorCode } from '@factory/contracts';
 
 /** Fifteen minutes when no lease is readable: a clock-bounded ceiling for the fallback path. */
@@ -25,6 +30,14 @@ export interface AttemptCredential {
   /** The scoped token the worker holds. Never the gateway key. */
   readonly token: string;
   readonly expiresAt: string;
+  /**
+   * What the gateway reported for this attempt, read *before* the token is revoked.
+   *
+   * `undefined` means no response was ever observed. A defined total whose `costUsd` is `null`
+   * means the gateway priced nothing: that is `unknown` and must be written as such, never as
+   * a measured zero.
+   */
+  usage(): UsageTotals | undefined;
   /**
    * Revoke the token. Idempotent, and safe to call when the launch threw: an attempt that
    * failed must not leave a live token behind, which is the whole point of revocation.
@@ -56,6 +69,20 @@ export interface AttemptCredentialOptions {
    */
   readonly leaseExpiresAt: string | null;
   readonly defaultTtlMs?: number;
+  /**
+   * The attempt's remaining spend authority, in USD. When the observed cost crosses it the
+   * proxy revokes the token — ND3's "enforce, do not negotiate". `undefined` means no ceiling
+   * (already exhausted envelopes are refused earlier, before a credential is ever minted).
+   */
+  readonly spendCeilingUsd?: number | undefined;
+  /** Only for a gateway that reports tokens and not prices; the observation says `estimated`. */
+  readonly priceTable?: PriceTable | undefined;
+  /** Called once, after the token is revoked, so the caller can record the crossing. */
+  readonly onCeilingReached?: (input: {
+    readonly attemptId: string;
+    readonly spendUsd: number;
+    readonly ceilingUsd: number;
+  }) => void;
 }
 
 /**
@@ -122,6 +149,11 @@ export async function openAttemptCredential(
   const proxy: CredentialProxy = await startCredentialProxy({
     upstream: { baseUrl: upstream, apiKey },
     now: options.nowIso,
+    ...(options.spendCeilingUsd === undefined ? {} : { spendCeilingUsd: options.spendCeilingUsd }),
+    ...(options.priceTable === undefined ? {} : { priceTable: options.priceTable }),
+    ...(options.onCeilingReached === undefined
+      ? {}
+      : { onCeilingReached: options.onCeilingReached }),
   });
   const minted = proxy.tokens.mint({
     attemptId: options.attemptId,
@@ -135,6 +167,9 @@ export async function openAttemptCredential(
       baseUrl: proxy.baseUrl,
       token: minted.token,
       expiresAt,
+      usage() {
+        return proxy.usageFor(minted.token);
+      },
       async settle() {
         if (settled) return;
         settled = true;

@@ -40,6 +40,7 @@ describe('every verb', () => {
         'budget',
         'credential',
         'intent',
+        'ledger',
         'promote',
         'qualify',
         'receipts',

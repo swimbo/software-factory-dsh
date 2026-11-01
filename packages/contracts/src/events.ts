@@ -97,6 +97,22 @@ export const EventPayload = z.discriminatedUnion('type', [
     kind: z.enum(['estimate', 'measured', 'unknown']),
   }),
   z.object({
+    // A metered usage fact, observed by the credential proxy from the gateway's own response.
+    // `costUsd` is `null` when the gateway reported tokens but no price: an unpriced call is
+    // `unknown`, never a measured zero. `recordSha` is the digest of the row as written, so a
+    // reader can prove the ledger entry and the table row are the same fact.
+    type: z.literal('usage.recorded'),
+    usageId: z.string(),
+    unitId: z.string(),
+    attemptId: z.string(),
+    tokensIn: z.number().int().nonnegative(),
+    tokensOut: z.number().int().nonnegative(),
+    costUsd: z.number().nonnegative().nullable(),
+    gatewayRequestId: z.string().nullable(),
+    ceilingCrossed: z.boolean(),
+    recordSha: hash,
+  }),
+  z.object({
     type: z.literal('envelope.raised'),
     envelopeId: z.string(),
     scope: z.enum(['per-unit', 'daily']),
@@ -131,6 +147,15 @@ export const EventPayload = z.discriminatedUnion('type', [
     detectedBy: z.string(),
   }),
   z.object({
+    // An additive migration ran on open. It is on the ledger because it changes the *shape* of the
+    // history a reader is about to audit, and "the binary upgraded your store" is exactly the kind of
+    // fact that must not live only in a changelog.
+    type: z.literal('store.migrated'),
+    from: z.number().int().nonnegative(),
+    to: z.number().int().positive(),
+    note: z.string(),
+  }),
+  z.object({
     type: z.literal('recovery.completed'),
     recoveryRunId: z.string(),
     orphanedAttempts: z.number().int().nonnegative(),
@@ -161,10 +186,12 @@ export const LedgerEvent = z.object({
     'unit.aborted',
     'spend.reserved',
     'spend.recorded',
+    'usage.recorded',
     'envelope.raised',
     'privileged.decided',
     'credential.issued',
     'store.quarantined',
+    'store.migrated',
     'recovery.completed',
   ]),
   occurredAt: iso,
@@ -183,6 +210,9 @@ export function aggregateOf(
   if (type.startsWith('unit.')) return 'unit';
   if (type.startsWith('attempt.')) return 'attempt';
   if (type.startsWith('spend.')) return 'spend';
+  // `usage.recorded` is the measured half of spend: same aggregate, because a reader asking
+  // "what did this unit cost" must not have to visit two projections to find out.
+  if (type.startsWith('usage.')) return 'spend';
   if (type.startsWith('envelope.')) return 'envelope';
   if (type.startsWith('credential.')) return 'credential';
   // `privileged.decided` reuses the credential aggregate: both are authorization facts.

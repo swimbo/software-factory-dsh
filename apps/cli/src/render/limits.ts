@@ -20,6 +20,7 @@ export const VERBS = [
   'promote',
   'budget',
   'credential',
+  'ledger',
   'version',
 ] as const;
 
@@ -83,6 +84,14 @@ const SPECIFIC: Readonly<Record<Verb, readonly string[]>> = {
     '`receipts` prints mechanical facts and a path. It never prints a diff.',
     'The narrative the model produced is not stored in the decision receipt and cannot be shown.',
     'Receipts are append-only: this command never edits, merges or overwrites one.',
+  ],
+  ledger: [
+    '`ledger anchor` is the only command that talks to another machine, and the destination comes from',
+    '  configuration (FACTORY_ANCHOR_SSH / FACTORY_ANCHOR_PATH), never from a unit spec or a receipt.',
+    'A local anchor is reported as LOCAL and never described as off-host: it detects truncation, not a',
+    '  host that rewrites both copies.',
+    '`ledger verify` exits 9 unless the anchor is fresh; `stale`, `missing` and `rollback` are all',
+    '  refusals, because an anchor nobody checked is an anchor that proves nothing.',
   ],
   audit: [
     '`audit` is read-only and works on a quarantined store.',

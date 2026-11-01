@@ -21,6 +21,7 @@ import type {
   WorkerReceiptType,
 } from '@factory/contracts';
 import { openSqlite } from './driver.ts';
+import { SCHEMA_VERSION } from './schema.ts';
 import { openStore } from './store.ts';
 import type { AppendOptions, Store, UnitRow } from './types.ts';
 
@@ -293,7 +294,7 @@ describe('durability pragmas', () => {
     expect(store.pragmas['journal_mode']).toBe('wal');
     expect(store.pragmas['synchronous']).toBe('FULL');
     expect(store.pragmas['foreign_keys']).toBe('ON');
-    expect(store.schemaVersion).toBe(1);
+    expect(store.schemaVersion).toBe(SCHEMA_VERSION);
     expect(store.location).toBe(dbPath);
   });
 
@@ -305,7 +306,7 @@ describe('durability pragmas', () => {
       checksum: string;
     }>();
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.version).toBe(1);
+    expect(rows[0]?.version).toBe(SCHEMA_VERSION);
     expect(typeof rows[0]?.checksum).toBe('string');
 
     // Re-opening the same directory is fine: the checksum matches.
@@ -316,6 +317,54 @@ describe('durability pragmas', () => {
     raw.prepare("UPDATE schema_migration SET checksum = 'deadbeef'").run();
     raw.close();
     expect(() => openStore({ dir, now: clock })).toThrow(/schema drift/);
+  });
+
+  it('opens a v1 store by applying the declared additive migration, and says so in the ledger', () => {
+    // Put a store back to v1 the way an operator's store actually is: the table the migration adds
+    // is gone, and the recorded version is the older one. This is the only test that can exist
+    // without shipping an old binary.
+    store.close();
+    const raw = openSqlite({ path: dbPath });
+    raw.prepare('DROP TABLE usage_records').run();
+    raw.prepare('DELETE FROM schema_migration WHERE version = ?').run(SCHEMA_VERSION);
+    raw
+      .prepare(
+        "INSERT INTO schema_migration (version, applied_at, checksum) VALUES (1, '2026-10-31T00:00:00.000Z', 'v1')",
+      )
+      .run();
+    raw.close();
+
+    const migrated = openStore({ dir, now: clock });
+    const applied = migrated.eventsSince(0).filter((event) => event.type === 'store.migrated');
+    expect(applied).toHaveLength(1);
+    expect(applied[0]?.payload).toMatchObject({ from: 1, to: SCHEMA_VERSION });
+    const raw2 = openSqlite({ path: dbPath });
+    const versions = raw2
+      .prepare('SELECT version FROM schema_migration ORDER BY version')
+      .all<{ version: number }>()
+      .map((row) => row.version);
+    // The v1 row stays: history is not rewritten by a migration, it is appended to.
+    expect(versions).toEqual([1, SCHEMA_VERSION]);
+    raw2.close();
+
+    // Reopening a migrated store must not migrate it again: the version row is now current, so the
+    // ledger still carries exactly one `store.migrated` event when the next process opens it.
+    migrated.close();
+    const reopened = openStore({ dir, now: clock });
+    const again = reopened.eventsSince(0).filter((event) => event.type === 'store.migrated');
+    expect(again).toHaveLength(1);
+    expect(reopened.migrationsApplied()).toEqual([]);
+    // Teardown closes whatever `store` points at, so hand it the live handle rather than leaving it
+    // holding a closed one.
+    store = reopened;
+  });
+
+  it('still refuses a version it has no declared path from', () => {
+    // Tampered from a second connection while this store is open, so teardown still has a live handle.
+    const raw = openSqlite({ path: dbPath });
+    raw.prepare('UPDATE schema_migration SET version = 7').run();
+    raw.close();
+    expect(() => openStore({ dir, now: clock })).toThrow(/declares no migration/u);
   });
 });
 
@@ -1311,6 +1360,110 @@ describe('recovery runs', () => {
     expectFactoryError(
       () => store.completeRecoveryRun('RR-missing', AT, { orphanedAttempts: 0, ambiguous: 0 }),
       'INTERNAL',
+    );
+  });
+});
+
+describe('metered usage (ND3)', () => {
+  // Appended here rather than in a new file because the setup helpers above build the
+  // unit/lease/attempt chain an attempt-scoped usage row needs; duplicating them would be a
+  // second definition of "a dispatched unit" that could drift from the first.
+
+  it('records a usage fact, and the ledger event carries the same digest as the row', () => {
+    dispatchedUnit();
+    const before = store.eventCount();
+    const row = store.recordUsage({
+      usageId: 'usg-1',
+      unitId: 'U-7f3a9c',
+      attemptId: 'A-1',
+      tokensIn: 1200,
+      tokensOut: 340,
+      costUsd: 0.021,
+      gatewayRequestId: 'req_1',
+      signedAt: AT,
+      ceilingCrossed: false,
+    });
+    expect(row.recordSha).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    // The digest is over the row as stored, so a reader can recompute it from the table alone.
+    expect(store.eventCount()).toBe(before + 1);
+    const appended = store.eventsSince(before).at(-1);
+    expect(appended?.type).toBe('usage.recorded');
+    expect((appended?.payload as { recordSha?: string }).recordSha).toBe(row.recordSha);
+    expect(store.usageForAttempt('A-1')).toEqual([row]);
+  });
+
+  it('keeps an unpriced call unknown instead of storing a zero', () => {
+    dispatchedUnit();
+    const row = store.recordUsage({
+      usageId: 'usg-2',
+      unitId: 'U-7f3a9c',
+      attemptId: 'A-1',
+      tokensIn: 10,
+      tokensOut: 2,
+      // The gateway reported tokens and no price. This is the case that must never become
+      // `$0.00 measured`: the budget would read healthier the less the gateway said.
+      costUsd: null,
+      gatewayRequestId: null,
+      signedAt: AT,
+      ceilingCrossed: false,
+    });
+    expect(row.costUsd).toBeNull();
+    expect(store.usageForUnit('U-7f3a9c')).toMatchObject({
+      tokensIn: 10,
+      tokensOut: 2,
+      costUsd: 0,
+      unpricedRows: 1,
+      rows: 1,
+    });
+  });
+
+  it('sums per unit, flags a crossing, and refuses a usage row for an unknown attempt', () => {
+    dispatchedUnit();
+    store.recordUsage({
+      usageId: 'usg-3',
+      unitId: 'U-7f3a9c',
+      attemptId: 'A-1',
+      tokensIn: 100,
+      tokensOut: 20,
+      costUsd: 0.004,
+      gatewayRequestId: 'req_a',
+      signedAt: AT,
+      ceilingCrossed: false,
+    });
+    store.recordUsage({
+      usageId: 'usg-4',
+      unitId: 'U-7f3a9c',
+      attemptId: 'A-1',
+      tokensIn: 50,
+      tokensOut: 10,
+      costUsd: 0.002,
+      gatewayRequestId: 'req_b',
+      signedAt: '2026-11-01T00:00:01.000Z',
+      ceilingCrossed: true,
+    });
+    expect(store.usageForUnit('U-7f3a9c')).toMatchObject({
+      tokensIn: 150,
+      tokensOut: 30,
+      costUsd: 0.006,
+      unpricedRows: 0,
+      rows: 2,
+      ceilingCrossed: true,
+    });
+    expect(store.listUsage()).toHaveLength(2);
+    expectFactoryError(
+      () =>
+        store.recordUsage({
+          usageId: 'usg-bad',
+          unitId: 'U-7f3a9c',
+          attemptId: 'A-missing',
+          tokensIn: 1,
+          tokensOut: 1,
+          costUsd: null,
+          gatewayRequestId: null,
+          signedAt: AT,
+          ceilingCrossed: false,
+        }),
+      'ATTEMPT_NOT_FOUND',
     );
   });
 });

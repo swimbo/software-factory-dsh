@@ -97,6 +97,18 @@ const VALID_PAYLOADS: Readonly<Record<EventType, unknown>> = {
     amountUsd: null,
     kind: 'unknown',
   },
+  'usage.recorded': {
+    type: 'usage.recorded',
+    usageId: 'usg_4d2e',
+    unitId: 'U-7f3a9c',
+    attemptId: 'A-01',
+    tokensIn: 1200,
+    tokensOut: 340,
+    costUsd: 0.02,
+    gatewayRequestId: 'req_8812',
+    ceilingCrossed: false,
+    recordSha: sha('b'),
+  },
   'envelope.raised': {
     type: 'envelope.raised',
     envelopeId: 'E-per-unit',
@@ -127,6 +139,12 @@ const VALID_PAYLOADS: Readonly<Record<EventType, unknown>> = {
     reason: 'ledger chain break at event 8812',
     detectedBy: 'control',
   },
+  'store.migrated': {
+    type: 'store.migrated',
+    from: 1,
+    to: 2,
+    note: 'ND3: append-only usage_records',
+  },
   'recovery.completed': {
     type: 'recovery.completed',
     recoveryRunId: 'R-91ab',
@@ -149,16 +167,20 @@ const EXPECTED_AGGREGATE: Readonly<Record<EventType, ReturnType<typeof aggregate
   'unit.aborted': 'unit',
   'spend.reserved': 'spend',
   'spend.recorded': 'spend',
+  // Usage is the measured half of spend: the same aggregate, so `audit`'s projection keeps one
+  // case for "what did this unit cost us" rather than two overlapping ones.
+  'usage.recorded': 'spend',
   'envelope.raised': 'envelope',
   // Both are authorization facts; the credential aggregate is reused on purpose so
   // `audit`'s projection switch does not grow a second case for one event type.
   'privileged.decided': 'credential',
   'credential.issued': 'credential',
   'store.quarantined': 'store',
+  'store.migrated': 'store',
   'recovery.completed': 'store',
 };
 
-describe('each of the 17 event types', () => {
+describe('each of the 18 event types', () => {
   for (const [type, payload] of Object.entries(VALID_PAYLOADS)) {
     it(`accepts a valid ${type} payload`, () => {
       expect(EventPayload.parse(payload).type).toBe(type);
@@ -167,8 +189,11 @@ describe('each of the 17 event types', () => {
 });
 
 describe('EventPayload', () => {
-  it('covers 17 event types', () => {
-    expect(Object.keys(VALID_PAYLOADS)).toHaveLength(17);
+  it('covers 19 event types', () => {
+    // 19 since ND3 added `usage.recorded` (spend as the gateway reported it) and `store.migrated`
+    // (an additive schema migration ran on open). A count that drifts from the union is the point of
+    // this spec; the number moves when a fact becomes worth recording, never to make a suite green.
+    expect(Object.keys(VALID_PAYLOADS)).toHaveLength(19);
   });
 
   it('rejects an unknown event type', () => {
@@ -214,7 +239,7 @@ describe('the ledger envelope', () => {
     }
   });
 
-  it('declares the same 17 types the payload union declares', () => {
+  it('declares the same 19 types the payload union declares', () => {
     // The envelope enum is written out by hand in events.ts; reading the schema
     // is the only way to prove the two lists agree rather than assume it.
     const ledgerTypes = (LedgerEvent.shape.type as unknown as { options: readonly string[] })

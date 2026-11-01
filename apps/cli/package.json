@@ -5,6 +5,7 @@
   "type": "module",
   "main": "./src/main.ts",
   "dependencies": {
+    "@factory/anchor": "workspace:*",
     "@factory/contracts": "workspace:*",
     "@factory/core": "workspace:*",
     "@factory/credential-proxy": "workspace:*",

@@ -9,9 +9,11 @@
  * omitted: `ux-plan.md` A-1 says unknown is a fact that needs a person, and a
  * silent zero is a lie about a measurement.
  */
+import { dirname } from 'node:path';
+
 import { contentHash } from '@factory/contracts';
 import { currentPolicyVersion } from '@factory/qualifier';
-import type { UnitRow, VerdictRow } from '@factory/store';
+import { probeTopology, type UnitRow, type VerdictRow } from '@factory/store';
 
 import { DEFAULT_PER_DAY_USD, type FactoryContext } from '../context.ts';
 import { outboxCounts } from '../effects.ts';
@@ -111,6 +113,12 @@ export interface StatusModel {
     readonly policyVersion: string;
     readonly wallVersion: string | null;
     readonly holdoutRevision: string | null;
+    /** Which topology this instance is running under (ND2) — a fact, not a health state. */
+    readonly topology: {
+      readonly kind: 'two-uid' | 'single-uid';
+      readonly reason: string;
+      readonly claim: string;
+    };
   };
   readonly waitingOnPerson: readonly WaitingItem[];
   readonly units: readonly UnitStatus[];
@@ -298,6 +306,19 @@ function ambiguityBlock(
   };
 }
 
+/**
+ * The topology this process is actually running under.
+ *
+ * Read from the marker beside the store rather than from a build flag: the claim "the wall is a
+ * separate principal" is true only on a host that was provisioned and verified, and a status page
+ * that printed it from a constant would be the exact failure ND2 exists to prevent. No subprocess
+ * here — `probeTopology` stats one file and compares one uid.
+ */
+function topologyOf(ctx: FactoryContext): StatusModel['factory']['topology'] {
+  const decision = probeTopology(dirname(ctx.store.location));
+  return { kind: decision.kind, reason: decision.reason, claim: decision.claim };
+}
+
 export function buildStatus(
   ctx: FactoryContext,
   options: { readonly unitId?: string } = {},
@@ -439,6 +460,7 @@ export function buildStatus(
       dshVersionObserved: observedDshVersion(ctx),
       policyVersion: currentPolicyVersion(),
       wallVersion: ctx.wall.available ? WALL_VERSION_FALLBACK : null,
+      topology: topologyOf(ctx),
       holdoutRevision: lastVerdict?.holdoutRevision ?? null,
     },
     waitingOnPerson,
@@ -673,6 +695,8 @@ export function renderAggregate(model: StatusModel, plain: boolean): string[] {
     `${unknown} unknown (not a pass)`,
     `wall ${model.health.wall.state}`,
     `store ${model.health.store.state}`,
+    // A fact, not a health state: which topology this instance is running under (ND2).
+    `principals ${model.factory.topology.kind}`,
     `today ${usd(model.budget.perDay.spent)}/${usd(model.budget.perDay.limit)}` +
       `${model.budget.perDay.limitIsDefault === true ? ' default' : ''} estimated`,
     `dispatch ${occupancyLine(model.concurrency.attempts, model.concurrency.walls)}`,
@@ -699,6 +723,20 @@ function occupancyLine(
   );
 }
 
+/**
+ * The one line the single-uid claim needs.
+ *
+ * On a two-uid host the aggregate's `principals two-uid` is the whole story and silence is right.
+ * On a host with one uid the wall is only a separate *process*, and that scoping has to be visible
+ * where the operator reads status — otherwise "independent wall" reads as if it held here. It is
+ * printed with the reason, because "single-uid" without one invites the reader to assume a bug.
+ */
+function renderPrincipals(model: StatusModel): string[] {
+  const { kind, claim, reason } = model.factory.topology;
+  if (kind === 'two-uid') return [];
+  return ['', ...wrap(`principals ${claim}`), ...wrap(`why: ${reason}`, 2)];
+}
+
 export function renderStatus(model: StatusModel, plain: boolean): string {
   const lines: string[] = [];
   const empty = model.units.length === 0;
@@ -707,11 +745,13 @@ export function renderStatus(model: StatusModel, plain: boolean): string {
     // The spend line still prints: an operator who sees no units should still see
     // that the envelope exists, and that its numbers are estimates (A-2).
     lines.push(...renderAggregate(model, plain));
+    lines.push(...renderPrincipals(model));
     lines.push(...renderTaskClasses(model));
     return record(lines);
   }
 
   lines.push(...renderAggregate(model, plain));
+  lines.push(...renderPrincipals(model));
   lines.push(...renderTaskClasses(model));
 
   if (model.units.length === 1) {

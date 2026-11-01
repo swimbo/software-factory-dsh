@@ -11,6 +11,8 @@
  * and `GET /api/status` cannot drift; this module only *builds* them, and the
  * server validates every response with `parseStatus()` before sending it.
  */
+import { dirname } from 'node:path';
+
 import { PINNED_DSH_VERSION } from '@factory/dsh-adapter';
 import { WALL_VERSION, isTerminal, sha256Hex } from '@factory/contracts';
 import type {
@@ -22,7 +24,7 @@ import type {
   VerdictStatus,
   WaitingOnPerson,
 } from '@factory/contracts';
-import type { Store, UnitRow, VerdictRow } from '@factory/store';
+import { probeTopology, type Store, type UnitRow, type VerdictRow } from '@factory/store';
 
 /** The factory's own version. One constant: the panel reports the binary it is. */
 export const FACTORY_VERSION = '0.1.0';
@@ -609,6 +611,12 @@ function buildBudget(store: Store): BudgetStatus {
  * The caller validates with `parseStatus()` before sending: a status object that
  * fails the contract must not reach a renderer (ui-plan §5.3, fail closed).
  */
+/** Read from the marker beside the store, never from a constant (see `topologyOf` in the CLI). */
+function topologyOf(store: Store): StatusV1['factory']['topology'] {
+  const decision = probeTopology(dirname(store.location));
+  return { kind: decision.kind, reason: decision.reason, claim: decision.claim };
+}
+
 export function buildStatus(store: Store, ctx: BuildStatusContext): StatusV1 {
   const nowIso = ctx.now().toISOString();
   const allUnits = store.listUnits();
@@ -655,6 +663,9 @@ export function buildStatus(store: Store, ctx: BuildStatusContext): StatusV1 {
       policyVersion: newest === null ? 'unknown' : newest.policyVersion,
       wallVersion: WALL_VERSION,
       holdoutRevision: newest === null ? null : newest.holdoutRevision,
+      // The page reports the topology the *store* was provisioned under (ND2), read from the
+      // marker beside it, so a page served on the dev host cannot carry the Linux claim.
+      topology: topologyOf(store),
     },
     waitingOnPerson: buildWaitingOnPerson(units, terminalUnitIds, budget, nowIso),
     units,
