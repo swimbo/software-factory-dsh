@@ -17,17 +17,17 @@ Build the piece that makes the factory a factory: a **generator-blind verificati
 
 ## Tasks
 
-- [ ] `holdout/store.ts`: layout `~/.factory/holdout/<taskClass>/<scenarioId>.json`, a monotonic **holdout revision** (`sha256` over sorted scenario files), and file-mode checks that refuse to run if the store is readable by the worker's container user.
-- [ ] `scenario.ts` + Zod schema: a scenario is `{id, taskClass, kind: 'http'|'cli'|'assert', steps[], expect[], severity}` — **derived from the spec, never from the implementation**; a scenario file carries no reference to the worker's diff.
-- [ ] `reexecute.ts` (deterministic layer, runs FIRST): clean checkout of `base + receipt.diff` in a fresh container, replay `receipt.commands[]` verbatim, compare exit codes and full-suite output against the receipt. Mismatch → verdict `receipt_unfaithful`; never falls through to scenario scoring.
-- [ ] `evaluate.ts`: triple-run each scenario against an ephemeral deployment, 2-of-3 per scenario, aggregate ≥90%, plus per-scenario severity weighting; a scenario that errors on infrastructure (not the candidate) is `unknown`, and **`unknown` fails the gate** (law L3).
+- [~] `holdout/store.ts`: layout `~/.factory/holdout/<taskClass>/<scenarioId>.json`, a monotonic **holdout revision** (`sha256` over sorted scenario files), and file-mode checks that refuse to run if the store is readable by the worker's container user.
+- [~] `scenario.ts` + Zod schema: a scenario is `{id, taskClass, kind: 'http'|'cli'|'assert', steps[], expect[], severity}` — **derived from the spec, never from the implementation**; a scenario file carries no reference to the worker's diff.
+- [~] `reexecute.ts` (deterministic layer, runs FIRST): clean checkout of `base + receipt.diff` in a fresh container, replay `receipt.commands[]` verbatim, compare exit codes and full-suite output against the receipt. Mismatch → verdict `receipt_unfaithful`; never falls through to scenario scoring.
+- [x] `evaluate.ts`: triple-run each scenario against an ephemeral deployment, 2-of-3 per scenario, aggregate ≥90%, plus per-scenario severity weighting; a scenario that errors on infrastructure (not the candidate) is `unknown`, and **`unknown` fails the gate** (law L3).
 - [ ] `delta.ts`: `Δ = visible_suite_pass_rate − holdout_pass_rate`, persisted per task class with a rolling sample; a class is `unstable` when Δ variance exceeds a configured bound or when the worker has ever been served that class's scenario text (leak check) → class cannot be certified `dark`.
-- [ ] `feedback.ts`: the opaque failure line — `"<scenarioId> failed: <symptom>"`; asserts that the emitted line contains no scenario step text, no expected values, no path under `~/.factory/holdout`.
-- [ ] `verdict.ts`: content-hashed (`sha256` over canonical verdict JSON) + ed25519-signed verdict receipt containing scenario ids/results, Δ, `holdoutRevision`, `policyVersion`, `receiptId`, `evaluatedAt`. The engine stores only ids + hashes.
-- [ ] `selftest/`: **sabotage corpus** of ≥3 fixture changes that pass their own visible tests and must be rejected (hardcoded response, deleted assertion, test-only patch); a **leaky-wall** fixture proving a worktree cannot read the holdout store; a `wall self-test` command that runs the corpus as a regression gate.
-- [ ] `criteria-log.ts`: append-only log of scenario versions + rationale, and a `wall revalidate` command producing a checklist for the scheduled human re-validation (R6).
-- [ ] Tests: sabotage rejected (the mandatory red-then-green case); unfaithful receipt detected; Δ instability blocks certification; infrastructure error ⇒ `unknown` ⇒ gate fails; feedback line leaks nothing; verdict signature verifies and a tampered verdict fails; leak test (both path-based and container-based, `@docker`).
-- [ ] `progress.md`: the red-then-green evidence for the sabotage test, verbatim command output.
+- [x] `feedback.ts`: the opaque failure line — `"<scenarioId> failed: <symptom>"`; asserts that the emitted line contains no scenario step text, no expected values, no path under `~/.factory/holdout`.
+- [x] `verdict.ts`: content-hashed (`sha256` over canonical verdict JSON) + ed25519-signed verdict receipt containing scenario ids/results, Δ, `holdoutRevision`, `policyVersion`, `receiptId`, `evaluatedAt`. The engine stores only ids + hashes.
+- [~] `selftest/`: **sabotage corpus** of ≥3 fixture changes that pass their own visible tests and must be rejected (hardcoded response, deleted assertion, test-only patch); a **leaky-wall** fixture proving a worktree cannot read the holdout store; a `wall self-test` command that runs the corpus as a regression gate.
+- [~] `criteria-log.ts`: append-only log of scenario versions + rationale, and a `wall revalidate` command producing a checklist for the scheduled human re-validation (R6).
+- [x] Tests: sabotage rejected (the mandatory red-then-green case); unfaithful receipt detected; Δ instability blocks certification; infrastructure error ⇒ `unknown` ⇒ gate fails; feedback line leaks nothing; verdict signature verifies and a tampered verdict fails; leak test (both path-based and container-based, `@docker`).
+- [~] `progress.md`: the red-then-green evidence for the sabotage test, verbatim command output.
 
 ## Delegation plan
 
@@ -42,26 +42,26 @@ Two parallel scopes:
 ### Hard Gates (copied verbatim from `done-means-done/phase-09-implementation.md`)
 
 - [ ] **Scope fidelity**: every IN-scope deliverable in `phased-plan.md` is represented by at least one merged/committed change. Nothing OUT-of-scope was implemented.
-- [ ] **User-story coverage**: every P0 story from `user-stories.md` has a code path that fulfils its acceptance criteria. Evidence: story ID referenced in commit messages, code comments, or `progress.md`.
-- [ ] **Architecture adherence**: implemented component boundaries match `architecture.md > ## Components`. Deviations were negotiated and recorded in `progress.md`.
-- [ ] **Tech-guide adherence**: versions, conventions, and dev-env commands match `tech-guide.md`. Deviations recorded with rationale.
+- [~] **User-story coverage**: every P0 story from `user-stories.md` has a code path that fulfils its acceptance criteria. Evidence: story ID referenced in commit messages, code comments, or `progress.md`.
+- [~] **Architecture adherence**: implemented component boundaries match `architecture.md > ## Components`. Deviations were negotiated and recorded in `progress.md`.
+- [x] **Tech-guide adherence**: versions, conventions, and dev-env commands match `tech-guide.md`. Deviations recorded with rationale.
 - [ ] **Subagent delegation used where required**: any phase with 2+ independent tasks dispatched parallel agents; delegation table in `phased-plan.md > ## Delegated Work` shows statuses and results.
 - [ ] **Error log is clean**: `progress.md > ## Errors` has no open errors. Every entry is either `resolved` with resolution, or tagged `accepted_risk` with a user sign-off line.
-- [ ] **3-strike protocol respected**: no task shows 3+ repeated identical failing attempts. Every failure has a mutation entry.
-- [ ] **Mid-phase volatile decisions debated**: every decision made during Implementation that falls into a Volatile Decision Category (LLM/model, AI SDK, third-party API/service, datastore swap, framework version bump, dependency major, architectural pattern change, auth strategy, data contract, deploy/CI pattern, observability) has a Mode B decision brief in `docs/planning/decisions/`, a `/debate` outcome recorded in the brief, and an entry in `docs/planning/decisions/INDEX.md`. No silent adoption.
-- [ ] **Secrets hygiene**: no secrets in code, commits, or planning files. `.env` present in `.gitignore` if used.
-- [ ] **Build succeeds**: canonical build command from `tech-guide.md` runs to success locally. Output pasted or linked in `progress.md`.
-- [ ] **Lint clean**: canonical lint command runs clean. Output linked.
-- [ ] **Type-check clean** _(typed languages)_: type-check runs clean.
+- [~] **3-strike protocol respected**: no task shows 3+ repeated identical failing attempts. Every failure has a mutation entry.
+- [~] **Mid-phase volatile decisions debated**: every decision made during Implementation that falls into a Volatile Decision Category (LLM/model, AI SDK, third-party API/service, datastore swap, framework version bump, dependency major, architectural pattern change, auth strategy, data contract, deploy/CI pattern, observability) has a Mode B decision brief in `docs/planning/decisions/`, a `/debate` outcome recorded in the brief, and an entry in `docs/planning/decisions/INDEX.md`. No silent adoption.
+- [x] **Secrets hygiene**: no secrets in code, commits, or planning files. `.env` present in `.gitignore` if used.
+- [x] **Build succeeds**: canonical build command from `tech-guide.md` runs to success locally. Output pasted or linked in `progress.md`.
+- [x] **Lint clean**: canonical lint command runs clean. Output linked.
+- [x] **Type-check clean** _(typed languages)_: type-check runs clean.
 
 ### Project-specific evidence
 
-- [ ] **The wall-first proof**: `pnpm --filter @factory/wall test -- sabotage` fails before `evaluate.ts` exists and passes after — both runs pasted into `progress.md` (this is the phase's defining gate).
-- [ ] `factory wall self-test` runs the full sabotage corpus and exits non-zero if any sabotage change is certified.
-- [ ] A tampered verdict (edited scenario result) fails signature verification.
-- [ ] Leak proofs: `rg -F "holdout" <worktree>` finds nothing; the `@docker` test shows `EACCES`/`ENOENT` reading the holdout store from inside the worker container.
-- [ ] An infrastructure-error scenario produces `unknown` and the verdict is `not_passed` (never `passed`).
-- [ ] Δ recorded for the fixture task class with a reproducible sample; an artificially unstable sample blocks certification.
+- [~] **The wall-first proof**: `pnpm --filter @factory/wall test -- sabotage` fails before `evaluate.ts` exists and passes after — both runs pasted into `progress.md` (this is the phase's defining gate).
+- [x] `factory wall self-test` runs the full sabotage corpus and exits non-zero if any sabotage change is certified.
+- [x] A tampered verdict (edited scenario result) fails signature verification.
+- [~] Leak proofs: `rg -F "holdout" <worktree>` finds nothing; the `@docker` test shows `EACCES`/`ENOENT` reading the holdout store from inside the worker container.
+- [x] An infrastructure-error scenario produces `unknown` and the verdict is `not_passed` (never `passed`).
+- [~] Δ recorded for the fixture task class with a reproducible sample; an artificially unstable sample blocks certification.
 
 ## Acceptance criteria
 
@@ -78,3 +78,5 @@ A sabotage change that passes its own visible tests is rejected with an opaque o
 `wall 125 — 9-case self-test (9/9 met), ten mutation checks each turning exactly one test red, sabotage rejected`.
 
 Full gate output, per-package suites and the four never-regress controls: [`evidence/phase-9-implementation.md`](evidence/phase-9-implementation.md). Whole-tree gate at close: `verify: 6 passed, 1 skipped, 0 failed` — `972 passed | 10 skipped (982)`.
+
+**Unproven (audit 2026-11-01):** 20/21/22/28 the plan's module split exists as capabilities inside `evaluate.ts`/`holdout.ts` rather than as `holdout/store.ts`, `scenario.ts`, `reexecute.ts`, `delta.ts`; 27 the sabotage corpus exists (9 cases) but there is no leaky-wall fixture; 28 `wall revalidate` does not exist; 30/59 the red-then-green transcript was never pasted — `e2e/cli/default/09-holdout-sabotage.test.ts` (committed in `b92f5cc`) is the closest evidence and was verified by re-running the suite, not by a recorded before/after; 62 the leak proofs are `@docker`-gated; 64 Δ is persisted per verdict, not as a rolling per-class sample.

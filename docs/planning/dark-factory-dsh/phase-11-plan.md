@@ -37,17 +37,17 @@ Three disjoint evidence jobs can run in parallel because their write scopes are 
 
 ### Hard Gates (copied verbatim from `done-means-done/phase-11-testing-verification.md`)
 
-- [ ] **Unit tests pass**: full suite run, exit code 0. Evidence: command + output timestamp.
-- [ ] **Integration tests pass** (if present): exit code 0.
+- [~] **Unit tests pass**: full suite run, exit code 0. Evidence: command + output timestamp.
+- [~] **Integration tests pass** (if present): exit code 0.
 - [ ] **E2E / Playwright tests pass** (if Phase 10 applies): exit code 0; no tests skipped without a logged reason.
-- [ ] **Lint clean**: canonical lint command exit code 0.
-- [ ] **Type-check clean** (typed languages): exit code 0.
-- [ ] **Build succeeds**: canonical build exit code 0.
+- [x] **Lint clean**: canonical lint command exit code 0.
+- [x] **Type-check clean** (typed languages): exit code 0.
+- [x] **Build succeeds**: canonical build exit code 0.
 - [ ] **User-story acceptance**: for each P0 story, acceptance criteria have been walked through and checked off. For web/CLI projects, this means a live run of the flow — not code inspection.
-- [ ] **Dark-pattern sanity**: for UX projects, a manual pass against `ux-plan.md > ## Dark Pattern Audit` confirms no regressions.
+- [~] **Dark-pattern sanity**: for UX projects, a manual pass against `ux-plan.md > ## Dark Pattern Audit` confirms no regressions.
 - [ ] **Accessibility spot-check** (UI projects): keyboard navigation, focus order, and contrast sampled on primary flows. Issues filed as `plan-gaps` if found.
 - [ ] **No unresolved errors**: `progress.md > ## Errors` has zero open entries.
-- [ ] **Cross-plugin verification considered**: `/bo-planner-done` warnings on Enterprise Assessment, Design Compliance, and Test Coverage reviewed (if those artifacts exist). Blocker-class issues either fixed or explicitly accepted by the user in `progress.md`.
+- [~] **Cross-plugin verification considered**: `/bo-planner-done` warnings on Enterprise Assessment, Design Compliance, and Test Coverage reviewed (if those artifacts exist). Blocker-class issues either fixed or explicitly accepted by the user in `progress.md`.
 
 ### Project-specific evidence
 
@@ -56,7 +56,7 @@ Three disjoint evidence jobs can run in parallel because their write scopes are 
 - [ ] `evidence/chaos-kill9.json` shows attempt state `ambiguous`, `recover()` dispatch count `0`, and one effect row per idempotency key.
 - [ ] `evidence/audit-trace.txt` proves the traceability NFR: every decision line resolves to `(event, receipt, verdict, policyVersion)`, and no promotion exists without a signed verdict.
 - [ ] `evidence/dogfood-<sha>.json` records ≥1 dark unit end-to-end offline and its wall-clock time.
-- [ ] All 8 adversarial scenarios from Phase 10 are green in `pnpm test` / `pnpm test:docker` output; a missing or skipped safety test fails this phase.
+- [~] All 8 adversarial scenarios from Phase 10 are green in `pnpm test` / `pnpm test:docker` output; a missing or skipped safety test fails this phase.
 
 ## Acceptance criteria
 
@@ -67,3 +67,5 @@ Every automated layer is green with timestamped evidence, every P0 story has bee
 - **`@live` is not part of this phase or of CI.** Live DSH model calls are UNVERIFIED on this machine; the honest report says so in `test-summary.md` rather than implying full coverage.
 - The checklist points at `progress.md > ## Test Results`; this project also wants per-phase evidence under `evidence/`. Both are produced — `progress.md` holds the summary and timestamps, `evidence/` holds the raw logs.
 - Docker-dependent suites can be skipped locally; they are **required for release**. If skipped, this phase cannot be `complete`, only `unknown`-carrying.
+
+**Unproven (audit 2026-11-01):** only three of the 33 boxes can be ticked — every named evidence artifact (`test-summary.md`, `typecheck.log`, `lint.log`, `build.log`, `docker-suite.log`, `panel-suite.log`, `chaos-kill9.json`, `audit-trace.txt`, `dogfood-<sha>.json`, `MISSING.md`) is absent. The suite itself is green — this audit ran it after `b92f5cc`: 65 files, 1029 tests, 1018 passed, 1 expected fail, 10 skipped — but a green run is not an evidence file, which is exactly what this phase's own law says.
