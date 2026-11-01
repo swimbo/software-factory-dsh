@@ -61,7 +61,39 @@ $ dsh --profile headless --patch overlay.yml --json "Reply with exactly the word
 **This is the first measured proof of the model path**: a real turn, a real model, real usage, and the
 `turn_end` reason the adapter's exit-code rule depends on (`exit 0` only on a completed `turn_end`).
 
-## 3. What this probe does **not** prove
+## 3. The first paid factory run, and what it broke
+
+The probe above used a hand-written overlay. The factory's own path was then run once, for real, with the
+operator's key: unit `U-20be8c159df8`, attempt `A-e507950c0625`, model `auto`, **12,684 tokens across two
+steps**, `turn_end.reason.kind = completed`, receipt written, wall measured.
+
+Everything the wall measures about the _change_ was green — `acceptance:suite-green`, `suite`,
+`holdout:01`, `delta`, `holdout:quality`, `test-surface`, `diff`, `tests-weakened`, `scope`,
+`irreversible`, `class-certification` — and the verdict was still **`fail`**, on
+`receipt_unfaithful` + `faithfulness_partial`, with the scope row reading
+`replayed 7 of 8 recorded commands; 2 mismatched`.
+
+That single run exposed three defects, none of which any offline spec had caught:
+
+1. **The wall replayed the worker launch.** `receipt.commands[0]` is the `dsh` invocation itself:
+   non-deterministic, side-effecting, and on a live run _billed_. The first fix made it honest but
+   useless (`replayed 0 of 8` ⇒ `unknown` ⇒ by L3 no real worker could ever produce a promotable unit).
+   The fix that stands: replay the verification reads **in recorded order from the receipt's base**, so
+   the replay rebuilds the index (`git read-tree <base> && git add --all -- .`) instead of assuming it.
+2. **Two of those reads are not replayable at all, and the wall said they were.** `git status
+--porcelain` with untracked or ignored entries depends on files present in the _working directory_,
+   which no commit records; the replay diverged on exactly those two rows (`--untracked-files=all`,
+   `--ignored=matching`) while `--cached` diffs and `git ls-files --others --ignored` reproduced. The
+   honest classification is unreplayable-with-reason, giving a measured **5 of 8**.
+3. **The scope row reported `2 mismatched` while carrying `outcome: pass`.** A row that counts a
+   divergence cannot be green; the overall verdict was right only because `receipt_unfaithful` happened
+   to accompany it — a coupling the verdict text should not depend on.
+
+The pattern is the one this repository keeps re-learning: **the mechanism was correct and its inputs were
+not.** Offline fixtures had the receipt shape the wall wanted; the real receipt had the shape the
+factory actually produces, and the difference only appears when a real worker runs.
+
+## 4. What this probe does **not** prove
 
 - **Not the factory's path.** This overlay was hand-written. The factory builds its own
   (`packages/dsh-adapter/src/overlay.ts`), and until the integration below lands, the fact that DSH can

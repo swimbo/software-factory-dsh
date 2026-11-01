@@ -60,6 +60,7 @@ import {
   effectiveProfile,
   FACTORY_VERIFICATION_PROVENANCE,
   WORKER_LAUNCH_PROVENANCE,
+  WORKTREE_READ_PROVENANCE,
   fingerprintEnv,
   forwardedCredentials,
   hashOverlay,
@@ -742,14 +743,14 @@ async function captureDiff(
     ['git', 'status', '--porcelain=v1', '--untracked-files=all'],
     attemptDir,
   );
-  commands.push(toCommandRecord(statusPlain, FACTORY_VERIFICATION_PROVENANCE));
+  commands.push(toCommandRecord(statusPlain, WORKTREE_READ_PROVENANCE));
 
   // A3.5: ignored paths are invisible to both the diff and `status --porcelain`.
   const status = await captured(
     ['git', 'status', '--porcelain=v1', '--ignored=matching'],
     attemptDir,
   );
-  commands.push(toCommandRecord(status, FACTORY_VERIFICATION_PROVENANCE));
+  commands.push(toCommandRecord(status, WORKTREE_READ_PROVENANCE));
   const ignoredList = await captured(
     ['git', 'ls-files', '--others', '--ignored', '--exclude-standard'],
     attemptDir,

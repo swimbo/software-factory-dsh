@@ -173,6 +173,24 @@ export const FACTORY_VERIFICATION_PROVENANCE: CommandProvenance = {
   replayable: true,
 };
 
+/**
+ * A factory read whose output depends on the *worktree*, not just on (base, staged tree).
+ *
+ * `git status --porcelain` lists untracked and ignored paths, and an ignored `node_modules/`
+ * either exists in the wall's scratch copy or it does not. Replaying these measures a different
+ * filesystem, so they are recorded as evidence of what the attempt's own tree looked like —
+ * never as a claim the wall can re-run. Measured the hard way: the first live replay reproduced
+ * `read-tree`, `add`, both `diff` reads and `ls-files`, and mismatched exactly these two.
+ */
+export const WORKTREE_READ_PROVENANCE: CommandProvenance = {
+  source: 'factory-verification',
+  replayable: false,
+  replaySkipReason:
+    'output depends on untracked and ignored working-tree contents, which cannot be reconstructed ' +
+    "from the receipt's base: an ignored node_modules/ either exists in the replay's scratch copy " +
+    'or it does not',
+};
+
 export interface EnvFingerprint {
   /** Names the child was given, sorted. Never a value. */
   readonly keys: readonly string[];
