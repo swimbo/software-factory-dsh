@@ -62,6 +62,31 @@ def inspect(container):
     return json.loads(command('docker', 'inspect', container))[0]
 
 
+def _owned_container(container, image, allocation, role):
+    if not re.fullmatch(r'[0-9a-f]{64}', container):
+        raise RuntimeError('full probe container identity required')
+    info = inspect(container)
+    labels = info['Config']['Labels']
+    if (info['Id'] != container or info['Image'] != image
+            or labels.get('factory.allocation') != allocation or labels.get('factory.role') != role):
+        raise RuntimeError('fixture ownership changed; retained for operator')
+    return info
+
+
+def _verify_stopped_reopen(adapter, conversation_id, calls):
+    from stall_runtime import StallIntervention
+    before = dict(calls)
+    try:
+        adapter.read(conversation_id, None)
+    except StallIntervention as stopped:
+        if stopped.intervention_status != 'stopped':
+            raise RuntimeError('journal reopen did not confirm stopped original') from None
+    else:
+        raise RuntimeError('journal reopen unexpectedly resumed original')
+    if calls != before:
+        raise RuntimeError('journal reopen performed transport activity')
+
+
 def fail_completion(*_):
     raise RuntimeError('scripted failure loop unexpectedly finished; no completion assertion')
 
@@ -113,8 +138,14 @@ def main():
                 extra += ['--env','OH_ENABLE_VSCODE=false','--env','OH_SESSION_API_KEYS_0=dummy',
                           '--entrypoint','/usr/local/bin/openhands-agent-server',args.image]
             else: extra += ['--entrypoint','python3',args.image,'-c','import time; time.sleep(300)']
-            roles[role] = command('docker','run','-d','--name','factory-unpaid-stall-'+allocation+'-'+role,
-                                  *common,'--label','factory.role='+role,*extra)
+            # Creation alone cannot run a process. Record its full owned ID
+            # before start so an accepted start timeout remains containable.
+            container = command('docker','create','--name','factory-unpaid-stall-'+allocation+'-'+role,
+                                *common,'--label','factory.role='+role,*extra)
+            if _owned_container(container, args.image, allocation, role)['State']['Running']:
+                raise RuntimeError('newly created fixture is already running')
+            roles[role] = container
+            command('docker', 'start', container)
         binding = {'volumes':{}}
         for role,container in roles.items():
             info = inspect(container)
@@ -142,9 +173,10 @@ def main():
             if (workspace/'.git/probe-model-ready').is_file(): break
             time.sleep(.1)
         else: raise RuntimeError('local unpaid model did not become ready before dispatch')
-        calls = {'create':0,'diagnostic':0,'run':0}
+        calls = {'create':0,'diagnostic':0,'run':0,'read':0}
         class CountingTransport:
             def request(self,method,path,payload=None):
+                if method=='GET': calls['read']+=1
                 if method=='POST':
                     if path=='/api/conversations': calls['create']+=1
                     elif path.endswith('/events'):
@@ -166,12 +198,11 @@ def main():
         journal = json.loads(observer.path.read_text()); detector = journal['detector']
         after = sum(s['seq']>detector['intervention_seq'] for s in detector['history'])
         if not (journal['effect']=='stopped' and journal['delivery_status']=='sent'
-                and detector['stopped'] and after>=3 and calls=={'create':1,'diagnostic':1,'run':0}):
+                and detector['stopped'] and after>=3
+                and {k:calls[k] for k in ('create','diagnostic','run')}=={'create':1,'diagnostic':1,'run':0}):
             raise RuntimeError('fixture stopped without verified post-intervention escalation')
         # Reopen same journal: no SDK reads, second diagnostic, or replacement.
-        try: StallAdapter(base,store,attempt,str(runtime),str(workspace)).read(cid,None)
-        except StallIntervention: pass
-        else: raise RuntimeError('stopped original was unexpectedly resumed')
+        _verify_stopped_reopen(StallAdapter(base,store,attempt,str(runtime),str(workspace)), cid, calls)
         with store._transaction() as (db,_):
             row = db.execute('SELECT request_hash,conversation_id,status FROM attempts WHERE attempt_id=?',(attempt,)).fetchone()
             counts = {table:db.execute('SELECT count(*) FROM '+table).fetchone()[0]
@@ -204,10 +235,7 @@ def main():
         else:
             # Before binding only this invocation's observed full IDs are owned.
             for role,container in roles.items():
-                info=inspect(container);labels=info['Config']['Labels']
-                if (info['Id']!=container or info['Image']!=args.image
-                        or labels.get('factory.allocation')!=allocation or labels.get('factory.role')!=role):
-                    raise RuntimeError('prebinding fixture ownership changed; retained for operator')
+                info=_owned_container(container,args.image,allocation,role)
                 if info['State']['Running']:command('docker','kill','--signal','KILL',container)
 
 
