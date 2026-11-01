@@ -193,7 +193,20 @@ Preconditions are shared unless stated: **P1** a fresh `FACTORY_HOME` (temp dir)
 | id     | Title                                                       | Preconditions                                           | Steps                                                      | Assertions                                                                                                                                                                                     | Story | Phase |
 | ------ | ----------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ----- |
 | E2E-47 | [@live] One real DeepSeek call end-to-end through the proxy | P1, P3, Docker, `FACTORY_E2E_LIVE=1`, `BIFROST_API_KEY` | `factory run U-…` on the honest fixture with a 1-turn task | receipt recorded; budget entry `kind: "estimated"` and **never** `measured`; `budget.telemetry === "estimated"`; spend settles as `estimated` or `unknown`, never as a fabricated exact charge | US-01 | 9b    |
-| E2E-48 | [@live] The gateway key never reaches the worker            | same                                                    | `run`, then inspect worker env/FS + proxy logs             | key absent from worker env, `/proc/self/environ`, container FS and session log; proxy log shows the request with an injected credential and no key echoed                                      | US-16 | 9b    |
+
+> **Executed 2026-11-01, and the claim changed.** E2E-47 now exists as a real spec
+> (`e2e/cli/live/08-model.test.ts`, the happy path): a factory-launched `dsh` turn through Bifrost,
+> receipt in the store, verdict `pass` with `replayed 5 of 8` and zero mismatched, holdout
+> discriminating, `12,706` tokens over two steps. It is **not** `Docker`-gated (the local runner is
+> what measures); the container half stays `UNKNOWN`. The budget clauses are unchanged and still hold:
+> the reservation is `kind: "estimated"` and the factory never fabricates a measured charge.
+> | E2E-48 | [@live] The gateway key never reaches the worker | same | `run`, then inspect worker env/FS + proxy logs | key absent from worker env, `/proc/self/environ`, container FS and session log; proxy log shows the request with an injected credential and no key echoed | US-16 | 9b |
+
+> **Still `UNKNOWN`, and narrowed deliberately.** The spec that shipped asserts the _inverse_ under
+> the live path: `credentialsForwarded: ['BIFROST_API_KEY']` (name only) and no key bytes in
+> `launch.json`. That is honest — v1 forwards the gateway credential to `dsh` because the credential
+> proxy container does not exist (ADR-006 amendment). "The key never reaches the worker" is true on
+> every offline and container path and false on the live path until the proxy ships.
 
 ### 4.4 Watchdog, ceilings, and mandate revalidation (`@default`, 5 tests)
 
