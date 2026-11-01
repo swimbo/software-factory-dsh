@@ -21,3 +21,4 @@ stapled-factory/worker/.venv/
 
 # Local-CI receipts from the previous (removed) project must never be re-added.
 .local-ci/
+e2e/soak/artifacts/
