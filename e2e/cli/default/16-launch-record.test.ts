@@ -15,10 +15,13 @@
  * name and by value. The record is the same one the real executor writes, so what is proven
  * here is the allowlist and the record — not the container.
  *
- * Clause counted `UNKNOWN` here: the **container's** filesystem isolation (a worker inside the
- * image cannot open the host's holdout directory even if it guesses the path). That needs the
- * wall image, which v1 does not ship; `@docker` E2E-45 owns it. This spec proves the path never
- * reaches the worker, not that the mount hides it.
+ * Clause counted `UNKNOWN` here: the **worker container's** filesystem isolation (a candidate
+ * inside the image cannot open the host's holdout directory even if it guesses the path). It stays
+ * `UNKNOWN` because the worker has no container to be isolated by — `apps/cli/src/wall.ts` wires
+ * the local runner and the executor launches `dsh` on the host. The *wall's* container isolation is
+ * separate and measured: `@docker` E2E-44 (b) proves the wall's scenario container cannot see the
+ * holdout or an operator key. This spec proves the path never reaches the worker, not that a mount
+ * hides it.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

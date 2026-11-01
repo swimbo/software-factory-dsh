@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.4.0 — 2026-11-01
+
+The round after ratification: the three things v0.3.0 left as mechanisms with nothing driving them are
+now driven, and two claims turned out to be stale — in one case in the factory's favour.
+
+- **The anchor runs.** `deploy/launchd/ai.factory.anchor.plist` anchors the ledger daily at 03:00 to
+  `hermes-control` (`$HOME/.factory/anchors/software-factory-dsh.jsonl`, directory `0700`, no root —
+  `/var/lib/factory` does not exist there and a root-owned anchor buys nothing but another thing to
+  provision). Installed, kickstarted and verified `FRESH · off-host`; two records sit on the off-host
+  machine. The 48 h refusal was also exercised live (`--max-age-hours 0` → `STALE`, exit 9) rather than
+  only in a spec.
+- **A class certificate is a row, not a sentence.** `class_certificates` (schema **v2 → v3**, additive,
+  declared in `MIGRATIONS`) — one row per verdict, written inside `insertVerdict`'s transaction, with
+  `m/k/p0/α/samples/passes/outcome/policyVersion/modelId` and a digest tying the row to its
+  `wall.class_certified` event. `factory audit --certifications` judges each class against the running
+  policy and model and exits **9** for stale, never-certified, absent projection **or an empty store**.
+  `not-certified` and `insufficient` can never read as `current`.
+- **The model id reaches the wall.** v0.3.0 wrote `modelId: null` on every live certificate because
+  nothing supplied one; `FACTORY_MODEL_ID` now flows to `evaluate()`, and an absent id stays absent
+  rather than becoming a string. New runbook `certificate-expired.md`, written against real output.
+- **An offline soak that executes the runbooks.** `scripts/soak.sh`: 50 units, six incidents on a
+  schedule derived from `--seed`, and after each one the runbook's own commands are run and their exit
+  codes _and_ promised sentences asserted — 27 steps, 76 s, zero paid calls. Invariants are checked
+  across every home the run touched. The first version of the checker counted one home twice and
+  reported a phantom redispatch; the spec now feeds each checker a fabricated row and requires a scream.
+- **The panel is verified in a browser for the first time.** `chromium_headless_shell-1248` is present
+  on this host now, so `npx playwright test` runs: **41 passed in 12.6 s** — measured contrast, the
+  320 px rule, 200 % zoom reflow, "no green anywhere in the unknown card", and identical parsing with
+  scripting disabled. The audit's oldest `UNPROVEN` bullet is closed by running it, not by assertion.
+- **The `@docker` isolation suite runs on this host, and it was never skipped.** Six specs in 4.8 s
+  (E2E-43/44/44b/46 + timeout/orphan + content-pin): no network (control: the host has it), writes only
+  inside the work dir, cannot see a factory home/holdout/operator key, cgroup limits are the flags
+  passed, a 400-fork storm is capped. Two defects found and fixed: E2E-43's host-egress control was a
+  `console.warn` that could be deleted with the suite still green (now `skipIf` with the reason in its
+  name), and both images ran a runtime that disagreed with the pins (now `node:26.12.1`, and
+  `docker/factory-env` builds with `dsh 0.2.1-rc.5`).
+
+**Still not built, unchanged by this round:** the _worker's_ container (E2E-45 stays `UNKNOWN` — there
+is no worker container to kill; the `ambiguous`/`recover` invariant is proven at process level), alerts
+on a stale anchor or an expired certificate, scheduled re-certification, ND3's ceiling through the real
+executor, and ND2 on the Linux target rather than in a container.
+
 ## v0.3.0 — 2026-11-01
 
 The operator ratified all four `NEEDS_HUMAN_DECISION` answers on 2026-11-01

@@ -25,7 +25,7 @@ makes "2-of-3 runs" a weaker claim than it looks.
 export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 pnpm install
 pnpm run build            # tsc -p tsconfig.build.json
-pnpm test                 # 1284 passed, 6 skipped (89 files)
+pnpm test                 # 1314 passed, 6 skipped (92 files)
 bash scripts/verify.sh    # preflight, typecheck, lint, format:check, test, build, panel, live-model(skip)
 bash scripts/provision-topology.sh   # report which topology this host can honour (--apply on Linux)
 factory ledger verify     # is the ledger head anchored off-host, and is the anchor fresh?
@@ -138,15 +138,25 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   a per-attempt **credential proxy** on `127.0.0.1` holds the key and hands the worker a token bounded
   to that socket, that lease, one upstream path prefix, and revoked before the verdict is written
   (ADR-007). The launch record says `credentialsForwarded: []` and `credentialProxy: { token: 'scoped' }`.
-  **What this does not buy:** a root-level attacker on the host, or a second OS uid — the container path
-  (E2E-44) is still the shape that adds real isolation.
+  **What this does not buy:** a root-level attacker on the host, or a second OS uid — and the worker
+  is still a host process, so a candidate that escapes its sandbox is not fenced in. The wall's
+  _scenarios_ already run in that container (E2E-43/44/46); the _worker_ does not.
 - **Spend is metered, not invoiced.** The proxy records what the gateway's response says
   (`tokensIn/out`, `costUsd` when the gateway prices it) into an append-only `usage_records` table and
   revokes the attempt token at the ceiling — but a response with no usage block is `unknown`, and
   `budget reconcile` against the gateway's export is best-effort: it reports `unknown` (exit 6) rather
   than guessing. There is no billing-grade accounting and no invoice.
-- **No container isolation on this host.** The 4 `@docker` specs are tagged and skipped; the local
-  runner measures behaviour, not containment.
+- **The wall's isolation layer is real and measured; the worker still has no container.** `@docker`
+  E2E-43/44/46 run on this host against `packages/wall/docker/` (base `node:26.12.1-alpine`, the
+  runtime `.nvmrc` pins) — six specs, ~5 s: the container reaches no network (control: the host
+  does), cannot write outside its work dir while it can write inside, cannot see a factory home,
+  holdout or operator key (control: the host can), and its cgroup memory and pid limits are the
+  flags the runner passed, with a 400-fork storm capped. What is **not** built is the _worker's_
+  container: `apps/cli/src/wall.ts` wires `createLocalRunner`, the executor launches `dsh` on the
+  host, and `docker/factory-env` builds (node 26.12.1, `dsh 0.2.1-rc.5`) but nothing dispatches into
+  it. So E2E-45 — kill the worker container mid-attempt ⇒ `ambiguous`, no redispatch — stays
+  `UNKNOWN`: there is no worker container to kill. The `ambiguous`/`recover` invariant itself is
+  proven at the process level (E2E-21/30/31/32).
 - **DSH's sandbox is not a security boundary**, and is not treated as one anywhere.
 - **No ACP worker.** The adapter drives `dsh --profile headless` one-shot turns and reads NDJSON;
   the agent-client-protocol path is not implemented, so "one-shot **or** ACP workers" is delivered as
