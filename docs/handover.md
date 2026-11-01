@@ -106,16 +106,16 @@ environment you must supply, and the summaries say so.
 
 ## Where things are
 
-| Path                              | What it is                                                                              |
-| --------------------------------- | --------------------------------------------------------------------------------------- |
-| `docs/adr/`                       | the six decisions the design rests on, with the alternatives rejected and why           |
-| `docs/runbooks/`                  | five 2am procedures (start with [`README.md`](runbooks/README.md))                      |
-| `docs/planning/dark-factory-dsh/` | the plan set: findings, data map, stories, architecture, UX/UI, e2e plan, and the audit |
-| `docs/verification/<run-id>/`     | recorded `verify.sh` runs, with the commit and environment they measured                |
-| `packages/`, `apps/`              | 8 packages, 2 apps; `packages/dsh-adapter` is the only code that imports DSH            |
-| `e2e/cli/default/`                | the operator suites, numbered by the e2e plan                                           |
-| `e2e/panel/`                      | the browser suites for the read-only status page                                        |
-| `stapled-factory/`, `worker/`     | the previous system's material — **not** part of the factory, not built, not tested     |
+| Path                                                               | What it is                                                                                                                               |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/adr/`                                                        | the six decisions the design rests on, with the alternatives rejected and why                                                            |
+| `docs/runbooks/`                                                   | five 2am procedures (start with [`README.md`](runbooks/README.md))                                                                       |
+| `docs/planning/dark-factory-dsh/`                                  | the plan set: findings, data map, stories, architecture, UX/UI, e2e plan, and the audit                                                  |
+| `docs/verification/<run-id>/`                                      | recorded `verify.sh` runs, with the commit and environment they measured                                                                 |
+| `packages/`, `apps/`                                               | 8 packages, 2 apps; `packages/dsh-adapter` is the only code that imports DSH                                                             |
+| `e2e/cli/default/`                                                 | the operator suites, numbered by the e2e plan                                                                                            |
+| `e2e/panel/`                                                       | the browser suites for the read-only status page                                                                                         |
+| `stapled-factory/`, `docs/planning/stapled-factory/`, `.local-ci/` | **deleted 2026-11-01** — the previous system's code and plans. Nothing here depends on them; the surviving lessons are in `findings.md`. |
 
 ## If you only read one thing
 

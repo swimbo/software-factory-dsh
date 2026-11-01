@@ -88,7 +88,27 @@ Where users report friction with existing solutions, by competitor (all sourced 
 
 ## Existing-state findings (what we inherit and must not break)
 
-Full audit: [research/existing-state.md](research/existing-state.md). The prior factory (`stapled-factory/`, docs in `docs/planning/stapled-factory/`) is **Path A** (OpenHands + Restate + Bifrost) and is **not** the base for this plan — but its hard-won invariants are.
+**The prior tree is gone.** The Path-A factory (OpenHands + Restate + Bifrost), its plan set
+(`docs/planning/stapled-factory/`), its local-CI receipts and its audit of that code were **deleted on
+2026-11-01** at the operator's instruction, because a second system's source, plans and evidence in the
+same repository is a reliable way to confuse every future reader (and every future agent). References to
+`stapled-factory/` elsewhere in this set are **historical**: they record what was read at planning time,
+not files you can open.
+
+What survives is the part that mattered — the invariants, not the plumbing:
+
+| Invariant the prior system paid for | Why it is kept |
+|---|---|
+| **No redispatch on an ambiguous attempt** — `reserve()` returned `new`, `unknown` or `completed`, never a second dispatch | The crash-recovery rule this repo's outbox and `recover` still obey |
+| **`unknown` is not a pass** — a scenario that could not run never satisfies a gate | Now law L3, and the reason `faithfulness_partial` produces `unknown` rather than a pass |
+| **Quarantine on watermark mismatch** — a store that disagreed with its own monotonic record failed closed | `StoreQuarantined`, and the runbook that tells an operator what to do |
+| **Budget is pre-authorised, never raised by a client** — reservations only, immutable policies | `packages/core/src/rules.ts`: a run reserves an estimate and the envelope can only shrink it |
+| **The wall is never on the worker's egress path** — the evaluator was a separate process with its own credentials | ADR-002 (generator-blind), and the reason the wall runs under its own `DSH_HOME` |
+| **Scoped credentials, short-lived, agent never sees the master key** | The broker this repo still does **not** fully have — ADR-006's outstanding half |
+
+The prior system's own defects are documented as the *research* findings below (an unwired wall, a
+firewall that did not mediate the agent's own terminal, criteria drift). Those lessons shaped this plan;
+none of them require the old code to still exist in order to be true.
 
 Corrected premises (the audit contradicted the brief):
 

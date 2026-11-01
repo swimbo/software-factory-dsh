@@ -18,3 +18,6 @@ coverage/
 
 # Vendored Python env inside the previous plan tree (353 MB, 17 k files)
 stapled-factory/worker/.venv/
+
+# Local-CI receipts from the previous (removed) project must never be re-added.
+.local-ci/

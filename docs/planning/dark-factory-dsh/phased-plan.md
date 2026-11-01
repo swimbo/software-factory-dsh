@@ -1,5 +1,11 @@
 # Phased Plan — The Dark Software Factory on DeepSeek Harness
 
+> **Historical note (2026-11-01).** The prior Path-A tree (`stapled-factory/`), its plan set
+> (`docs/planning/stapled-factory/`) and its local-CI artefacts were **deleted** to stop a second
+> system confusing readers of this one. Any reference to them in this file records what was read when
+> the plan was written; the durable lessons are summarised in
+> [`findings.md > The prior tree is gone`](findings.md).
+
 **Repo (implementation):** `/Users/bo/code/software-factory-dsh` — **this repository**, on a new branch (`feat/dark-factory-dsh`). The prior Path-A factory stays untouched in `stapled-factory/`.
 **Planning artifacts (this directory):** `/Users/bo/code/software-factory-dsh/docs/planning/dark-factory-dsh/`
 **Reference material:** `dark-software-factory-report.md`, `README.md`, `docs/planning/stapled-factory/`, `docs/verification/` (all in `/Users/bo/code/software-factory-dsh`)
