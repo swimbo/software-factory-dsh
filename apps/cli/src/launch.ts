@@ -290,7 +290,8 @@ export async function launchAttempt(
         'FACTORY_PROXY_BASE_URL and FACTORY_MODEL_ID must be set for a launch; no proxy means no worker',
     };
   }
-  if (ctx.executor.binPath === null)
+  // A container launch runs the *image's* `dsh`; only a host launch needs one on this machine.
+  if (ctx.executor.binPath === null && ctx.executor.isolation.container === null)
     return { ok: false, code: 'EXECUTOR_UNAVAILABLE', detail: 'no dsh binary' };
 
   const adapter = await import('@factory/dsh-adapter').catch(() => null);
@@ -338,6 +339,11 @@ export async function launchAttempt(
   try {
     const executor = adapter.createDshExecutor({
       dshBin: ctx.executor.binPath,
+      // Where the turn runs, decided by the probe before anything was reserved. `null` is a host
+      // child; a plan means the adapter wraps the turn in `docker run` and reaps it afterwards.
+      ...(ctx.executor.isolation.container === null
+        ? {}
+        : { container: ctx.executor.isolation.container }),
       factoryHome: ctx.home,
       proxyBaseUrl,
       modelId,

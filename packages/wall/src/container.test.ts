@@ -167,6 +167,22 @@ describe('the docker invocation is physical, not aspirational', () => {
     );
   });
 
+  it('names the container, so a client that dies before its cidfile leaves a findable orphan', () => {
+    // The cidfile is written by the client; a SIGKILLed client can die between the daemon
+    // creating the container and the id reaching disk. `--name` is set before the container
+    // starts and needs nothing from the client afterwards, so the kill path has a handle in
+    // exactly the window where the cidfile is missing. Both are present: neither replaces the other.
+    const args = dockerRunArgv(
+      { image: 'factory-env', name: 'factory-wall-suite-1-1', cidFile: '/tmp/cid-1' },
+      '/tmp/copy',
+      ['true'],
+    );
+    expect(args[args.indexOf('--name') + 1]).toBe('factory-wall-suite-1-1');
+    expect(args.indexOf('--name')).toBeLessThan(args.indexOf('--cidfile'));
+    // Absent when not asked for, and never an empty flag.
+    expect(dockerRunArgv({ image: 'factory-env' }, '/tmp/copy', ['true'])).not.toContain('--name');
+  });
+
   it('pins a locally built image by content id, because a tag is mutable', () => {
     // A local build has no registry manifest, so `name@sha256:…` cannot resolve; the content
     // id is the only honest pin available offline.

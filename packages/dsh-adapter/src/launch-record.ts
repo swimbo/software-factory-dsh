@@ -248,6 +248,36 @@ export function fingerprintEnv(
   };
 }
 
+/**
+ * What the worker ran *inside*, when it ran in a container — or `null` for a host child.
+ *
+ * `null` means **host process**, and nothing else: it is not "unknown". The field is optional so
+ * every record written before the container path existed still parses, and a reader that finds no
+ * `container` key is reading a record from before the launch could have been containerised.
+ *
+ * The `mountsDenied` list is the part that matters for E2E-33: a container claim is only worth
+ * something if it says which of the factory's own paths it was *not* given — the holdout corpus,
+ * the operator's keys, the host's home, the docker socket.
+ */
+export interface ContainerLaunchRecord {
+  /** The image reference as passed to `docker run`. */
+  readonly image: string;
+  /** `sha256:…` from the image's repo digest, when it has one. Never the layer diff-id. */
+  readonly imageDigest: string | null;
+  /** `uid:gid` the worker ran as inside the container. */
+  readonly user: string;
+  readonly network: 'none';
+  readonly readOnlyRoot: true;
+  readonly memoryLimit: string;
+  readonly pidsLimit: number;
+  /** Writable tmpfs mounts. Only `/tmp`, because the root is read-only. */
+  readonly tmpfs: readonly string[];
+  readonly mounts: readonly { readonly path: string; readonly mode: 'rw' | 'ro' }[];
+  /** Paths the container deliberately did not get. A claim about a boundary is a list of these. */
+  readonly mountsDenied: readonly string[];
+  readonly labels: Readonly<Record<string, string>>;
+}
+
 export interface LaunchRecord {
   readonly schema: 'launch/1';
   readonly recordedAt: string;
@@ -286,6 +316,13 @@ export interface LaunchRecord {
    * what the reader needs — this was not the gateway key, and it dies at `expiresAt`.
    */
   readonly credentialProxy: { readonly token: 'scoped'; readonly expiresAt: string } | null;
+  /**
+   * The container the worker ran inside, or `null` when it ran as a host child.
+   *
+   * Optional only for records written before this field existed; both executors write it
+   * explicitly, so "absent" is never produced by current code and `null` is never ambiguous.
+   */
+  readonly container?: ContainerLaunchRecord | null;
 }
 
 /** Write the launch record and return its path. Mode 0600: it names the worker's world. */

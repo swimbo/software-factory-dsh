@@ -13,6 +13,7 @@ import { FactoryError, WorkerReceipt, type WorkerReceiptType } from '@factory/co
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
+  attemptRecordDir,
   buildChildEnv,
   createDshExecutor,
   DEFAULT_MAX_OUTPUT_BYTES,
@@ -631,5 +632,21 @@ describe('the documented defaults', () => {
       modelId: MODEL,
     });
     expect(entryValue(overlay, 'workspaceRoot')).toBe(repo.attemptDir);
+  });
+});
+
+describe('a host launch says so, in the record', () => {
+  it('records `container: null` — a host child is a fact, not a missing measurement', async () => {
+    const { run, repo } = harness();
+    await run();
+    const recordPath = join(attemptRecordDir(repo.factoryHome, UNIT_ID, ATTEMPT_ID), 'launch.json');
+    const record = JSON.parse(readFileSync(recordPath, 'utf8')) as Record<string, unknown>;
+    // The key is present and null: a reader can tell "ran on the host" from "nobody said".
+    expect(Object.hasOwn(record, 'container')).toBe(true);
+    expect(record['container']).toBeNull();
+    // And the argv is the child's, not a docker wrapper's: no `docker` at the head.
+    const argv = record['argv'] as string[];
+    expect(argv[0]).toBe(fixturePath('fake-dsh-success.sh'));
+    expect(argv).not.toContain('run');
   });
 });

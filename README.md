@@ -148,24 +148,38 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   to that socket, that lease, one upstream path prefix, and revoked before the verdict is written
   (ADR-007). The launch record says `credentialsForwarded: []` and `credentialProxy: { token: 'scoped' }`.
   **What this does not buy:** a root-level attacker on the host, or a second OS uid — and the worker
-  is still a host process, so a candidate that escapes its sandbox is not fenced in. The wall's
-  _scenarios_ already run in that container (E2E-43/44/46); the _worker_ does not.
+  is a host process _unless_ `FACTORY_WORKER_ISOLATION=container` is set, in which case the turn runs
+  inside `factory-env` behind the flags in the next bullet (the worker is non-root there, uid 10001,
+  but it is not a second uid _on this host_). The wall's _scenarios_ and the _worker_ both have that
+  container now (E2E-43/44/46 and E2E-45).
 - **Spend is metered, not invoiced.** The proxy records what the gateway's response says
   (`tokensIn/out`, `costUsd` when the gateway prices it) into an append-only `usage_records` table and
   revokes the attempt token at the ceiling — but a response with no usage block is `unknown`, and
   `budget reconcile` against the gateway's export is best-effort: it reports `unknown` (exit 6) rather
   than guessing. There is no billing-grade accounting and no invoice.
-- **The wall's isolation layer is real and measured; the worker still has no container.** `@docker`
-  E2E-43/44/46 run on this host against `packages/wall/docker/` (base `node:26.12.1-alpine`, the
-  runtime `.nvmrc` pins) — six specs, ~5 s: the container reaches no network (control: the host
-  does), cannot write outside its work dir while it can write inside, cannot see a factory home,
-  holdout or operator key (control: the host can), and its cgroup memory and pid limits are the
-  flags the runner passed, with a 400-fork storm capped. What is **not** built is the _worker's_
-  container: `apps/cli/src/wall.ts` wires `createLocalRunner`, the executor launches `dsh` on the
-  host, and `docker/factory-env` builds (node 26.12.1, `dsh 0.2.1-rc.5`) but nothing dispatches into
-  it. So E2E-45 — kill the worker container mid-attempt ⇒ `ambiguous`, no redispatch — stays
-  `UNKNOWN`: there is no worker container to kill. The `ambiguous`/`recover` invariant itself is
-  proven at the process level (E2E-21/30/31/32).
+- **Both containers are real and measured; the worker's is opt-in.** `@docker` E2E-43/44/46 run on
+  this host against `packages/wall/docker/` (base `node:26.12.1-alpine`, the runtime `.nvmrc` pins) —
+  six specs, ~5 s: the container reaches no network (control: the host does), cannot write outside its
+  work dir while it can write inside, cannot see a factory home, holdout or operator key (control: the
+  host can), and its cgroup memory and pid limits are the flags the runner passed, with a 400-fork
+  storm capped. The _worker_ runs the same way when `FACTORY_WORKER_ISOLATION=container`: the turn
+  executes inside `factory-env` (node 26.12.1, `dsh 0.2.1-rc.5`) as uid 10001, with `--network none`,
+  `--read-only`, `--tmpfs /tmp`, an explicit memory and pid ceiling, the clone and its per-attempt
+  `DSH_HOME` bind-mounted, the attempt record mounted read-only, and the attempt's id as a label.
+  Proven from inside, not asserted from outside: the candidate's own process walks `../../..` to the
+  factory root and cannot open `<factoryHome>/holdout/corpus.txt` or
+  `<factoryHome>/keys/evaluator.key`, while the host reads both; `/home/factory` is not writable and
+  `/var/run/docker.sock` is absent. `launch.json` records the image (tag **and** digest), uid, network
+  mode, limits, labels and the paths it did _not_ get — `container: {…}`, where `null` means "host
+  process" and never "unknown". E2E-45 is real: `docker kill` the worker container mid-attempt ⇒
+  `ATTEMPT_AMBIGUOUS` (exit 4), no receipt, exactly one attempt, no redispatch, `recover` records it
+  `ambiguous` (it defers while the lease is still live — the same rule, not a retry) and no container
+  remains. What is **not** built: the mode is opt-in rather than the default; a request that cannot be
+  honoured refuses with exit 8 `CONTAINER_UNAVAILABLE` and the exact `docker build` line instead of
+  falling back to a host process; network isolation is pinned by the argv spec and not by a
+  container-side egress probe (the wall's E2E-43 covers egress, with a host control); and a control
+  plane that is `SIGKILL`ed can leave its container behind, because the sweep runs in the launcher
+  that died — that needs a `recover`-side sweep and is **not built**.
 - **DSH's sandbox is not a security boundary**, and is not treated as one anywhere.
 - **No ACP worker.** The adapter drives `dsh --profile headless` one-shot turns and reads NDJSON;
   the agent-client-protocol path is not implemented, so "one-shot **or** ACP workers" is delivered as

@@ -68,6 +68,16 @@ import {
   writeLaunchRecord,
 } from './launch-record.ts';
 import { buildOverlay } from './overlay.ts';
+import {
+  ATTEMPT_LABEL,
+  RUN_LABEL,
+  killContainer,
+  readContainerId,
+  reapAttemptContainers,
+  workerContainerArgv,
+  workerVersionArgv,
+  type WorkerContainerPlan,
+} from './worker-container.ts';
 
 // Re-exported for callers that import it from the executor (the public API predates the
 // launch-record module). The definition lives with the record now, because the allowlist and
@@ -174,8 +184,11 @@ export interface Executor {
 }
 
 export interface DshExecutorOptions {
-  /** Absolute path to the pinned `dsh` binary. */
-  dshBin: string;
+  /**
+   * Absolute path to the pinned `dsh` binary — the host one. `null` when the caller only ever
+   * launches in a container (`container` set), where the binary that runs is the image's.
+   */
+  dshBin: string | null;
   /** Factory root: the record, template home and per-attempt home all live here. */
   factoryHome: string;
   /** The credential proxy's Anthropic-compatible base URL. */
@@ -195,6 +208,15 @@ export interface DshExecutorOptions {
   profile?: string;
   /** Provider API shape for the overlay. Defaults to `'anthropic-messages'`. */
   modelApi?: 'anthropic-messages' | 'openai-completions';
+  /**
+   * Run the turn inside this container instead of as a host child.
+   *
+   * Absent or `null` means a host child, which is what every caller did before the container
+   * path existed. The CLI decides this from the environment and the docker probes
+   * (`chooseWorkerIsolation`) and passes the plan here; the adapter never consults the
+   * environment itself, so a library caller cannot be surprised by a container it did not ask for.
+   */
+  container?: WorkerContainerPlan | null;
 }
 
 /** A command the factory itself ran, captured for the receipt. */
@@ -231,8 +253,26 @@ export function attemptRecordDir(root: string, unitId: string, attemptId: string
   return join(root, 'attempts', unitId, attemptId);
 }
 
-/** Run one command to completion and capture everything the receipt needs. */
-async function captured(argv: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<Captured> {
+/**
+ * The last non-empty line of a stream.
+ *
+ * The container probe goes through the docker *client*, whose own chatter shares stdout with the
+ * command's. The version is the last line that is not blank; anything else means the probe failed
+ * for a reason the caller must see, not a version string to compare against the pin.
+ */
+function lastNonEmptyLine(text: string): string {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  return lines.length === 0 ? '' : (lines[lines.length - 1] ?? '');
+}
+
+/** Run one command to completion and capture everything the receipt needs. */ async function captured(
+  argv: string[],
+  cwd: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<Captured> {
   const started = performance.now();
   return await new Promise<Captured>((resolve, reject) => {
     const child = spawn(argv[0] ?? '', argv.slice(1), {
@@ -300,6 +340,9 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
   const parentEnv = options.parentEnv ?? process.env;
   const expectedVersion = options.expectedVersion ?? PINNED_DSH_VERSION;
   const profile = options.profile ?? DSH_PROFILE;
+  // Absent and `null` are the same fact here: a host child. Kept as one value so the two paths
+  // are a branch, not a search.
+  const container = options.container ?? null;
   // Probed once per executor: the binary cannot change underneath a running
   // control plane, and a probe per attempt would be a needless subprocess.
   let versionVerified = false;
@@ -310,6 +353,12 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
     async run(payload: LaunchPayload, ctx: LaunchContext): Promise<WorkerReceipt> {
       if (!Number.isInteger(ctx.attempt) || ctx.attempt < 0) {
         throw new FactoryError('INTERNAL', 'attempt ordinal must be a non-negative integer');
+      }
+      if (container === null && (dshBin === null || dshBin === '')) {
+        throw new FactoryError(
+          'EXECUTOR_UNAVAILABLE',
+          'no dsh binary is configured; a host launch needs one, and only a container launch may omit it',
+        );
       }
       const attemptDir = payload.attemptDir;
       // The clone must be usable from a single mount before anything else is spent
@@ -353,9 +402,20 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
 
       // Refuse to dispatch to an unverified harness, before the base revision is
       // read: a mismatched binary must leave no trace of an attempt.
+      //
+      // In container mode the probe runs *inside* the image: the binary whose version matters is
+      // the one the worker will execute, and a host probe would verify a different one.
       if (!versionVerified) {
-        const probe = await captured([dshBin, '--version'], attemptDir, env);
-        const actual = probe.stdout.trim();
+        const probeArgv =
+          container === null
+            ? [dshBin ?? '', '--version']
+            : workerVersionArgv({ ...container, runToken: ctx.effectId }, ['--version']);
+        const probe = await captured(
+          [...probeArgv],
+          container === null ? attemptDir : factoryHome,
+          container === null ? env : undefined,
+        );
+        const actual = container === null ? probe.stdout.trim() : lastNonEmptyLine(probe.stdout);
         if (probe.exitCode !== 0) {
           throw new FactoryError(
             'EXECUTOR_UNAVAILABLE',
@@ -399,7 +459,28 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
       const overlayPath = join(recordDir, 'dsh-overlay.yml');
       writeFileSync(overlayPath, overlay, { mode: 0o600 });
 
-      const argv = [dshBin, '--profile', profile, '--patch', overlayPath, '--json', prompt];
+      // The arguments `dsh` receives. In container mode the image's ENTRYPOINT is the binary, so
+      // the container's *command* is exactly this list; on the host the binary is the head.
+      const dshArgs = ['--profile', profile, '--patch', overlayPath, '--json', prompt];
+      const argv = container === null ? [dshBin ?? '', ...dshArgs] : dshArgs;
+      // The container runs the same argv, prefixed by `docker run` and the flags that are the
+      // isolation. `runToken` names this launch: the sweep after a kill cannot be per-process,
+      // because the process that would sweep may be the one that died.
+      const plan = container === null ? null : { ...container, runToken: ctx.effectId };
+      const cidFile = join(recordDir, 'container.cid');
+      const launchArgv =
+        plan === null
+          ? argv
+          : [
+              ...workerContainerArgv({
+                plan,
+                paths: { attemptDir, home, recordDir },
+                argv,
+                env,
+                attemptId: payload.attemptId,
+                cidFile,
+              }),
+            ];
       if (dropped.length > 0) {
         // Never the value, only the name: the log is not a place for secrets either.
         log.warn(
@@ -421,7 +502,10 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
         attemptId: payload.attemptId,
         // The prompt itself is not evidence about the boundary, and it can be large: the
         // record keeps its size, which is what distinguishes "no prompt" from "a prompt".
-        argv: [...argv.slice(0, -1), `<prompt ${String(Buffer.byteLength(prompt, 'utf8'))} bytes>`],
+        argv: [
+          ...launchArgv.slice(0, -1),
+          `<prompt ${String(Buffer.byteLength(prompt, 'utf8'))} bytes>`,
+        ],
         cwd: attemptDir,
         // The clone path is recorded twice on purpose: it must equal the container mount
         // target, and that equality is what makes session adoption work after a restart.
@@ -434,6 +518,35 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
         // The fact and the expiry, never the token: this file is evidence and gets copied.
         credentialProxy:
           credential === undefined ? null : { token: 'scoped', expiresAt: credential.expiresAt },
+        // `null` is a fact ("host child"), not a gap. Every record written by current code has
+        // this key; its absence only means the record predates the container path.
+        container:
+          plan === null
+            ? null
+            : {
+                image: plan.image,
+                imageDigest: plan.imageDigest,
+                user: plan.user,
+                network: 'none',
+                readOnlyRoot: true,
+                memoryLimit: plan.memoryLimit,
+                pidsLimit: plan.pidsLimit,
+                tmpfs: ['/tmp'],
+                mounts: [
+                  { path: attemptDir, mode: 'rw' },
+                  { path: home, mode: 'rw' },
+                  { path: recordDir, mode: 'ro' },
+                ],
+                // The paths this launch deliberately did not mount. A boundary nobody wrote
+                // down is a boundary nobody can check (E2E-33).
+                mountsDenied: [
+                  join(factoryHome, 'keys'),
+                  join(factoryHome, 'holdout'),
+                  parentEnv.HOME ?? '~/',
+                  '/var/run/docker.sock',
+                ],
+                labels: { [RUN_LABEL]: plan.runToken, [ATTEMPT_LABEL]: payload.attemptId },
+              },
       });
       // Read back rather than re-serialise: the receipt's artifact hash must describe the
       // bytes on disk, and two independent serialisations could drift apart silently.
@@ -446,11 +559,14 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
       let killedBy: WatchdogCeiling | null = null;
 
       const started = performance.now();
-      const child = spawn(argv[0] ?? '', argv.slice(1), {
+      const child = spawn(launchArgv[0] ?? '', launchArgv.slice(1), {
         // The checkout itself: sandbox root, mount target and cwd are one path, so
         // paths in output do not shift between host and container.
         cwd: attemptDir,
-        env,
+        // A container launch is `docker run`: the client's environment is the host's, and the
+        // worker's is the `-e` list. Passing the child allowlist here would hand the docker
+        // client a copy of variables it must not need.
+        ...(plan === null ? { env } : {}),
         stdio: ['ignore', 'pipe', 'pipe'],
         // Group leader, so a kill reaches grandchildren. See watchdog.ts.
         detached: process.platform !== 'win32',
@@ -463,8 +579,21 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
           killedBy = ceiling;
           log.warn(
             { ceiling, effectId: ctx.effectId, attemptId: payload.attemptId, pid: child.pid },
-            'ceiling tripped; killing the process group',
+            plan === null
+              ? 'ceiling tripped; killing the process group'
+              : 'ceiling tripped; killing the worker container',
           );
+          if (plan !== null) {
+            // Kill the container first and synchronously: killing the *client* would leave the
+            // container running with nothing left to reap it in this process.
+            const id = readContainerId(cidFile);
+            if (id !== null && !killContainer(plan, id)) {
+              log.error(
+                { attemptId: payload.attemptId, containerId: id },
+                'docker kill failed; the container may outlive the attempt',
+              );
+            }
+          }
           if (child.pid !== undefined) killProcessGroup(child.pid, 'SIGKILL');
         },
       });
@@ -495,9 +624,11 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
           child.once('error', (cause) => {
             watchdog.stop();
             reject(
-              new FactoryError('EXECUTOR_UNAVAILABLE', `cannot spawn ${dshBin}: ${cause.message}`, {
-                attemptDir,
-              }),
+              new FactoryError(
+                'EXECUTOR_UNAVAILABLE',
+                `cannot spawn ${launchArgv[0] ?? '(empty)'}: ${cause.message}`,
+                { attemptDir },
+              ),
             );
           });
           child.once('close', (code, signal) => {
@@ -506,12 +637,46 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
         },
       );
       watchdog.stop();
+      // The sweep runs before anything can throw: a container is a client's claim on a daemon,
+      // and the one exit path that leaves it behind is the one where this process stops early.
+      const reap = plan === null ? null : reapAttemptContainers(plan, payload.attemptId);
+      if (reap !== null && reap.remaining.length > 0) {
+        log.error(
+          { attemptId: payload.attemptId, remaining: [...reap.remaining] },
+          'containers for this attempt survived the reap; they are now a leak a person must clear',
+        );
+      }
       const wallClockUsedMs = Math.max(0, Math.round(performance.now() - started));
       for (const line of splitter.flush()) stdoutLines.push(line);
 
       const stdoutText = stdoutLines.length === 0 ? '' : `${stdoutLines.join('\n')}\n`;
       const parsed = parseHeadlessStream(stdoutLines);
 
+      if (plan !== null && !parsed.ok) {
+        // A container that ends without a completed turn is the case that must never read as a
+        // failure *of the work*: the turn ran, was cut off from outside (a `docker kill`, an OOM,
+        // a daemon restart), and nothing vouched for the outcome. Ambiguous, not failed — the
+        // same classification `recover` gives a host child whose process died mid-attempt.
+        // Write what was observed first: an ambiguity with no evidence is a rumour.
+        writeFileSync(join(recordDir, 'stdout.log'), stdoutText);
+        writeFileSync(join(recordDir, 'stderr.log'), stderrText);
+        writeFileSync(
+          join(recordDir, 'container-reap.json'),
+          `${JSON.stringify({ ...reap, cidFile }, null, 2)}\n`,
+        );
+        throw new FactoryError(
+          'ATTEMPT_AMBIGUOUS',
+          `attempt ${payload.attemptId} ran inside ${plan.image} and ended (exit ${String(exit.code)}` +
+            `${killedBy === null ? '' : `, ceiling ${killedBy}`}) without a \`turn_end\` reason "completed"; ` +
+            'the outcome was never observed, so it is ambiguous, not failed',
+          {
+            attemptId: payload.attemptId,
+            unitId: payload.unitId,
+            effectId: ctx.effectId,
+            exitCode: exit.code,
+          },
+        );
+      }
       // A degraded permission service is a silent failure mode, so it fails the
       // attempt loudly instead. This is the `did not activate` guard from the
       // integration probe: a two-entry overlay composes a sandbox/approval pair
@@ -541,6 +706,17 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
           kind: 'other',
         },
       ];
+      if (reap !== null) {
+        // What the sweep found and removed. Written as an artifact so the receipt's hash covers
+        // it: "zero leftovers" is a claim, and a claim nobody can check is not evidence.
+        artifacts.push(
+          writeArtifact(
+            join(recordDir, 'container-reap.json'),
+            `${JSON.stringify({ ...reap, cidFile }, null, 2)}\n`,
+            'other',
+          ),
+        );
+      }
       if (diff.ignoredPaths !== '') {
         // A write to a gitignored path is invisible to the diff and to the
         // untracked list (A3.5, verified: `git status --porcelain` hides `!!`).

@@ -224,3 +224,82 @@ describe('the live-model credential opt-in', () => {
     expect(JSON.stringify(print)).not.toContain('sk-live');
   });
 });
+
+/**
+ * The container field: what the worker ran inside, or `null` for a host child.
+ *
+ * `null` is the load-bearing half. A reader that cannot tell "host process" from "the container
+ * was not recorded" cannot audit an isolation claim at all, which is why `container: null` is
+ * written by code and the *absent* key exists only for records from before the container path.
+ */
+describe('the container field', () => {
+  const baseRecord = {
+    schema: 'launch/1' as const,
+    recordedAt: '2026-11-01T12:00:00.000Z',
+    effectId: 'EFF-1',
+    attempt: 0,
+    unitId: 'UNIT-1',
+    attemptId: 'A-0001',
+    argv: ['dsh', '--profile', 'factory-worker', '--json', '<prompt 6 bytes>'],
+    cwd: '/factory/attempts/UNIT-1/A-0001',
+    mountedAt: '/factory/attempts/UNIT-1/A-0001',
+    dshHome: '/factory/attempts/UNIT-1/A-0001/dsh-home',
+    profile: { requested: 'factory-worker', effective: 'factory-worker' },
+    overlay: { path: null, sha256: null },
+    env: { keys: ['NODE_ENV'], valueHashes: { NODE_ENV: 'sha256:abc' }, dropped: [] },
+    credentialsForwarded: [],
+    credentialProxy: null,
+  };
+
+  it('writes `container: null` for a host launch, and keeps schema launch/1', () => {
+    const path = writeLaunchRecord(dir, { ...baseRecord, container: null });
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    expect(parsed['schema']).toBe('launch/1');
+    // Present and null: the fact, spelled out. Not an omitted key.
+    expect(Object.hasOwn(parsed, 'container')).toBe(true);
+    expect(parsed['container']).toBeNull();
+  });
+
+  it('carries the image, uid, network, limits and the mounts it did NOT get', () => {
+    const mountDenied = ['/factory/keys', '/factory/holdout', '/Users/operator'];
+    const path = writeLaunchRecord(dir, {
+      ...baseRecord,
+      container: {
+        image: 'factory-env:rc5',
+        imageDigest: 'factory-env@sha256:0123456789abcdef',
+        user: '10001:10001',
+        network: 'none',
+        readOnlyRoot: true,
+        memoryLimit: '2g',
+        pidsLimit: 512,
+        tmpfs: ['/tmp'],
+        mounts: [
+          { path: '/factory/attempts/UNIT-1/A-0001', mode: 'rw' },
+          { path: '/factory/attempts/UNIT-1/A-0001/dsh-home', mode: 'rw' },
+          { path: '/factory/attempts/UNIT-1/A-0001/record', mode: 'ro' },
+        ],
+        mountsDenied: mountDenied,
+        labels: { 'org.factory.attempt': 'A-0001', 'org.factory.run': 'EFF-1' },
+      },
+    });
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      container: Record<string, unknown>;
+    };
+    expect(parsed.container['image']).toBe('factory-env:rc5');
+    expect(parsed.container['imageDigest']).toContain('sha256:');
+    expect(parsed.container['user']).toBe('10001:10001');
+    expect(parsed.container['network']).toBe('none');
+    expect(parsed.container['readOnlyRoot']).toBe(true);
+    expect(parsed.container['mountsDenied']).toStrictEqual(mountDenied);
+    const mounts = parsed.container['mounts'] as { path: string; mode: string }[];
+    expect(mounts.map((mount) => mount.mode)).toStrictEqual(['rw', 'rw', 'ro']);
+  });
+
+  it('leaves a record from before the field readable: the key is optional, not required', () => {
+    // The type must accept the old shape, and the written JSON must not invent a value for it.
+    const path = writeLaunchRecord(dir, baseRecord);
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    expect(Object.hasOwn(parsed, 'container')).toBe(false);
+    expect(parsed['schema']).toBe('launch/1');
+  });
+});

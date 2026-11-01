@@ -148,18 +148,35 @@ async function runProbe(
 }
 
 /** Containers still running for this suite's label. Should be empty after every spec. */
+/**
+ * Any container this suite left, by **either** handle, running or exited.
+ *
+ * The label was the only handle here once, and that was the bug the worker-container work found:
+ * the wall's timeout spec built its runner without a label, so the leaked container it left behind
+ * (image `node:22-alpine`, `Exited (137)`) matched nothing and outlived the suite. `-a` matters for
+ * the same reason — a container that exited seconds ago is still a container. `--name` is set on
+ * every wall run from the run counter, so it is a handle that exists from the moment the daemon
+ * creates the container, with or without a label and with or without a cidfile.
+ */
 function leftovers(): string[] {
-  const listed = spawnSync(
-    'docker',
-    ['ps', '--quiet', '--filter', `label=org.factory.run=${RUN_TOKEN}`],
-    {
+  const ids = new Set<string>();
+  for (const filter of [`label=org.factory.run=${RUN_TOKEN}`, 'name=factory-wall-']) {
+    const listed = spawnSync('docker', ['ps', '-aq', '--filter', filter], { encoding: 'utf8' });
+    for (const line of (listed.stdout ?? '').trim().split('\n')) {
+      if (line.length > 0) ids.add(line.trim());
+    }
+  }
+  return [...ids];
+}
+
+/** The name this suite's runs carry, so the leak check can name what it found. */
+function leftoverNames(ids: readonly string[]): string[] {
+  return ids.map((id) => {
+    const named = spawnSync('docker', ['inspect', '--format', '{{.Name}}', id], {
       encoding: 'utf8',
-    },
-  );
-  return (listed.stdout ?? '')
-    .trim()
-    .split('\n')
-    .filter((line) => line.length > 0);
+    });
+    return (named.stdout ?? '').trim();
+  });
 }
 
 const EGRESS_PROBE = `const net=require('net');const s=net.connect({host:'1.1.1.1',port:443});s.setTimeout(5000);
@@ -379,7 +396,10 @@ const tryOne=()=>new Promise((res)=>{const c=spawn('/bin/sleep',['10'],{stdio:'i
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
       remaining = leftovers();
     }
-    expect(remaining, 'no container from this suite may outlive its run').toEqual([]);
+    expect(
+      remaining,
+      `no container from this suite may outlive its run — found ${leftoverNames(remaining).join(', ')}`,
+    ).toEqual([]);
   }, 120_000);
 
   it('[@docker] the image under test is pinned by content, not by a mutable tag', async () => {

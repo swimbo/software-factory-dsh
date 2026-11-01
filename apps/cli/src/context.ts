@@ -127,6 +127,19 @@ export interface ExecutorProbe {
   readonly scenarioPath: string | null;
   readonly detail: string;
   readonly runbook: string;
+  /**
+   * Where the turn will run, and what it will run inside.
+   *
+   * `mode: 'host'` is the default and means a child of this process. `mode: 'container'` carries
+   * the plan the executor needs; it is `null` for a host launch, so a caller cannot accidentally
+   * pass a container plan it did not probe. The refusal case is `available: false` with the
+   * docker/image reason in `detail` — never a host launch.
+   */
+  readonly isolation: {
+    readonly mode: 'host' | 'container' | 'refused';
+    readonly reason: string;
+    readonly container: import('@factory/dsh-adapter').WorkerContainerPlan | null;
+  };
 }
 
 export interface WallProbe {
@@ -173,6 +186,24 @@ export function findOnPath(
   return null;
 }
 
+/**
+ * The adapter, required lazily.
+ *
+ * `context.ts` is the composition root and must import on a host with no adapter installed
+ * (`run` then refuses with a runbook line). A static import would turn that refusal into a stack
+ * trace at module load, so the one package the probe needs is required here, inside a try/catch,
+ * exactly like {@link moduleResolves}.
+ */
+function requireAdapter(): typeof import('@factory/dsh-adapter') | null {
+  try {
+    return createRequire(import.meta.url)(
+      '@factory/dsh-adapter',
+    ) as typeof import('@factory/dsh-adapter');
+  } catch {
+    return null;
+  }
+}
+
 function moduleResolves(specifier: string): boolean {
   try {
     createRequire(import.meta.url).resolve(specifier);
@@ -202,6 +233,11 @@ export function probeExecutor(
         detail: refusal,
         runbook:
           'runbook: unset NODE_ENV or FACTORY_EXECUTOR=fake; the real executor needs the pinned dsh',
+        isolation: {
+          mode: 'host',
+          reason: 'the scripted executor launches no process',
+          container: null,
+        },
       };
     }
     if (scenarioPath === null) {
@@ -213,6 +249,11 @@ export function probeExecutor(
         scenarioPath: null,
         detail: 'FACTORY_EXECUTOR=fake needs a scenario (--scenario <path> or FACTORY_SCENARIO)',
         runbook: 'runbook: pass --scenario <scenario.json> describing the worker the test needs',
+        isolation: {
+          mode: 'host',
+          reason: 'the scripted executor launches no process',
+          container: null,
+        },
       };
     }
     return {
@@ -223,21 +264,70 @@ export function probeExecutor(
       scenarioPath,
       detail: `fake executor, scenario ${scenarioPath} - no dsh process will be launched`,
       runbook: '',
+      isolation: {
+        mode: 'host',
+        reason: 'the scripted executor launches no process',
+        container: null,
+      },
     };
   }
   const moduleAvailable = options.moduleAvailable ?? moduleResolves('@factory/dsh-adapter');
+  // Where the turn will run. Consulted even for a host request, because an unrecognised value is a
+  // usage error and the operator has to learn about it before anything is reserved.
+  const adapter = moduleAvailable ? requireAdapter() : null;
+  const choice =
+    adapter === null ? null : adapter.decideWorkerIsolation({ env, platform: process.platform });
+
+  if (choice !== null && choice.mode === 'refuse') {
+    // A refusal is never a fallback. If `container` was asked for and docker, the image, or a flag
+    // is missing, the launch stops here with the reason and the command that fixes it — running a
+    // host child instead would make the isolation claim in the README false while every test
+    // stayed green.
+    return {
+      available: false,
+      kind: 'headless',
+      binPath,
+      moduleAvailable,
+      scenarioPath: null,
+      // The reason *and* the fix, in the one field `run` renders (`verbs/run.ts` turns `detail`
+      // into the refusal message and drops `runbook`, which is why the command is carried here
+      // too — the same shape `resolveMirror` uses for its refusals).
+      detail: `${choice.reason}. ${choice.runbook}`,
+      runbook: choice.runbook,
+      isolation: { mode: 'refused', reason: choice.reason, container: null },
+    };
+  }
+
+  const wantsContainer = choice !== null && choice.mode === 'container';
   const missing: string[] = [];
-  if (binPath === null) missing.push('no `dsh` binary on PATH (set DSH_BIN to override)');
-  if (!moduleAvailable) missing.push('the @factory/dsh-adapter package could not be resolved');
+  if (!moduleAvailable || adapter === null) {
+    missing.push('the @factory/dsh-adapter package could not be resolved');
+  }
+  // In container mode the binary that runs is the image's; only a host launch needs the host one.
+  if (!wantsContainer && binPath === null) {
+    missing.push('no `dsh` binary on PATH (set DSH_BIN to override)');
+  }
+  const container =
+    wantsContainer && choice !== null && choice.mode === 'container' ? choice.plan : null;
+  const reason = choice === null ? 'the worker runs as a child of this process' : choice.reason;
   return {
     available: missing.length === 0,
     kind: 'headless',
     binPath,
     moduleAvailable,
     scenarioPath: null,
-    detail: missing.length === 0 ? `dsh at ${String(binPath)}` : missing.join('; '),
+    detail:
+      missing.length === 0
+        ? container === null
+          ? `dsh at ${String(binPath)}`
+          : reason
+        : missing.join('; '),
     runbook:
       'runbook: install the pinned dsh (0.2.1-rc.5) and make it reachable on PATH, then re-run: factory run <unitId>',
+    isolation:
+      container === null
+        ? { mode: 'host', reason, container: null }
+        : { mode: 'container', reason, container },
   };
 }
 

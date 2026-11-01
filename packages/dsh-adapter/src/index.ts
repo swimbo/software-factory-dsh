@@ -72,6 +72,43 @@ export {
 export { assertSelfContainedClone, createAttemptClone, type CloneOptions } from './clone.ts';
 
 /**
+ * The worker's container: selection, the `docker run` argv, and the reaping.
+ *
+ * Exported so the CLI can make the decision (and print the refusal) before it opens a store or
+ * reserves anything — a refusal that arrives after a reservation is a refusal that cost a run.
+ */
+export {
+  ATTEMPT_LABEL,
+  BUILD_RUNBOOK,
+  DEFAULT_WORKER_IMAGE,
+  DEFAULT_WORKER_MEMORY,
+  DEFAULT_WORKER_PIDS,
+  DEFAULT_WORKER_USER,
+  DOCKER_BIN_ENV,
+  RUN_LABEL,
+  WORKER_IMAGE_ENV,
+  WORKER_ISOLATION_ENV,
+  WORKER_MEMORY_ENV,
+  WORKER_PIDS_ENV,
+  WORKER_USER_ENV,
+  chooseWorkerIsolation,
+  decideWorkerIsolation,
+  dockerBinOf,
+  killContainer,
+  probeDocker,
+  readContainerId,
+  reapAttemptContainers,
+  requestedIsolation,
+  workerContainerArgv,
+  workerImageOf,
+  workerVersionArgv,
+  type DockerProbe,
+  type IsolationChoice,
+  type WorkerContainerPaths,
+  type WorkerContainerPlan,
+} from './worker-container.ts';
+
+/**
  * **Test-only.** A scripted worker behind the same `Executor` interface, so the
  * `run → attempt → receipt → verdict → promotion` path can be driven offline with
  * no `dsh`, no container and no model key. Refused under `NODE_ENV=production` by

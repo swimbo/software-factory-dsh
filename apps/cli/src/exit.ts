@@ -118,6 +118,8 @@ const RUNBOOKS: Readonly<Record<string, string>> = {
     'runbook: docs/runbooks/ledger-anchor.md — either no target is configured (set FACTORY_ANCHOR_SSH + FACTORY_ANCHOR_PATH, or FACTORY_ANCHOR_DIR to accept a local anchor) or the host did not answer; the message above says which',
   EXECUTOR_UNAVAILABLE:
     'runbook: install the pinned dsh on PATH and start a docker daemon, then re-run: factory run <unitId>',
+  CONTAINER_UNAVAILABLE:
+    'runbook: build or pull the worker image and check the daemon — docker build --tag factory-env:rc5 docker/factory-env — then re-run; leaving container mode is an explicit choice (unset FACTORY_WORKER_ISOLATION), never an automatic fallback',
   DSH_VERSION_MISMATCH:
     'runbook: install dsh 0.2.1-rc.5 exactly — a version mismatch is refused, never warned about',
   STORE_QUARANTINED:
