@@ -178,3 +178,31 @@ describe('buildDshHome', () => {
     );
   });
 });
+
+describe('the provider API shape is configurable without moving the default', () => {
+  it('is byte-identical for a caller that does not ask', () => {
+    // The default is a promise to every existing overlay and every recorded hash: asking for
+    // nothing must produce exactly the bytes the adapter produced before this option existed.
+    expect(buildOverlay(INPUT)).toBe(buildOverlay({ ...INPUT, api: 'anthropic-messages' }));
+  });
+
+  it('switches only the provider line when the gateway speaks OpenAI completions', () => {
+    const anthropic = buildOverlay(INPUT).split('\n');
+    const openai = buildOverlay({ ...INPUT, api: 'openai-completions' }).split('\n');
+    expect(openai).toHaveLength(anthropic.length);
+
+    const differing = anthropic.filter((line, index) => line !== openai[index]);
+    expect(differing).toStrictEqual(['        api: anthropic-messages']);
+    expect(openai).toContain('        api: openai-completions');
+    // Authentication is still by env-var name: the gateway accepts `Authorization: Bearer`,
+    // so the overlay names the credential instead of carrying one.
+    expect(openai).toContain('        apiKeyEnv: BIFROST_API_KEY');
+    expect(openai.join('\n')).not.toMatch(/headers\s*:/u);
+  });
+
+  it('keeps the secret refusal for a value pasted into either shape', () => {
+    expect(() =>
+      assertNoSecrets('        api: openai-completions\n        apiKey: sk-live-12345678'),
+    ).toThrow(/credential field with a value|sk- prefixed/u);
+  });
+});

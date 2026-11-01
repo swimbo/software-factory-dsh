@@ -55,9 +55,13 @@ import { assertSelfContainedClone } from './clone.ts';
 import { attemptHomePath, destroyAttemptHome, readOutSession, seedAttemptHome } from './home.ts';
 import { createLineSplitter, parseHeadlessStream } from './ndjson.ts';
 import {
+  type CommandProvenance,
   buildChildEnv,
   effectiveProfile,
+  FACTORY_VERIFICATION_PROVENANCE,
+  WORKER_LAUNCH_PROVENANCE,
   fingerprintEnv,
+  forwardedCredentials,
   hashOverlay,
   writeLaunchRecord,
 } from './launch-record.ts';
@@ -171,6 +175,8 @@ export interface DshExecutorOptions {
   expectedVersion?: string;
   /** The provisioned profile to boot. Defaults to {@link DSH_PROFILE}. */
   profile?: string;
+  /** Provider API shape for the overlay. Defaults to `'anthropic-messages'`. */
+  modelApi?: 'anthropic-messages' | 'openai-completions';
 }
 
 /** A command the factory itself ran, captured for the receipt. */
@@ -239,7 +245,10 @@ async function captured(argv: string[], cwd: string, env?: NodeJS.ProcessEnv): P
   });
 }
 
-function toCommandRecord(c: Captured): CommandValue {
+function toCommandRecord(
+  c: Captured,
+  provenance: CommandProvenance,
+): CommandValue & CommandProvenance {
   return {
     // `argv` must have at least one non-empty element; an empty argv is a bug, and
     // a placeholder is more useful in a receipt than a schema failure.
@@ -249,6 +258,10 @@ function toCommandRecord(c: Captured): CommandValue {
     timedOut: false,
     outputSha: c.outputSha,
     durationMs: c.durationMs,
+    // Provenance is emitted even while the receipt contract is still being widened: the fields
+    // are stripped by `WorkerReceipt.safeParse` until `CommandRecord` carries them, and the same
+    // table is written into `launch.json` below so the wall can read it today.
+    ...provenance,
   };
 }
 
@@ -350,7 +363,12 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
         );
       }
 
-      const overlay = buildOverlay({ attemptDir, proxyBaseUrl, modelId });
+      const overlay = buildOverlay({
+        attemptDir,
+        proxyBaseUrl,
+        modelId,
+        ...(options.modelApi === undefined ? {} : { api: options.modelApi }),
+      });
       const overlayPath = join(recordDir, 'dsh-overlay.yml');
       writeFileSync(overlayPath, overlay, { mode: 0o600 });
 
@@ -385,6 +403,7 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
         profile: { requested: profile, effective: effectiveProfile(home) },
         overlay: { path: overlayPath, sha256: hashOverlay(overlay) },
         env: fingerprintEnv(env, dropped),
+        credentialsForwarded: forwardedCredentials(parentEnv),
       });
       // Read back rather than re-serialise: the receipt's artifact hash must describe the
       // bytes on disk, and two independent serialisations could drift apart silently.
@@ -523,18 +542,40 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
 
       // `commands[]` is FORENSIC ONLY. The wall owns the oracle and re-executes
       // its own commands (amendment A4.1); nothing here is an acceptance path.
-      const commands: CommandValue[] = [
-        toCommandRecord({
-          argv,
-          cwd: attemptDir,
-          exitCode: exit.code,
-          outputSha: `sha256:${sha256Hex(stdoutText + stderrText)}`,
-          durationMs: wallClockUsedMs,
-          stdout: stdoutText,
-          stderr: stderrText,
-        }),
+      const commands: (CommandValue & CommandProvenance)[] = [
+        toCommandRecord(
+          {
+            argv,
+            cwd: attemptDir,
+            exitCode: exit.code,
+            outputSha: `sha256:${sha256Hex(stdoutText + stderrText)}`,
+            durationMs: wallClockUsedMs,
+            stdout: stdoutText,
+            stderr: stderrText,
+          },
+          WORKER_LAUNCH_PROVENANCE,
+        ),
         ...diff.commands,
       ];
+      // The contract cannot carry provenance yet (the receipt schema strips unknown keys), so the
+      // table is also written as a sidecar: index-aligned with `receipt.commands`, same argv. The
+      // wall can consume either the widened contract field or this file; both say the same thing.
+      writeFileSync(
+        join(recordDir, 'command-provenance.json'),
+        `${JSON.stringify(
+          commands.map((command, index) => ({
+            index,
+            source: command.source,
+            replayable: command.replayable,
+            ...(command.replaySkipReason === undefined
+              ? {}
+              : { replaySkipReason: command.replaySkipReason }),
+          })),
+          null,
+          2,
+        )}\n`,
+        { mode: 0o600 },
+      );
 
       const narrative =
         parsed.finalText === null ? null : parsed.finalText.slice(0, MAX_NARRATIVE_CHARS);
@@ -642,30 +683,34 @@ async function captureDiff(
   attemptDir: string,
   baseRev: string,
   log: LogSink,
-): Promise<{ record: DiffValue; commands: CommandValue[]; ignoredPaths: string }> {
-  const commands: CommandValue[] = [];
+): Promise<{
+  record: DiffValue;
+  commands: (CommandValue & CommandProvenance)[];
+  ignoredPaths: string;
+}> {
+  const commands: (CommandValue & CommandProvenance)[] = [];
   const indexPath = join(recordDir, 'patch.index');
   const indexEnv: NodeJS.ProcessEnv = { ...process.env, GIT_INDEX_FILE: indexPath };
 
   const readTree = await captured(['git', 'read-tree', baseRev], attemptDir, indexEnv);
-  commands.push(toCommandRecord(readTree));
+  commands.push(toCommandRecord(readTree, FACTORY_VERIFICATION_PROVENANCE));
   let diffText: string;
   let numstatText: string;
   if (readTree.exitCode === 0) {
     const add = await captured(['git', 'add', '--all', '--', '.'], attemptDir, indexEnv);
-    commands.push(toCommandRecord(add));
+    commands.push(toCommandRecord(add, FACTORY_VERIFICATION_PROVENANCE));
     const diff = await captured(
       ['git', 'diff', '--binary', '--cached', '--no-color', baseRev],
       attemptDir,
       indexEnv,
     );
-    commands.push(toCommandRecord(diff));
+    commands.push(toCommandRecord(diff, FACTORY_VERIFICATION_PROVENANCE));
     const numstat = await captured(
       ['git', 'diff', '--numstat', '--cached', '--no-color', baseRev],
       attemptDir,
       indexEnv,
     );
-    commands.push(toCommandRecord(numstat));
+    commands.push(toCommandRecord(numstat, FACTORY_VERIFICATION_PROVENANCE));
     diffText = diff.stdout;
     numstatText = numstat.stdout;
     if (add.exitCode !== 0 || diff.exitCode !== 0) {
@@ -683,9 +728,9 @@ async function captureDiff(
       'temp index unavailable; falling back to a tracked-only diff',
     );
     const diff = await captured(['git', 'diff', '--binary', '--no-color', baseRev], attemptDir);
-    commands.push(toCommandRecord(diff));
+    commands.push(toCommandRecord(diff, FACTORY_VERIFICATION_PROVENANCE));
     const numstat = await captured(['git', 'diff', '--numstat', '--no-color', baseRev], attemptDir);
-    commands.push(toCommandRecord(numstat));
+    commands.push(toCommandRecord(numstat, FACTORY_VERIFICATION_PROVENANCE));
     diffText = diff.stdout;
     numstatText = numstat.stdout;
   }
@@ -697,19 +742,19 @@ async function captureDiff(
     ['git', 'status', '--porcelain=v1', '--untracked-files=all'],
     attemptDir,
   );
-  commands.push(toCommandRecord(statusPlain));
+  commands.push(toCommandRecord(statusPlain, FACTORY_VERIFICATION_PROVENANCE));
 
   // A3.5: ignored paths are invisible to both the diff and `status --porcelain`.
   const status = await captured(
     ['git', 'status', '--porcelain=v1', '--ignored=matching'],
     attemptDir,
   );
-  commands.push(toCommandRecord(status));
+  commands.push(toCommandRecord(status, FACTORY_VERIFICATION_PROVENANCE));
   const ignoredList = await captured(
     ['git', 'ls-files', '--others', '--ignored', '--exclude-standard'],
     attemptDir,
   );
-  commands.push(toCommandRecord(ignoredList));
+  commands.push(toCommandRecord(ignoredList, FACTORY_VERIFICATION_PROVENANCE));
   const ignoredPaths = ignoredList.stdout
     .split('\n')
     .map((line) => line.trim())

@@ -54,7 +54,12 @@
  * receipt that merely looks like success. `unknown` is not `failed`, and it is
  * certainly not `pass`.
  */
-import { buildChildEnv, fingerprintEnv, writeLaunchRecord } from './launch-record.ts';
+import {
+  buildChildEnv,
+  fingerprintEnv,
+  forwardedCredentials,
+  writeLaunchRecord,
+} from './launch-record.ts';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -311,6 +316,9 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
         // The marker the fake adds is recorded too: the worker must be able to tell it is
         // scripted, and the record must not describe an environment that never existed.
         env: fingerprintEnv({ ...childEnv, FACTORY_FAKE_WORKER: '1' }, dropped),
+        // The scripted worker spends nothing, so it forwards nothing: the flag is a
+        // permission, not an instruction, and recording it here would overstate the run.
+        credentialsForwarded: forwardedCredentials(process.env),
       });
 
       const events: string[] = [];

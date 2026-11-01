@@ -46,6 +46,34 @@ export const CREDENTIAL_NAME = /(?:API_?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENT
  * variable somebody adds next week: anything shaped like a path or a control handle is
  * dropped, including `FACTORY_TEST_ROOT`, `FACTORY_PRISTINE_REPO` and `FACTORY_HOME`.
  */
+/**
+ * The one documented opt-in for a credential in the worker environment.
+ *
+ * v1 has no credential proxy: the gateway key must reach `dsh` itself, so a live run needs
+ * exactly one credential name forwarded to the child — `BIFROST_API_KEY` — and nothing else.
+ * The flag is the operator saying "this run may spend money"; without it the allowlist is
+ * unchanged and a live run cannot authenticate, which is the offline-safe default.
+ */
+export const LIVE_MODEL_FLAG = 'FACTORY_LIVE_MODEL';
+export const LIVE_MODEL_CREDENTIAL = 'BIFROST_API_KEY';
+
+/** Whether the operator opted this process into a live, billable model call. */
+export function liveModelEnabled(parentEnv: NodeJS.ProcessEnv): boolean {
+  return (parentEnv[LIVE_MODEL_FLAG] ?? '').trim() === '1';
+}
+
+/**
+ * The credential names forwarded to the child: the named key under the flag, nothing else.
+ *
+ * Returns names so the launch record can say *that* a credential was forwarded without the
+ * value ever reaching the record, a log, or a diff.
+ */
+export function forwardedCredentials(parentEnv: NodeJS.ProcessEnv): readonly string[] {
+  if (!liveModelEnabled(parentEnv)) return [];
+  const value = parentEnv[LIVE_MODEL_CREDENTIAL];
+  return value === undefined || value === '' ? [] : [LIVE_MODEL_CREDENTIAL];
+}
+
 export const PATH_LIKE_NAME =
   /(?:HOLDOUT|PRISTINE|MIRROR|OPERATOR|SIGNING|_HOME|_ROOT|_DIR|_PATH|_FILE|_PID|SCENARIO)/i;
 
@@ -75,8 +103,15 @@ export function buildChildEnv(
     DSH_TELEMETRY_DISABLED: '1',
     PATH: parentEnv['PATH'] ?? '/usr/local/bin:/usr/bin:/bin',
   };
+  const liveCredential = forwardedCredentials(parentEnv);
   for (const [name, value] of Object.entries(parentEnv)) {
     if (value === undefined) continue;
+    if (liveCredential.includes(name)) {
+      // The single documented exception, and it is never silent: the record says which name
+      // was forwarded (`credentialsForwarded`), never the value.
+      env[name] = value;
+      continue;
+    }
     if (!name.startsWith('FACTORY_')) continue;
     if (forbiddenForWorker(name)) {
       onDropped?.(name);
@@ -91,6 +126,47 @@ export function buildChildEnv(
 export function hashEnvValue(value: string): string {
   return `sha256:${createHash('sha256').update(value, 'utf8').digest('hex')}`;
 }
+
+/**
+ * Where a recorded command came from — and therefore what kind of claim it is.
+ *
+ * "The worker launched" and "the factory measured the tree" are not the same claim, and a
+ * receipt that lists them together invites a reader to replay both. Provenance travels with the
+ * command so the wall can replay the subset that is replayable and say, in the verdict, which
+ * commands it did not re-execute. Set at the recording site; never defaulted to `true`.
+ */
+export type CommandSource = 'worker-launch' | 'worker-command' | 'factory-verification';
+
+export interface CommandProvenance {
+  readonly source: CommandSource;
+  readonly replayable: boolean;
+  /** Required when `replayable` is false: a refusal without a reason is a shrug. */
+  readonly replaySkipReason?: string;
+}
+
+/** The launch itself: not a claim about the world, and replaying it would re-spend money. */
+export const WORKER_LAUNCH_PROVENANCE: CommandProvenance = {
+  source: 'worker-launch',
+  replayable: false,
+  replaySkipReason:
+    'the worker launch is the thing under test: replaying it starts another worker (a paid ' +
+    'model call in a live run) and cannot reproduce its output by construction',
+};
+
+/**
+ * The factory's own post-attempt git reads.
+ *
+ * `git diff --cached` is read-only in intent but not in fact: its output depends on the
+ * `GIT_INDEX_FILE` the attempt staged into, so a replay that does not first reconstruct that
+ * index measures a different tree. Not replayable until the wall rebuilds the index.
+ */
+export const FACTORY_VERIFICATION_PROVENANCE: CommandProvenance = {
+  source: 'factory-verification',
+  replayable: false,
+  replaySkipReason:
+    'index-state dependent: the output depends on the staged tree in the attempt GIT_INDEX_FILE, ' +
+    'so a replay that does not first reconstruct that index measures a different tree',
+};
 
 export interface EnvFingerprint {
   /** Names the child was given, sorted. Never a value. */
@@ -149,6 +225,11 @@ export interface LaunchRecord {
   /** The composed overlay: the file on disk and the hash of the bytes that were written. */
   readonly overlay: { readonly path: string | null; readonly sha256: string | null };
   readonly env: EnvFingerprint;
+  /**
+   * Credential variable *names* the child was given. Empty unless the operator set
+   * `FACTORY_LIVE_MODEL=1`; a name here is a fact an auditor may want and a value never is.
+   */
+  readonly credentialsForwarded: readonly string[];
 }
 
 /** Write the launch record and return its path. Mode 0600: it names the worker's world. */

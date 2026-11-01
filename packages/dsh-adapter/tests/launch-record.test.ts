@@ -19,6 +19,8 @@ import {
   CREDENTIAL_NAME,
   buildChildEnv,
   effectiveProfile,
+  forwardedCredentials,
+  liveModelEnabled,
   fingerprintEnv,
   forbiddenForWorker,
   hashEnvValue,
@@ -125,6 +127,7 @@ describe('the composed overlay identity', () => {
       profile: { requested: 'factory-attempt', effective: 'factory-attempt' },
       overlay: { path: overlayPath, sha256: sha },
       env: fingerprintEnv({ PATH: '/usr/bin' }),
+      credentialsForwarded: [],
     });
 
     const written = JSON.parse(readFileSync(path, 'utf8')) as {
@@ -151,5 +154,47 @@ describe('the effective profile is read back, not assumed', () => {
 
     // A home that was never seeded is also unknown, and never the requested value.
     expect(effectiveProfile(join(dir, 'absent'))).toBeNull();
+  });
+});
+
+describe('the live-model credential opt-in', () => {
+  it('forwards nothing by default, and refuses the key like any other credential', () => {
+    const dropped: string[] = [];
+    const env = buildChildEnv('/h', { PATH: '/usr/bin', BIFROST_API_KEY: 'sk-live' }, (name) =>
+      dropped.push(name),
+    );
+    expect(env['BIFROST_API_KEY']).toBeUndefined();
+    // Not a `FACTORY_` name, so it was never a candidate: the allowlist copies nothing, which
+    // is why the drop callback stays empty and the key cannot be "re-added" by accident.
+    expect(dropped).toStrictEqual([]);
+    expect(forwardedCredentials({ BIFROST_API_KEY: 'sk-live' })).toStrictEqual([]);
+    expect(liveModelEnabled({ FACTORY_LIVE_MODEL: '1' })).toBe(true);
+    expect(liveModelEnabled({ FACTORY_LIVE_MODEL: 'true' })).toBe(false);
+  });
+
+  it('forwards exactly one name under FACTORY_LIVE_MODEL=1 and never a second', () => {
+    const env = buildChildEnv('/h', {
+      PATH: '/usr/bin',
+      BIFROST_API_KEY: 'sk-live',
+      DEEPSEEK_API_KEY: 'sk-deepseek',
+      OPENAI_API_KEY: 'sk-openai',
+      FACTORY_LIVE_MODEL: '1',
+    });
+    // The one documented exception, by name; nothing else rides along with it.
+    expect(env['BIFROST_API_KEY']).toBe('sk-live');
+    expect(env['DEEPSEEK_API_KEY']).toBeUndefined();
+    expect(env['OPENAI_API_KEY']).toBeUndefined();
+    expect(
+      forwardedCredentials({ FACTORY_LIVE_MODEL: '1', BIFROST_API_KEY: 'sk-live' }),
+    ).toStrictEqual(['BIFROST_API_KEY']);
+  });
+
+  it('records the forwarded name and never the value', () => {
+    const print = fingerprintEnv({ PATH: '/usr/bin', BIFROST_API_KEY: 'sk-live' });
+    // The fingerprint is about the child environment: a forwarded credential is still
+    // credential-shaped, so it stays out of the record's key list entirely.
+    expect(print.keys).toStrictEqual(['PATH']);
+    expect(JSON.stringify(print)).not.toContain('BIFROST_API_KEY');
+    expect(JSON.stringify(print)).not.toContain('sk-live');
   });
 });

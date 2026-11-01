@@ -7,7 +7,8 @@
  * how to settle it afterwards — is the caller's business.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { FactoryError, type ErrorCode } from '@factory/contracts';
 
@@ -76,6 +77,85 @@ export async function cloneAttempt(
   }
 }
 
+/**
+ * The prompt the worker is given, rendered from the unit's spec and written as `task.md`.
+ *
+ * The adapter refuses to launch without it — "the caller must prepare the prompt" — and this is
+ * the caller: the prompt is a function of the spec the operator minted, not of anything the
+ * worker said, so it can be re-rendered byte for byte on a retry. The text carries acceptance
+ * oracles as commands to run, because an oracle a worker cannot run is not checkable.
+ */
+function renderPrompt(spec: {
+  readonly slug: string;
+  readonly revision: number;
+  readonly intent: string;
+  readonly acceptance: readonly {
+    readonly id: string;
+    readonly text: string;
+    readonly oracle: { readonly kind: string; readonly target: string; readonly expect: string };
+  }[];
+  readonly touchPaths: readonly string[];
+  readonly sizeBudget: { readonly files: number; readonly lines: number };
+}): string {
+  const lines: string[] = [
+    `# ${spec.slug} (revision ${String(spec.revision)})`,
+    '',
+    '## Intent',
+    '',
+    spec.intent,
+    '',
+    '## Acceptance criteria — each one must hold when this attempt ends',
+    '',
+  ];
+  for (const criterion of spec.acceptance) {
+    lines.push(`- ${criterion.id}: ${criterion.text}`);
+    lines.push(`  - oracle (${criterion.oracle.kind}): ${criterion.oracle.target}`);
+    lines.push(`  - expected: ${criterion.oracle.expect}`);
+  }
+  lines.push('', '## Touch paths', '');
+  for (const path of spec.touchPaths) lines.push(`- ${path}`);
+  lines.push(
+    '',
+    '## Limits',
+    '',
+    `- at most ${String(spec.sizeBudget.files)} files and ${String(spec.sizeBudget.lines)} changed lines`,
+    '',
+    '## Rules',
+    '',
+    '- Work only inside the current working directory; it is the whole of your world.',
+    '- Change the touch paths above; do not edit anything else unless an acceptance criterion',
+    '  cannot be met otherwise.',
+    '- Run the acceptance oracles exactly as written before you finish.',
+    '- Commit nothing, push nothing, and never read or write outside this directory.',
+    '',
+  );
+  return lines.join('\n');
+}
+
+/**
+ * Write `task.md` into the attempt record directory, unless it is already there.
+ *
+ * Idempotent on purpose: a retry re-renders the same text from the same spec, and rewriting a
+ * file the run already read would make the prompt differ from the record for no reason.
+ */
+async function ensureTaskPrompt(ctx: VerbInput['ctx'], launch: LaunchPayloadLike): Promise<void> {
+  const adapter = await import('@factory/dsh-adapter').catch(() => null);
+  if (adapter === null) return;
+  const recordDir = adapter.attemptRecordDir(ctx.home, launch.unitId, launch.attemptId);
+  const taskPath = join(recordDir, adapter.TASK_FILE);
+  if (existsSync(taskPath)) return;
+  const unit = ctx.store.getUnit(launch.unitId);
+  if (unit === null) return;
+  mkdirSync(recordDir, { recursive: true });
+  writeFileSync(taskPath, renderPrompt(unit.spec), { mode: 0o600 });
+}
+
+/** The two provider API shapes the overlay knows, validated rather than cast. */
+function modelApiOf(value: string): 'anthropic-messages' | 'openai-completions' | undefined {
+  if (value === 'anthropic-messages' || value === 'openai-completions') return value;
+  return undefined;
+}
+
 export type LaunchOutcome =
   | { readonly ok: true; readonly receipt: unknown }
   | { readonly ok: false; readonly code: ErrorCode; readonly detail: string };
@@ -93,6 +173,9 @@ export async function launchAttempt(
   baseRev: string,
 ): Promise<LaunchOutcome> {
   const launch = payload as LaunchPayloadLike;
+  // The prompt comes from the spec, not from the transport: both executors see the same text,
+  // so a scripted run and a live run cannot drift on what the worker was asked to do.
+  await ensureTaskPrompt(ctx, launch);
   if (ctx.executor.kind === 'fake' && ctx.executor.scenarioPath !== null) {
     // Test-only, and bannered before it does anything (`--scenario` on `run`).
     ctx.ui.err('executor: FAKE (no DSH process launched)');
@@ -156,12 +239,15 @@ export async function launchAttempt(
       detail: 'the @factory/dsh-adapter package could not be imported',
     };
 
+  const modelApi = modelApiOf((ctx.env.FACTORY_MODEL_API ?? '').trim());
   try {
     const executor = adapter.createDshExecutor({
       dshBin: ctx.executor.binPath,
       factoryHome: ctx.home,
       proxyBaseUrl,
       modelId,
+      // Absent means the default shape the overlay has always produced.
+      ...(modelApi === undefined ? {} : { modelApi }),
       log: {
         info: (fields: Record<string, unknown>, message?: string) =>
           ctx.ui.err(message ?? JSON.stringify(fields)),
