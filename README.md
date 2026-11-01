@@ -126,8 +126,9 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   `FRESH · off-host` against `hermes-control`). Still not built: **alerting on a stale anchor** —
   `ledger verify` exits 9, but nothing pages anyone — and **re-certification**, which is being turned
   from prose into a stored certificate now.
-  ND3's ceiling is proven at the socket, not through the real executor (no paid e2e spec), and ND2's
-  two-uid path is proven in a `node:26-bookworm` container rather than on the Linux target itself.
+  ND3's ceiling is proven **through the real executor** (a paid `@live` spec arms it and crosses it on
+  one turn, ~1 cent, with the crossing recorded in `usage_records`), and ND2's two-uid path is proven
+  in a `node:26-bookworm` container rather than on the Linux target itself.
 - **The two-uid topology has not run on the Linux target**, only in a `node:26-bookworm` container:
   that proof covers the accounts, the modes, the marker and the worker's `EACCES` on store, corpus
   and key. It does not cover systemd, a real `/var/lib/factory`, or an operator key that already
