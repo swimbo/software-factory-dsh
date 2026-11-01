@@ -59,10 +59,13 @@ const READS: readonly (readonly string[])[] = [
   ['git', 'read-tree'],
   ['git', 'add', '--all', '--', '.'],
   ['git', 'diff', '--binary', '--cached'],
-  ['git', 'diff', '--numstat'],
-  ['git', 'status', '--porcelain'],
-  ['git', 'diff', '--cached', '--name-only'],
-  ['git', 'ls-files', '-s'],
+  ['git', 'diff', '--numstat', '--cached'],
+  // The two forms the live attempt caught: they report working-directory state (untracked,
+  // ignored) that a commit cannot reconstruct, so they are unreplayable-with-reason.
+  ['git', 'status', '--porcelain=v1', '--untracked-files=all'],
+  ['git', 'status', '--porcelain=v1', '--ignored=matching'],
+  // This one answers the ignored-file question from the index, so it *is* reconstructable.
+  ['git', 'ls-files', '--others', '--ignored'],
 ];
 
 let repo = '';
@@ -149,7 +152,8 @@ function recordCommands(options: { readonly tamperNumstat?: boolean } = {}): Com
     const argv =
       read[0] === 'git' && read[1] === 'read-tree' ? ['git', 'read-tree', baseRev] : read;
     const captured = capture(repo, argv);
-    const tampered = options.tamperNumstat === true && argv.join(' ') === 'git diff --numstat';
+    const tampered =
+      options.tamperNumstat === true && argv.join(' ') === 'git diff --numstat --cached';
     commands.push({
       argv: [...argv],
       cwd: 'worktree',
@@ -215,7 +219,7 @@ function policy() {
 describe.skipIf(spawnSync('git', ['--version']).status !== 0)(
   'real git: the recorded reads reproduce because the wall rebuilds the index from the base',
   () => {
-    it('reproduces every one of the seven reads in a checkout whose index was reset to base', async () => {
+    it('reproduces every reconstructable read in a checkout whose index was reset to base', async () => {
       const commands = recordCommands();
       const runner: ScenarioRunner = createLocalRunner({ cwd: repo });
 
@@ -230,8 +234,12 @@ describe.skipIf(spawnSync('git', ['--version']).status !== 0)(
       });
 
       const scope = verdict.scenarios.find((scenario) => scenario.id === 'faithfulness:scope');
-      expect(scope?.observed).toContain('replayed 7 of 8 recorded commands');
+      // The live receipt's arithmetic: five reconstructable reads out of eight commands, and
+      // the two status forms reported rather than diverging.
+      expect(scope?.observed).toContain('replayed 5 of 8 recorded commands');
       expect(scope?.observed).toContain('0 mismatched');
+      expect(scope?.observed).toContain('untracked entries from the working directory');
+      expect(scope?.outcome).toBe('pass');
       // Nothing diverged: the reconstruction, not the receipt, made the reads reproducible.
       expect(verdict.reasons).not.toContain('receipt_unfaithful');
       const replayed = verdict.scenarios.filter((scenario) =>
@@ -240,7 +248,7 @@ describe.skipIf(spawnSync('git', ['--version']).status !== 0)(
       expect(replayed.filter((scenario) => scenario.outcome === 'fail')).toHaveLength(0);
     }, 60_000);
 
-    it('catches one tampered read while the other six still reproduce', async () => {
+    it('catches one tampered read while the other four still reproduce', async () => {
       const commands = recordCommands({ tamperNumstat: true });
       const runner: ScenarioRunner = createLocalRunner({ cwd: repo });
 
@@ -259,8 +267,13 @@ describe.skipIf(spawnSync('git', ['--version']).status !== 0)(
       const diverged = verdict.scenarios.filter((scenario) => scenario.outcome === 'fail');
       // Exactly one read diverged — the tampered one — so the check is measuring, not failing
       // wholesale because the reconstruction is wrong.
-      expect(diverged).toHaveLength(1);
-      expect(diverged[0]?.id).toBe('faithfulness:05');
+      // One replayed read diverged; the scope row agrees with its own sentence by failing too
+      // (it is not a "green row that reads like a warning").
+      const readRows = diverged.filter((scenario) => scenario.id !== 'faithfulness:scope');
+      expect(readRows).toHaveLength(1);
+      expect(readRows[0]?.id).toBe('faithfulness:05');
+      const scope = verdict.scenarios.find((scenario) => scenario.id === 'faithfulness:scope');
+      expect(scope?.outcome, 'a row that counts a divergence is a failure').toBe('fail');
     }, 60_000);
 
     it('the replay script a read is given starts from the receipt base, not from the checkout', () => {

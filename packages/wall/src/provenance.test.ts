@@ -50,9 +50,10 @@ const LAUNCH_ARGV = ['dsh', 'run', '--attempt', 'attempt-1', '--live'];
 const READ_TREE_ARGV = ['git', 'read-tree', BASE_REV];
 const ADD_ARGV = ['git', 'add', '--all', '--', '.'];
 const DIFF_BINARY_ARGV = ['git', 'diff', '--binary', '--cached'];
-const DIFF_NUMSTAT_ARGV = ['git', 'diff', '--numstat'];
-const STATUS_ARGV = ['git', 'status', '--porcelain'];
-const NAME_ONLY_ARGV = ['git', 'diff', '--cached', '--name-only'];
+const DIFF_NUMSTAT_ARGV = ['git', 'diff', '--numstat', '--cached'];
+const STATUS_UNTRACKED_ARGV = ['git', 'status', '--porcelain=v1', '--untracked-files=all'];
+const STATUS_IGNORED_ARGV = ['git', 'status', '--porcelain=v1', '--ignored=matching'];
+const LS_FILES_IGNORED_ARGV = ['git', 'ls-files', '--others', '--ignored'];
 
 interface Outcome {
   readonly exitCode: number | null;
@@ -231,12 +232,18 @@ const LAUNCH = command(LAUNCH_ARGV, {
 });
 
 /**
- * The real receipt's eight commands, in recorded order: launch, then the factory's own
- * reconstruction (`read-tree`, `add`) and five reads. The reads are marked `replayable: true`
- * because they are deterministic given (base commit, staged tree) — the wall rebuilds that
- * tree, so the flag is honest rather than optimistic.
+ * The live attempt's own eight commands, in recorded order (`U-20be8c159df8 / A-e507950c0625`):
+ * the launch, the factory's reconstruction (`read-tree`, `add`), three diff reads that are
+ * functions of (base, staged tree), and two `git status` forms that are not — they report
+ * untracked and ignored entries from the working directory, which no commit can reconstruct.
+ *
+ * All seven are marked `replayable: true` by the recorder, and that is the point: the wall
+ * decides the class itself, so a recorder that is too optimistic (or too pessimistic) cannot
+ * move the gate. Five reproduce; the two status forms are reported as not-replayed-with-reason.
  */
-function realReceiptCommands(over: { readonly tamperNumstat?: boolean } = {}): CommandRecord[] {
+function realReceiptCommands(
+  over: { readonly tamperNumstat?: boolean; readonly tamperBoth?: boolean } = {},
+): CommandRecord[] {
   const verification = (argv: readonly string[], outcome: Outcome = PASS): CommandRecord =>
     command(argv, { source: 'factory-verification', replayable: true }, outcome);
   return [
@@ -246,11 +253,16 @@ function realReceiptCommands(over: { readonly tamperNumstat?: boolean } = {}): C
     verification(DIFF_BINARY_ARGV),
     verification(
       DIFF_NUMSTAT_ARGV,
-      over.tamperNumstat === true ? { exitCode: 0, outputSha: FAIL_SHA } : PASS,
+      over.tamperNumstat === true || over.tamperBoth === true
+        ? { exitCode: 0, outputSha: FAIL_SHA }
+        : PASS,
     ),
-    verification(STATUS_ARGV),
-    verification(NAME_ONLY_ARGV),
-    verification(['git', 'ls-files', '-s']),
+    verification(STATUS_UNTRACKED_ARGV),
+    verification(STATUS_IGNORED_ARGV),
+    verification(
+      LS_FILES_IGNORED_ARGV,
+      over.tamperBoth === true ? { exitCode: 0, outputSha: FAIL_SHA } : PASS,
+    ),
   ];
 }
 
@@ -273,30 +285,46 @@ const scopeOf = (verdict: { scenarios: { id: string; observed: string | null }[]
   verdict.scenarios.find((scenario) => scenario.id === 'faithfulness:scope')?.observed ?? '';
 
 describe('the wall replays what it can reconstruct, and says what it could not', () => {
-  it('replays 7 of the 8 real-receipt commands from the same base, with zero mismatches', async () => {
+  it('replays 5 of the 8 live-receipt commands and reports the two status forms as not replayed', async () => {
+    // The exact shape the paid attempt produced. Five reads are functions of (base, staged
+    // tree): read-tree, add, diff --binary --cached, diff --numstat --cached, and
+    // ls-files --others --ignored. The launch is never replayed, and the two `git status`
+    // forms depend on untracked/ignored working-directory state a commit cannot reconstruct —
+    // they are unreplayable-with-reason, not divergences.
     const runner = greenRunner();
     const verdict = await evaluateReceipt(realReceiptCommands(), runner);
 
-    // Seven verification reads replayed, the launch not — the line the operator will read.
-    expect(scopeOf(verdict)).toContain('replayed 7 of 8 recorded commands');
+    expect(scopeOf(verdict)).toContain('replayed 5 of 8 recorded commands');
     expect(scopeOf(verdict)).toContain('0 mismatched');
     expect(scopeOf(verdict)).toContain('commands[0] (worker-launch');
 
-    // Every one of the seven ran in a reconstructed index: the script it was given carries
-    // the read-tree and the add, so the index is rebuilt by the replay rather than assumed.
+    // The reason names the limit rather than blaming the change.
+    const untracked = verdict.scenarios.find((scenario) => scenario.id === 'faithfulness:06');
+    const ignored = verdict.scenarios.find((scenario) => scenario.id === 'faithfulness:07');
+    expect(untracked?.observed).toContain('not replayed');
+    expect(untracked?.observed).toContain('untracked entries from the working directory');
+    expect(ignored?.observed).toContain('ignored entries from the working directory');
+    expect(untracked?.outcome).toBe('pass');
+    expect(ignored?.outcome).toBe('pass');
+
+    // Every replayed read ran in a rebuilt index: the script carries read-tree and add.
     const replayScripts = runner.calls
       .filter((call) => call.argv[0] === 'sh' && call.argv[1] === '-c')
       .map((call) => call.argv[2] ?? '');
-    expect(replayScripts).toHaveLength(7);
+    expect(replayScripts).toHaveLength(5);
     for (const script of replayScripts) {
       expect(script).toContain(`git read-tree ${BASE_REV}`);
       expect(script).toContain('git add --all -- .');
     }
+    // `git ls-files --others --ignored` is reconstructable and stays replayable: it answers
+    // the ignored-file question from the index, which the replay rebuilds.
+    expect(replayScripts.some((script) => script.endsWith('git ls-files --others --ignored'))).toBe(
+      true,
+    );
     // The launch was never executed, by any route.
     expect(runner.argvs.some((argv) => argv[0] === 'dsh')).toBe(false);
-    expect(runner.scripts).not.toContain(LAUNCH_ARGV.join(' '));
 
-    // A fully green world plus seven reproduced reads is a pass — the gate can open.
+    // No false divergence, so a green world is a pass — the gate can open.
     expect(verdict.outcome).toBe('pass');
     expect(verdict.reasons).toEqual([]);
     expect(() => assertVerdictIsEarned(verdict)).not.toThrow();
@@ -304,11 +332,6 @@ describe('the wall replays what it can reconstruct, and says what it could not',
       scenario.id.startsWith('faithfulness:0'),
     );
     expect(faithfulness).toHaveLength(8);
-    // Seven reproduced rows, plus one row for the launch that says it was not replayed: a
-    // `pass` there means "no evidence against the change", and the observed text says exactly
-    // that rather than pretending the launch was checked.
-    expect(faithfulness.filter((scenario) => scenario.outcome === 'pass')).toHaveLength(8);
-    expect(faithfulness[0]?.observed).toContain('not replayed — worker-launch');
   });
 
   it('catches a tampered --numstat: the replay measures, it does not trust', async () => {
@@ -321,14 +344,48 @@ describe('the wall replays what it can reconstruct, and says what it could not',
 
     expect(verdict.outcome).toBe('fail');
     expect(verdict.reasons).toContain('receipt_unfaithful');
-    expect(scopeOf(verdict)).toContain('replayed 7 of 8 recorded commands');
+    expect(scopeOf(verdict)).toContain('replayed 5 of 8 recorded commands');
     expect(scopeOf(verdict)).toContain('1 mismatched');
+    // The scope row agrees with its own sentence: a row that counts a divergence is a failure.
+    const scope = verdict.scenarios.find((scenario) => scenario.id === 'faithfulness:scope');
+    expect(scope?.outcome).toBe('fail');
     // The divergence is named by index, so the operator knows which read lied.
     const divergent = verdict.scenarios.find((scenario) => scenario.id === 'faithfulness:05');
     expect(divergent?.outcome).toBe('fail');
     expect(divergent?.observed).toContain('not reproduced');
     // The agent still learns nothing beyond "not accepted".
     expect(workerFacingReason(verdict)).toBe('not accepted');
+  });
+
+  it('with two of eight mismatched the scope row fails and both codes are present', async () => {
+    // The live verdict said `2 mismatched` on a row whose outcome was `pass`: a green line
+    // reporting a divergence. It only failed overall because `receipt_unfaithful` came along;
+    // the row must fail on its own terms, and both codes must be present.
+    const verdict = await evaluateReceipt(realReceiptCommands({ tamperBoth: true }), greenRunner());
+
+    const scope = verdict.scenarios.find((scenario) => scenario.id === 'faithfulness:scope');
+    expect(scope?.observed).toContain('2 mismatched');
+    expect(scope?.outcome).toBe('fail');
+    expect(verdict.outcome).toBe('fail');
+    expect(verdict.reasons).toContain('receipt_unfaithful');
+    expect(verdict.reasons).toContain('faithfulness_partial');
+  });
+
+  it('no row may claim a mismatch while passing', async () => {
+    // The invariant behind the bug, checked over every verdict this file can produce: if a
+    // row's own observed text counts a divergence, the row is a failure. A reader who sees a
+    // green row saying `2 mismatched` has been lied to by the instrument.
+    const cases = [
+      await evaluateReceipt(realReceiptCommands(), greenRunner()),
+      await evaluateReceipt(realReceiptCommands({ tamperNumstat: true }), greenRunner()),
+      await evaluateReceipt(realReceiptCommands({ tamperBoth: true }), greenRunner()),
+    ];
+    for (const verdict of cases) {
+      for (const scenario of verdict.scenarios) {
+        const counted = /([1-9][0-9]*) mismatched/u.exec(scenario.observed ?? '');
+        if (counted !== null) expect(scenario.outcome).toBe('fail');
+      }
+    }
   });
 
   it('reports an out-of-order verification group as unreplayable-with-reason, never a silent pass', async () => {

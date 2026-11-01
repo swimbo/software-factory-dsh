@@ -99,6 +99,44 @@ export function verificationSequenceProblem(
 }
 
 /**
+ * Why this verification read is **not** a function of (base commit, staged tree).
+ *
+ * The live attempt answered this honestly: seven of the eight commands were reconstructable, and
+ * the two that diverged were both `git status` reads:
+ *
+ *     git status --porcelain=v1 --untracked-files=all   → mismatch
+ *     git status --porcelain=v1 --ignored=matching      → mismatch
+ *
+ * They are not bugs in the reconstruction, they are a limit of it: those forms report entries
+ * that exist only in the *working directory* — untracked, ignored — and a working directory
+ * cannot be reconstructed from a commit. Classifying them as replayable produced two false
+ * divergences and a `fail` on a good change.
+ *
+ * So the rule is about the *form* of the read, not the command family: a status read is
+ * replayable only when it is asked not to report untracked or ignored entries.
+ * `git ls-files --others --ignored` stays replayable — it answers the ignored-file question
+ * from the index, which the replay does rebuild.
+ */
+export function verificationReadProblem(argv: readonly string[]): string | null {
+  if (argv[0] !== 'git' || argv[1] !== 'status') return null;
+
+  // The ignored form is checked first because it is the more specific reason: a read that
+  // asks for ignored entries is not repaired by switching untracked off, and the operator
+  // should be told which of the two working-directory dependencies it hit.
+  const ignored = argv.find((token) => token === '--ignored' || token.startsWith('--ignored='));
+  if (ignored !== undefined && ignored !== '--ignored=no' && ignored !== '--ignored=false') {
+    return 'git status reports ignored entries from the working directory, which cannot be reconstructed from a commit — use --ignored=no, or git ls-files --others --ignored, which is reconstructable';
+  }
+
+  const untracked = argv.find((token) => token.startsWith('--untracked-files='));
+  if (untracked !== '--untracked-files=no') {
+    return 'git status reports untracked entries from the working directory, which cannot be reconstructed from a commit — replayable only with --untracked-files=no';
+  }
+
+  return null;
+}
+
+/**
  * The argv that replays one recorded verification read in a reconstructed index, or `null` when
  * this command cannot be replayed faithfully.
  */

@@ -46,7 +46,7 @@ import {
 } from '@factory/contracts';
 import { assessDiscrimination } from './criteria-log.ts';
 import { PrivilegedBrokerRefusal } from './local.ts';
-import { replayArgv, verificationSequenceProblem } from './replay.ts';
+import { replayArgv, verificationReadProblem, verificationSequenceProblem } from './replay.ts';
 import type { CriteriaLogEntry, CriteriaLogPort, DiscriminationReport } from './criteria-log.ts';
 import type { HoldoutScenario, HoldoutStore } from './holdout.ts';
 import { assessSecurityPaths, SENSITIVE_OPERATION_CLASSES } from './security-path.ts';
@@ -509,6 +509,14 @@ function replayPolicy(
     if (context.verificationProblem !== null) {
       return { replayable: false, note: `factory-verification: ${context.verificationProblem}` };
     }
+    // Not every git read is a function of (base, staged tree): a status form that reports
+    // untracked or ignored entries depends on the working directory, which a commit cannot
+    // reconstruct. The live attempt caught exactly that — two `git status` rows diverged and
+    // failed a good change.
+    const readProblem = verificationReadProblem(command.argv);
+    if (readProblem !== null) {
+      return { replayable: false, note: `factory-verification: ${readProblem}` };
+    }
     const replayArgvForCommand = replayArgv(context.baseRev, command.argv);
     if (replayArgvForCommand === null) {
       return {
@@ -671,7 +679,13 @@ async function checkFaithfulness(input: EvaluateInput): Promise<CheckOutcome> {
   // `unknown` (the invariant below), and a change whose replayable commands reproduced has
   // earned its pass. The scope note in `observed` is what carries the honesty — the operator
   // reads it, and `oneLineReason` promotes it whenever the verdict is not a pass.
-  scenarios.push(result('faithfulness:scope', 'faithfulness', 'pass', scopeObserved));
+  // The scope row's outcome must agree with its own sentence. A live attempt produced
+  // `outcome: pass` on a row whose text read `2 mismatched` — a green line that reports a
+  // divergence, which is the verdict lying rather than the check failing. The overall verdict
+  // was `fail` only because `receipt_unfaithful` came along; do not rely on that coupling.
+  scenarios.push(
+    result('faithfulness:scope', 'faithfulness', mismatched > 0 ? 'fail' : 'pass', scopeObserved),
+  );
   // A refusal states its own scope too: on a `fail` the extra code cannot mask anything
   // (a failure is already the outcome), and the operator should know that the launch was
   // skipped before concluding that "the wall re-ran everything and it diverged".
