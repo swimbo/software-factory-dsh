@@ -51,7 +51,9 @@ export function planReservation(inputs: BudgetInputs): BudgetDecision {
       allowed: false,
       reserveUsd: null,
       kind: 'estimate',
-      reason: `envelope exhausted: committed $${committed.toFixed(2)} of $${inputs.envelopeUsd.toFixed(2)}`,
+      // Committed spend is recorded, so it is labelled as such: it is a measurement, not a
+      // projection, and the comparison only means something if the reader can tell them apart.
+      reason: `envelope exhausted: committed (recorded) $${committed.toFixed(2)} of $${inputs.envelopeUsd.toFixed(2)}`,
     };
   }
 
@@ -60,7 +62,7 @@ export function planReservation(inputs: BudgetInputs): BudgetDecision {
       allowed: true,
       reserveUsd: remaining,
       kind: 'unknown',
-      reason: `no estimate; reserving the remaining envelope $${remaining.toFixed(2)} (spend will be reported as unknown, not as zero)`,
+      reason: `no estimate; reserving the remaining envelope $${remaining.toFixed(2)} (a ceiling, not an estimate; spend will be reported as unknown, not as zero)`,
     };
   }
 
@@ -69,7 +71,9 @@ export function planReservation(inputs: BudgetInputs): BudgetDecision {
       allowed: false,
       reserveUsd: null,
       kind: 'estimate',
-      reason: `projected $${inputs.estimateUsd.toFixed(2)} > remaining envelope $${remaining.toFixed(2)}`,
+      // A-2: money that is a guess must say so. "estimates the run as $2.41" is the claim; a
+      // bare dollar figure next to a recorded ceiling reads as if both were measurements.
+      reason: `estimates the run as $${inputs.estimateUsd.toFixed(2)} > remaining envelope $${remaining.toFixed(2)} (the run cost is an estimate, not a measurement)`,
     };
   }
 
@@ -77,7 +81,7 @@ export function planReservation(inputs: BudgetInputs): BudgetDecision {
     allowed: true,
     reserveUsd: inputs.estimateUsd,
     kind: 'estimate',
-    reason: `reserving projected $${inputs.estimateUsd.toFixed(2)} of $${remaining.toFixed(2)} remaining`,
+    reason: `reserving estimated $${inputs.estimateUsd.toFixed(2)} of $${remaining.toFixed(2)} remaining`,
   };
 }
 

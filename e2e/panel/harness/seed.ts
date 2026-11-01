@@ -29,7 +29,12 @@ import { join } from 'node:path';
 // The e2e tree sits outside every workspace package, so the root `node_modules`
 // does not link them. Relative imports keep the harness runnable from a checkout
 // whose install is scoped to `apps/*` — the same sources, resolved the same way.
-import { FactoryError, WALL_VERSION, contentHash } from '../../../packages/contracts/src/index.ts';
+import {
+  FactoryError,
+  WALL_VERSION,
+  contentHash,
+  receiptShaFor,
+} from '../../../packages/contracts/src/index.ts';
 import { currentPolicyVersion } from '../../../packages/qualifier/src/index.ts';
 import { PINNED_DSH_VERSION } from '../../../packages/dsh-adapter/src/index.ts';
 
@@ -200,7 +205,9 @@ export function seedVerdict(
     const verdict = {
       unitId: options.unitId,
       attemptId,
-      receiptSha: contentHash(receipt),
+      // The store records `receiptShaFor(receipt)` — the decision projection, not the
+      // narrative-bearing body — and refuses a verdict that cites evidence it does not hold.
+      receiptSha: receiptShaFor(receipt),
       holdoutRevision: 'holdout/7',
       policyVersion: currentPolicyVersion(),
       wallVersion: WALL_VERSION,

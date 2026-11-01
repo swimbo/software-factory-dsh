@@ -631,7 +631,9 @@ describe('runUnit', () => {
     h.setEnvelope(0.5);
 
     const error = expectCode(() => h.engine.runUnit(unit.unitId), 'BUDGET_EXCEEDED');
-    expect(error.message).toContain('projected $1.50');
+    // A-2: the estimate is labelled as an estimate, next to a recorded ceiling.
+    expect(error.message).toContain('estimates the run as $1.50');
+    expect(error.message).toContain('estimate, not a measurement');
 
     expect(h.store.calls['enqueueEffect']).toBeUndefined();
     expect(h.store.effectsInOrder()).toHaveLength(0);

@@ -49,13 +49,14 @@ describe('dispatch-time budget ceiling (E2E-26)', () => {
     expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(6);
     expect(json['code']).toBe('BUDGET_EXCEEDED');
     const message = String(json['message']);
-    // The numbers and their comparison are printed. Divergence from e2e-tests.md E2E-26,
-    // recorded rather than smoothed over: the plan expects "projected $2.41 > per-unit
-    // envelope $0.05" and the word *estimated*; the CLI says "remaining envelope" and prints
-    // two bare dollar amounts with no estimate label (A-2 says money must be labelled).
-    expect(message).toContain('projected $2.41');
-    expect(message).toContain('$0.05');
-    expect(message).toContain('envelope');
+    // A-2: a projected cost is a guess and must be labelled one. The plan expected the
+    // literal "projected $2.41 > per-unit envelope $0.05"; the surface said "projected $2.41
+    // > remaining envelope $0.05", printing an estimate and a recorded ceiling as if they
+    // were the same kind of number. Fixed in `packages/core/src/rules.ts`: the estimate now
+    // says *estimates the run as* and names the comparison, and the amount is labelled.
+    expect(message).toContain('estimates the run as $2.41');
+    expect(message).toContain('remaining envelope $0.05');
+    expect(message).toMatch(/estimate, not a measurement/u);
 
     // Nothing was dispatched: no attempt row, no lease, no attempt directory, no executor.
     expect(json['attemptId']).toBeUndefined();

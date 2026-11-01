@@ -49,6 +49,16 @@ Three disjoint evidence jobs can run in parallel because their write scopes are 
 - [ ] **No unresolved errors**: `progress.md > ## Errors` has zero open entries.
 - [~] **Cross-plugin verification considered**: `/bo-planner-done` warnings on Enterprise Assessment, Design Compliance, and Test Coverage reviewed (if those artifacts exist). Blocker-class issues either fixed or explicitly accepted by the user in `progress.md`.
 
+### Evidence produced (2026-11-01)
+
+`evidence/phase-11-verification.md` — the consolidated run record: the offline gate, the process e2e
+suite, the panel browser suite (cannot launch: chromium 1248 vs host 1243), the `@docker` suite
+(unimplemented placeholders, required for release, `UNKNOWN`), the `@live` suite (`UNKNOWN`), and the
+wall's `self-test` (9 of 9). It is the substitute for the summary/unknowns artifacts this phase lists;
+the chaos, audit-trace and dogfood artifacts it does **not** cover are named as unclaimed in §8. Status
+stays **partial**: `@docker` and the browser layer are `UNKNOWN`, which under this phase's law cannot be
+counted as pass.
+
 ### Project-specific evidence
 
 - [ ] `pnpm test`, `pnpm test:docker`, `pnpm test:e2e:panel`, `pnpm run typecheck`, `pnpm run lint`, `pnpm run format:check`, `pnpm run build`, `pnpm run dogfood` — each exits 0 with its timestamped log under `docs/planning/dark-factory-dsh/evidence/`.
