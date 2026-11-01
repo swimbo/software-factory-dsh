@@ -416,3 +416,42 @@ Stated plainly, as requested:
 - The plan assumed **13** phase plans; there are **18** (9a–9e). All 18 are audited above.
 - The plan's tasks that I did **not** perform, because they are the Lead's or need a human in the loop: user sign-off (task 19/31), severity corrections, `wont_fix` designations, and the `progress.md` capture of those.
 - Two plan tasks _were_ absorbed into §3 without a separate heading: "better than planned" deviations (ui-plan's `health` richer than planned, the clone replacing the worktree, the `+local` runner label) and "silent volatile decisions" (three INDEX rows missing, item 8 of §6).
+
+---
+
+## 9. Addendum — 2026-11-01, after the operator ratified ND1–ND4
+
+This section is appended rather than woven into the rows above: an audit is a record of what was true
+when it ran, and editing its verdicts in place would make it impossible to tell which sentences were
+measured and which were later "corrected" by the thing being audited. Everything here names the artifact
+that carries the evidence.
+
+### What changed since the audit
+
+| Item                              | Then                                                                 | Now                                                                                                                                  |
+| --------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| ND1–ND4                           | escalated as `NEEDS_HUMAN_DECISION`, every row "blocked on a human"   | **decided 2026-11-01** (`findings.md` § DECIDED) and implemented — `evidence/phase-13-nd-decisions.md`                                 |
+| Certification                     | no operating point; Δ evidence only                                  | per task class, **m=20 / k=18**, **α = 0.0755** computed in exact rational arithmetic; β stated as unmeasured                        |
+| Spend                             | an estimate reserved, nothing measured                               | gateway-reported usage per attempt, append-only `usage_records`, ceiling **enforced by revoking the token**; `budget reconcile` can say `unknown` |
+| Ledger head                       | nothing outside the host                                             | daily off-host anchor (`packages/anchor`, `factory ledger`), refusal at exit 9 past 48 h; claim is "detectable within 48 h" (ADR-008) |
+| Wall vs worker                    | same principal everywhere                                            | `two-uid` where the platform allows it, reported by `status`; this macOS host reports `single-uid` with the reason                    |
+| Store schema                      | v1, a version change meant a refusal                                 | v2 with **declared additive migrations** and a `store.migrated` ledger event; a version with no declared path is still refused         |
+| `§7 What this audit could not verify` → the panel | `UNPROVEN`: no matching chromium build                           | **resolved**: chromium `1248` is installed and the panel is a gate stage — 41 specs pass in `scripts/verify.sh`                       |
+
+### The current gate (measured, not remembered)
+
+```
+bash scripts/verify.sh   →  7 passed, 1 skipped, 0 failed — OK
+log: docs/verification/2026-11-01T21-04-41Z/
+      1284 tests passed | 6 skipped across 89 files (vitest), 41 panel specs (playwright, chromium 1248)
+```
+
+### Claims this round explicitly did **not** widen
+
+- Re-certification on a policy/model change is **not built**; every verdict carries the point it was
+  measured under, and that is the extent of it.
+- Nothing schedules the anchor and nothing alerts on staleness — the runbook gives the cron/launchd line.
+- The ceiling is proven at the socket (`credential.test.ts`), not through the real executor.
+- ND2's Linux path is proven in a `node:26-bookworm` container, not on the Linux target.
+- The wall is still described as "independent, deterministic where possible, adversarially tested and
+  human-audited" — never "safe".

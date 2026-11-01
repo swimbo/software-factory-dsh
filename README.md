@@ -22,15 +22,56 @@ makes "2-of-3 runs" a weaker claim than it looks.
 ## What runs today
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 pnpm install
 pnpm run build            # tsc -p tsconfig.build.json
-pnpm test                 # 1017 passed, 10 skipped (64 files)
-bash scripts/verify.sh    # preflight, typecheck, lint, format:check, test, build, live-model(skip)
+pnpm test                 # 1284 passed, 6 skipped (89 files)
+bash scripts/verify.sh    # preflight, typecheck, lint, format:check, test, build, panel, live-model(skip)
+bash scripts/provision-topology.sh   # report which topology this host can honour (--apply on Linux)
+factory ledger verify     # is the ledger head anchored off-host, and is the anchor fresh?
 ```
 
 `verify.sh` writes `docs/verification/<run-id>/{verify.log,summary.json}`, and the summary names the
 commit it measured, so a green line is reproducible rather than remembered.
+
+### The wall's principal, not just its process
+
+The wall is a separate **principal** where the platform allows it. On the Linux target the verdict
+store, the holdout corpus and the operator key belong to `factory-wall` (`0750`, group
+`factory-wall`) and the worker runs as `factory-worker`, which is not a member of that group:
+`factory-worker` gets `EACCES` on the store, the corpus and the key. That is what makes "the wall is
+independent" a property of the deployment rather than of a function-call boundary.
+
+On this macOS development host there is no second uid in play, so the factory runs single-uid and
+says so: **the wall is a separate process, not a separate principal.** `factory status` prints which
+of the two it found — the aggregate line carries `principals two-uid` or `principals single-uid`, and
+the single-uid case prints the claim and its reason beneath it — so the stronger sentence cannot leak
+onto a host that cannot honour it. `scripts/provision-topology.sh` reports the same fact and refuses
+to run where the accounts are missing: it prints the `groupadd`/`useradd` lines and exits 8 rather
+than minting system users.
+
+| Platform | Accounts present | The factory reports  | The claim it may make            |
+| -------- | ---------------- | -------------------- | -------------------------------- |
+| Linux    | yes              | `two-uid`            | the wall is a separate principal |
+| Linux    | no               | `single-uid`, exit 8 | the wall is a separate process   |
+| macOS    | n/a              | `single-uid`         | the wall is a separate process   |
+
+What this does **not** buy: anything against root on the host, and no isolation at all on a
+single-uid platform.
+
+### The numbers the factory publishes about itself
+
+| What                          | Number                                                               | Where it is computed                       |
+| ----------------------------- | -------------------------------------------------------------------- | ------------------------------------------ |
+| Certification operating point | **m = 20 attempts, k = 18 passes** per task class                    | `packages/wall/src/operating-point.ts`     |
+| α (false-alarm rate)          | **0.0755** — P(a class that truly passes 95 % fails certification)   | same, exact rational arithmetic            |
+| β (power)                     | **unmeasured** — needs a known-bad corpus nobody has                 | stated in the module header, not published |
+| Anchor freshness window       | **48 h** — `ledger verify` exits 9 past it                           | `packages/anchor`, ADR-008                 |
+| Spend                         | what the gateway reports per call; `unknown` when it reports nothing | `packages/credential-proxy/src/usage.ts`   |
+
+Re-certification on a policy or model change is **not built**: every verdict carries the point and α it
+was measured under, which is the evidence such a job would read, but no job compares a stored class
+certificate with a changed policy version.
 
 ## Packages
 
@@ -69,9 +110,16 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
 - **No credential proxy** (R5). `packages/proxy` does not exist; the destructive-command classifier
   is a post-hoc denylist that its own comment calls partial. Privileged operations are _refused_,
   not brokered.
-- **No off-host anchor** (ND4), **no verdict-store split by uid** (ND2), **no proxy metering**
-  (ND3), **no certification operating point** (ND1). These are open human decisions, recorded in
-  `architecture.md §11` as NEEDS_HUMAN_DECISION rather than quietly defaulted.
+- **ND1–ND4 are decided and implemented; these are the parts still missing.** The decisions themselves
+  are in `findings.md` § DECIDED and the implementation record in
+  `evidence/phase-13-nd-decisions.md`. Not built: **re-certification as a job** (ND1 half two), and
+  **alerting on a stale anchor** (ND4 — `ledger verify` is a command a cron job or a person runs).
+  ND3's ceiling is proven at the socket, not through the real executor (no paid e2e spec), and ND2's
+  two-uid path is proven in a `node:26-bookworm` container rather than on the Linux target itself.
+- **The two-uid topology has not run on the Linux target**, only in a `node:26-bookworm` container:
+  that proof covers the accounts, the modes, the marker and the worker's `EACCES` on store, corpus
+  and key. It does not cover systemd, a real `/var/lib/factory`, or an operator key that already
+  exists — and the macOS host you are reading this on is single-uid by construction.
 - **The live layer is opt-in, and the worker gets a scoped token, not the gateway key.** `@live`
   specs skip unless `BIFROST_API_KEY` **and** `DSH_BIN` are set; the `live-model` gate stage runs only
   with `FACTORY_VERIFY_LIVE=1`, because each run makes real, paid model calls. When a live run happens,
@@ -80,8 +128,11 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   (ADR-007). The launch record says `credentialsForwarded: []` and `credentialProxy: { token: 'scoped' }`.
   **What this does not buy:** a root-level attacker on the host, or a second OS uid — the container path
   (E2E-44) is still the shape that adds real isolation.
-- **No model-call budget of its own.** Spend is bounded by the operator's gateway route, not by the
-  factory; the factory's `budget` reserves an _estimate_ per attempt and never measures tokens.
+- **Spend is metered, not invoiced.** The proxy records what the gateway's response says
+  (`tokensIn/out`, `costUsd` when the gateway prices it) into an append-only `usage_records` table and
+  revokes the attempt token at the ceiling — but a response with no usage block is `unknown`, and
+  `budget reconcile` against the gateway's export is best-effort: it reports `unknown` (exit 6) rather
+  than guessing. There is no billing-grade accounting and no invoice.
 - **No container isolation on this host.** The 4 `@docker` specs are tagged and skipped; the local
   runner measures behaviour, not containment.
 - **DSH's sandbox is not a security boundary**, and is not treated as one anywhere.

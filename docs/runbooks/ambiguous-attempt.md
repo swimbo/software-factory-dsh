@@ -58,7 +58,7 @@ expired and `factory recover` reconciled it rather than guessing.
 ## Commands, in this order
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"   # node 26.12.1
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"   # node 26.12.1
 
 # 1. Re-read the facts (read-only, safe to repeat).
 factory status U-ea3e3e8672da --attempt A-0001

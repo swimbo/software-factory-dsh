@@ -268,12 +268,18 @@ true sentence* rather than a broader false one.
 
 **ND1 — certify per task class at m=20, k=18; publish α, never a global pass rate.**
 One trial unit = one **task class**, not the factory and not the product. m=20 attempts, k=18 passes
-(α ≈ 0.882), and the published number is that α with its definition — "the probability a class that
+(**α = 0.0755**), and the published number is that α with its definition — "the probability a class that
 truly passes 95 % of the time fails certification" — not a claim about production success. Re-certify
 when the policy version or the model id changes, because both move the population. **Why middle:** m=6
-(α ≈ 0.687) certifies flukes, and m=48/k=44 costs 2.4× the spend for a marginal α. **Does not buy:**
+(α = 0.2649) certifies flukes, and m=48/k=44 costs 2.4× the spend for a marginal α. **Does not buy:**
 β, the power to detect a regressing class — that needs a known-bad corpus nobody has; say so instead of
-publishing a β that was never measured.
+publishing a β that was never measured. **Correction, 2026-11-01 (when the arithmetic was implemented):**
+this row first carried "α ≈ 0.882" and "m=6, α ≈ 0.687". Under the definition in the same sentence, the
+binomial tail gives **0.0755** at m=20/k=18 and **0.2649** at m=6/k=6 (`packages/wall/src/operating-point.ts`,
+computed in exact rational arithmetic; `docs/planning/dark-factory-dsh/evidence/phase-13-nd-decisions.md`
+carries the term-by-term sum). The old figures were not attainable from this binomial at any k — they were
+survival probabilities from another formulation, i.e. exactly the class of error this file exists to
+prevent, in this file. The decision (m=20, k=18) is unchanged; the published number is now computed.
 
 **ND2 — ship the two-uid topology as the Linux default, keep single-uid on the dev host, and scope the
 claim to the topology actually in use.**

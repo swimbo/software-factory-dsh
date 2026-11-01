@@ -51,7 +51,7 @@ ledger cannot be papered over by more writes.
 ## What you _can_ do (all read-only)
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 
 factory status              # health.store.state = quarantined, detail, unit count
 factory status --all        # units and any open gates; still exit 0 unless a gate is open

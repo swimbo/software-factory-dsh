@@ -1,6 +1,6 @@
 # Runbooks
 
-Five 2am procedures. Each one is written for the person who did not build the thing: the symptom,
+Six 2am procedures. Each one is written for the person who did not build the thing: the symptom,
 what the factory will refuse to do, the exact commands, what "fixed" looks like, and what to do when
 it does not work. Every command here was run against this tree; every limit that is real is labelled
 **not built** rather than described as a plan.
@@ -12,12 +12,13 @@ it does not work. Every command here was run against this tree; every limit that
 | [store-quarantine.md](store-quarantine.md)               | every write is refused with "the ledger integrity check failed"  | `9`, `8`           |
 | [budget-envelope-refusal.md](budget-envelope-refusal.md) | `run` refuses with `BUDGET_EXCEEDED` before anything starts      | `6`, `5`           |
 | [rotate-operator-key.md](rotate-operator-key.md)         | every promotion is refused with `PROMOTION_UNSIGNED`             | `5`                |
+| [ledger-anchor.md](ledger-anchor.md)                     | `ledger verify` says the anchor is stale, missing or behind      | `9`, `8`           |
 
 Common ground, so no runbook has to repeat it:
 
 - `FACTORY_HOME` is the CLI's home (default `$HOME/.factory`); the store lives at
   `$FACTORY_HOME/state` (override with `FACTORY_STATE_DIR`), keys at `$FACTORY_HOME/keys`.
-- The pinned runtime is in `.nvmrc` (26.12.1): `export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"`
+- The pinned runtime is in `.nvmrc` (26.12.1): `export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"`
   in every shell, or the preflight stage refuses.
 - `factory` is a pnpm script (`node apps/cli/src/main.ts`). `pnpm run factory <verb>` works from the
   repo root; a `factory` shim on `PATH` is optional.

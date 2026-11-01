@@ -48,7 +48,7 @@ symptom of an old key.
 ## Procedure (verified end-to-end on this tree)
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 KEYDIR="$HOME/.factory-operator-keys"      # outside the repo: it holds a private key
 mkdir -p "$KEYDIR"
 

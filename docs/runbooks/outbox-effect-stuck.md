@@ -69,7 +69,7 @@ is present but the wrong version, or a container runtime that stopped.
 ## Commands, in this order
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 
 # 1. See the unit and the gate that is open (read-only).
 factory status --all

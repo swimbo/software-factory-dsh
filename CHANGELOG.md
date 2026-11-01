@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased — the four ND decisions, implemented
+
+The operator ratified all four `NEEDS_HUMAN_DECISION` answers on 2026-11-01
+(`docs/planning/dark-factory-dsh/findings.md` § DECIDED). This release is what "ratified" means in code,
+and each item ends where the claim ends. Evidence: `evidence/phase-13-nd-decisions.md`.
+
+- **ND1 — a published certification operating point.** Certification is per **task class** at
+  **m = 20 attempts / k = 18 passes**, and the number published is
+  **α = 0.0755** — the probability a class that truly passes 95 % of the time fails certification —
+  computed in exact rational arithmetic (`packages/wall/src/operating-point.ts`), never a global pass
+  rate. `insufficient` evidence keeps `requiresHuman: true`. β stays unmeasured and unpublished, because
+  it needs a known-bad corpus nobody has. The planning record's old "α ≈ 0.882 / 0.687" figures were
+  wrong under their own definition and are corrected, with the correction visible.
+- **ND3 — spend is metered from the response and enforced by revocation.** The proxy tees (never
+  buffers) the upstream body, folds every SSE `usage` chunk, and records
+  `{tokensIn, tokensOut, costUsd, gatewayRequestId, signedAt}` per attempt into an append-only
+  `usage_records` table plus a `usage.recorded` ledger event carrying the same digest. A response with no
+  usage block is `unknown`, never `$0.00`. Crossing the attempt's remaining authority **revokes the
+  token**: the crossing request is served, the next is `401 token-revoked`, and nothing redispatches it.
+  `factory budget reconcile --usage-file` compares against the gateway's own export and can say
+  `unknown` (exit 6, `USAGE_UNRECONCILED`) — a missing export is not "0 mismatches".
+- **ND4 — the ledger head is anchored off-host daily.** New `packages/anchor` and
+  `factory ledger <anchor|verify>`: a chain hash over the events that a second party can recompute, four
+  outcomes (`fresh | stale | missing | rollback`), a refusal at exit 9 for anything but `fresh`, and a
+  local anchor reported as **local** rather than dressed up as off-host (ADR-008, runbook
+  `docs/runbooks/ledger-anchor.md`). Claim: **detectable within 48 h**, never "prevented".
+- **ND2 — the wall is a separate principal where the platform allows it.** The topology decision is
+  computed, reported by `factory status`, and provisioned by `scripts/provision-topology.sh`; on this
+  macOS host it reports `single-uid` with the reason, because a separate process is not a separate
+  principal.
+- **Breaking (schema v1 → v2), with a real migration instead of a reset.** The new `usage_records` table
+  changes `SCHEMA_SQL`, so `packages/store` now declares additive `MIGRATIONS` and applies them on open;
+  each applied step appends a `store.migrated` ledger event, and a version with no declared path is still
+  refused. Deleting `FACTORY_HOME` was never an allowed repair, so "upgrade or refuse" is the only
+  honest pair of options.
+- **Two hazards found by this round's own gate, both fixed:** two `verify.sh` runs started in the same
+  UTC second shared one output directory and truncated each other's log (now suffixed `-2`, `-3`, …);
+  and a ledger that a second process had already migrated could not be re-opened (`migrationsApplied`
+  reported the same event twice) — covered by a spec.
+
 ## v0.2.0 — 2026-11-01
 
 - **The live path no longer hands the worker the gateway key.** `packages/credential-proxy` mints a

@@ -40,7 +40,7 @@ reservation and no executor start. That is why the remedy is a ceiling change, n
 ## Commands
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 
 # 1. See where the ceiling is.
 factory budget

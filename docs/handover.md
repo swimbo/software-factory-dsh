@@ -8,7 +8,7 @@ the audit says so and this document repeats it rather than smoothing it over.
 ## What to run before touching anything
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"   # 26.12.1, or preflight fails
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"   # 26.12.1, or preflight fails
 pnpm install
 pnpm run preflight          # node version, package layout, the pinned dsh expectation
 bash scripts/verify.sh      # preflight → typecheck → lint → format:check → test → build → panel
