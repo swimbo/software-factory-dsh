@@ -72,7 +72,9 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
 - **No off-host anchor** (ND4), **no verdict-store split by uid** (ND2), **no proxy metering**
   (ND3), **no certification operating point** (ND1). These are open human decisions, recorded in
   `architecture.md §11` as NEEDS_HUMAN_DECISION rather than quietly defaulted.
-- **The live layer needs an operator key, and it forwards that key to `dsh`.** The `@live` specs
+- **The live layer is opt-in and it forwards one credential name to `dsh`.** `@live` specs skip
+  unless `BIFROST_API_KEY` **and** `DSH_BIN` are set; the `live-model` gate stage runs only with
+  `FACTORY_VERIFY_LIVE=1`, because each run makes real, paid model calls. The `@live` specs
   skip unless `BIFROST_API_KEY` **and** `DSH_BIN` are set, so the offline gate stays free. When they
   do run they forward exactly one credential name to the child (`FACTORY_LIVE_MODEL=1`, recorded as
   `credentialsForwarded: ['BIFROST_API_KEY']` in `launch.json`), because v1 has no credential proxy
@@ -87,6 +89,19 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   the agent-client-protocol path is not implemented, so "one-shot **or** ACP workers" is delivered as
   **one-shot only**. An ACP worker would need a second executor behind the same `Executor` port and
   the same launch record — the seam exists, the implementation does not.
+
+## Running the live layer
+
+```bash
+export DSH_BIN="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+export BIFROST_API_KEY=…              # from the operator's secret store, never from this repo
+pnpm run test:live                    # both @live specs, one paid turn each
+FACTORY_VERIFY_LIVE=1 bash scripts/verify.sh   # the whole gate, live stage included
+```
+
+Measured: `verify: 7 passed, 0 skipped, 0 failed`. With the key unset the same gate is
+`6 passed, 1 skipped, 0 failed` and the live row is `SKIPPED` with its reason — the offline suite
+never spends (C5).
 
 ## What has actually been executed against a model
 

@@ -75,7 +75,17 @@ function compose(): { home: string; work: string; overlayPath: string; attemptDi
 }
 
 function env(home: string): NodeJS.ProcessEnv {
-  return { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1' };
+  const base: NodeJS.ProcessEnv = { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1' };
+  // A fresh `DSH_HOME` has no credentials, and this suite relies on that: the boot must fail
+  // closed at MISSING_CREDENTIAL, which is also the proof that nothing was sent anywhere. Spreading
+  // `process.env` broke that the moment the operator had a real gateway key exported — the boot
+  // then got a credential, tried the network and reported `TRANSPORT: Connection error` instead,
+  // so this spec measured the developer's shell. A credential-shaped variable inherited from the
+  // parent must never reach a child whose whole purpose is to have none.
+  for (const key of Object.keys(base)) {
+    if (/KEY|TOKEN|SECRET|CREDENTIAL/iu.test(key)) delete base[key];
+  }
+  return base;
 }
 
 /** Split the composed config dump into `id -> block`, dropping comment lines. */
@@ -168,13 +178,16 @@ describe.skipIf(!available)('the real dsh profile', () => {
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
     });
-    // A hung harness must fail this test rather than hang the suite.
-    const guard = setTimeout(() => child.kill('SIGKILL'), 15_000);
+    // A hung harness must fail this test rather than hang the suite. 60 s, not 15: this boots a
+    // real `dsh` (composing every profile entry) inside a full-suite run, and 15 s measured the
+    // machine's load rather than a hang -- it went red at 15,147 ms on a busy run and passes in
+    // isolation in ~4 s.
+    const guard = setTimeout(() => child.kill('SIGKILL'), 60_000);
     const code = await new Promise<number | null>((resolve) => {
       child.once('close', (exitCode) => resolve(exitCode));
     });
     clearTimeout(guard);
-    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(Date.now() - started).toBeLessThan(60_000);
 
     // Not an activation failure.
     expect(stderr).not.toContain('did not activate');

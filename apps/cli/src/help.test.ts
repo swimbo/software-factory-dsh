@@ -89,7 +89,12 @@ describe('factory version', () => {
   it('reports the pinned version in --json under the same names the status page uses', () => {
     const json = jsonOf(runCli(['version', '--json']));
     expect(json).toMatchObject({ ok: true, dshVersionExpected: '0.2.1-rc.3' });
-    expect(json['dshVersionObserved']).toBeNull();
+    // `dshVersionObserved` is a *probe*: null when no binary is reachable, the observed version
+    // when one is. Asserting `null` made this spec pass only on a shell without `dsh`/`DSH_BIN` —
+    // it went red the moment the live layer exported DSH_BIN, which is a test that measured the
+    // developer's environment. The contract is the shape: either null or a version string.
+    const observed = json['dshVersionObserved'];
+    expect(observed === null || typeof observed === 'string').toBe(true);
   });
 });
 

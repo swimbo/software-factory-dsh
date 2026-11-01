@@ -144,3 +144,43 @@ system that does not exist.
   recorded opt-in for live runs; the shape and the evidence for it follow below once integrated.
 - **Not a pass-rate claim.** Two calls, both trivial. Nothing here says anything about how often a real
   task succeeds — and per A14, no such claim is certified by this project anyway.
+
+## 6. Final state — the live layer is in the gate
+
+After the five defects above were fixed, the live spec pair and the whole gate were run one last time:
+
+```
+✓ [@live] a one-shot turn ... reproducible receipt   20.9 s
+✓ [@live] a model that cannot answer ... never a pass  4.1 s
+  Tests  2 passed (2)
+
+[@live] run exit 0 · verdict pass · reasons [] · replayed 5 of 8 recorded commands; 0 mismatched
+[@live] refusal: run exit 5 · receipt absent
+```
+
+```
+preflight PASS · typecheck PASS · lint PASS · format:check PASS · test PASS (114.8 s)
+build PASS · live-model PASS (112.7 s)
+verify: 7 passed, 0 skipped, 0 failed — OK        docs/verification/2026-11-01T18-23-07Z/
+```
+
+**Five defects were exposed by real runs and are now fixed with specs that would have caught each:**
+
+1. the wall replayed the worker launch (a paid call inside a faithfulness check);
+2. the first fix replayed nothing, so `unknown` made every real worker unpromotable;
+3. two `git status` reads were claimed replayable while depending on untracked/ignored worktree
+   contents — now unreplayable-with-reason (`replayed 5 of 8`);
+4. the scope row printed `2 mismatched` while carrying `outcome: pass`;
+5. the live spec's own oracle finder matched the word "suite" inside the **prompt** (which is an
+   argv element of the launch) and therefore executed `dsh` a second time — a paid model call made
+   by a test assertion, caught only because the second launch exited non-zero.
+
+Two further specs were environment-coupled and went red the moment this machine had a real key and
+`DSH_BIN` exported: `help.test.ts` asserted `dshVersionObserved` was `null`, and
+`profile.test.ts` relied on inheriting `process.env` to prove a fresh `DSH_HOME` fails closed at
+`MISSING_CREDENTIAL`. Both now control their own environment — a spec that passes only because the
+developer's shell lacks a tool is measuring the shell.
+
+**What remains true and narrower than the headline:** the live path forwards `BIFROST_API_KEY` to
+`dsh` (no credential proxy exists in v1, ADR-006 amendment), so "the worker never holds the key"
+applies to every offline and container path and **not** to the live one. E2E-48 stays `UNKNOWN`.

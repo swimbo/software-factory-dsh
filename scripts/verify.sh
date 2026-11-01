@@ -229,9 +229,22 @@ else
   run_stage build "pnpm run build" pnpm run build
 fi
 
-if [ "$bifrost_present" = true ]; then
+# The live stage spends money, so it is OPT-IN even when a key is present: `FACTORY_VERIFY_LIVE=1`
+# turns it into a real stage. Before this, the note claimed live calls were "excluded by design (no
+# network)" -- true when no live spec existed, false once one did, and a skip message that describes
+# a version of the harness that no longer exists is the defect this repo keeps finding.
+live_ready=false
+if [ "$bifrost_present" = true ] && [ -n "${DSH_BIN:-}" ] && [ -x "${DSH_BIN:-}" ]; then
+  live_ready=true
+fi
+if [ "$live_ready" = true ] && [ "${FACTORY_VERIFY_LIVE:-0}" = "1" ]; then
+  run_stage live-model "pnpm run test:live" pnpm run test:live
+elif [ "$live_ready" = true ]; then
   run_declared_skip live-model "pnpm run test:live" \
-    "BIFROST_API_KEY is set, but live model calls are excluded from this harness by design (no network); run pnpm run test:live by hand"
+    "BIFROST_API_KEY and DSH_BIN are set; the live stage spends money and is opt-in — set FACTORY_VERIFY_LIVE=1 to run it"
+elif [ "$bifrost_present" = true ]; then
+  run_declared_skip live-model "pnpm run test:live" \
+    "BIFROST_API_KEY is set but DSH_BIN is not — the live specs need the installed dsh binary"
 else
   run_declared_skip live-model "pnpm run test:live" \
     "BIFROST_API_KEY is not set; live model tests are not part of offline verification"

@@ -42,8 +42,10 @@ The whole-tree gate at the time of writing: `bash scripts/verify.sh` → **6 pas
 
 ## What is **not** evidenced
 
-- **The 2 `@live` specs** — no `BIFROST_API_KEY` in any environment this repo was built in. The claim
-  "DeepSeek via Bifrost" is proven by configuration and adapter tests, not by a live turn.
+- ~~The 2 `@live` specs~~ — **now measured** (2026-11-01): both pass against the operator's Bifrost
+  program key, and the full gate with `FACTORY_VERIFY_LIVE=1` is `7 passed, 0 skipped, 0 failed`. See
+  [`phase-9b-live-model-probe.md`](phase-9b-live-model-probe.md). Re-running it costs money, which is
+  why the stage is opt-in rather than part of the default gate.
 - **The DSH worker inside the wall container** (E2E-43/44/45/46 as originally worded) — the worker
   image and the credential proxy container are not part of this build. The isolation layer those ids
   depend on **is** measured (`e2e/cli/docker/07-isolation.test.ts`, 6 specs, 5 mutation checks).
