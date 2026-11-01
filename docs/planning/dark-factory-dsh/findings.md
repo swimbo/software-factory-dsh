@@ -253,7 +253,12 @@ Four decisions the Phase 5 debate could not settle. Each is argued in full — w
 
 All four are **claim-blockers, not ship-blockers**: the code is correct under either answer, and what changes is the sentence the operator is allowed to say. None of them may be closed by an agent.
 
-### Recommended answers (Lead, 2026-11-01 — operator to ratify)
+### DECIDED 2026-11-01 — ratified by the operator
+
+The operator accepted all four recommendations below ("I agree with all your recommendations").
+They are no longer defaults: they are the answers, and the table above them is history rather than
+procedure. Each still says what it does **not** buy, because a decision that quietly widens a claim is
+the failure mode this file exists to prevent.
 
 The operator asked for positions that are **neither maximally cautious nor maximally aggressive**, and
 that is the right instinct for these four: the cautious answer to each is "ship nothing and claim
@@ -298,8 +303,9 @@ money and a new dependency; nothing at all means a coordinated local rewrite is 
 the exact attack the anchor exists for. **Does not buy:** real-time tamper evidence — the window is up
 to a day, and the README will say "detectable within 48 h", not "prevented".
 
-Recording these as recommendations, not as decisions: the table above still governs, and an agent
-changing them would be exactly the failure mode this section warns about.
+Ratified → implementation follows the decisions, not the old defaults. Where the code could not yet
+honour one (the two-uid topology needs the Linux target, off-host anchoring needs the anchor job), the
+README says which topology the running instance has, rather than assuming the decision is in force.
 
 ## Contradiction log (resolved 2026-11-01)
 
