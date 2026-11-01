@@ -280,8 +280,13 @@ The pattern behind P1–P3 is worth naming: each was a correct control that its 
 
 So a real receipt with a narrative is unjoinable to its own verdict. `apps/cli` works around it by stamping the stored sha onto the verdict, which makes the gate pass but leaves the contract saying two incompatible things.
 
-**Ruling (for the next round, not applied tonight):** the evidence identity must be the **decision projection** — the bytes the wall was given — and the store should keep the full body only as the record. That means `insertReceipt` and `insertVerdict` both hash `toDecisionReceipt(body)`, and `receipts.receipt_sha` becomes "sha of the evidence", not "sha of the stored bytes".
+**Ruling — applied 2026-11-01 (`b92f5cc`).** The evidence identity is the **decision projection** — the bytes the wall was given. `receiptShaFor()` in `packages/contracts/src/receipt.ts` is now the single definition, used by the engine when it files a receipt, by the store when it joins a verdict to one, and by every fixture; the CLI's stamp is gone.
 
-**Why it was not applied:** the change was made, then reverted. It ripples through every fixture that constructs a receipt (17 store tests plus the panel and e2e fixtures all hashed the full body), and doing that across five agents' files at the end of a session is exactly the kind of sweeping edit that breaks a control silently. The workaround in `apps/cli` is documented and correct; the contract fix is a single coordinated change with its own test-count budget.
+Two things this settled that a shim would have hidden:
+
+- **The narrative is not evidence.** One engine test asserted the opposite — `not.toBe` on the two receipts' shas — which is precisely the bug: it made prose part of the identity, so an agent could mint new evidence by rewriting its story. It now asserts equality, with the reason in the test.
+- **The change is a ripple, so it was measured first.** It touches every fixture that constructs a receipt; doing it blind is how a control breaks silently. It was reverted once at the end of a session, then applied deliberately with the blast radius known (67 fixtures) and the whole suite re-run.
+
+`e2e/cli/default/09-holdout-sabotage.test.ts` is the spec this finally made meaningful: a change whose visible suite is green and whose receipt is faithful is still rejected, because the holdout disagrees and the Δ is measured rather than asserted.
 
 Recorded here rather than left in a chat log because the symptom ("a promotion gate that only passes because the CLI rewrote the hash") is invisible in the code that would fail.
