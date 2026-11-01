@@ -18,6 +18,13 @@ export const OPERATION_CLASSES = [
   'credential-use',
   'network-egress',
   'config-change',
+  // Privileged work — `sudo`, `docker`, `gh`, `kubectl`, `security`, `defaults write`,
+  // writes under `/etc`, `~/.ssh`, `~/.aws`. Deliberately *not* in
+  // `IRREVERSIBLE_OPERATION_CLASSES`: a declared class is a claim (L1), and the control
+  // for this one is the broker (`packages/proxy`) refusing to perform an operation that
+  // has no recorded human decision. Making the declaration force review would let an
+  // honest label cost throughput while a dishonest one changed nothing.
+  'privileged',
 ] as const;
 export type OperationClass = (typeof OPERATION_CLASSES)[number];
 

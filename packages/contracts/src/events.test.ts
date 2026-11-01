@@ -106,6 +106,15 @@ const VALID_PAYLOADS: Readonly<Record<EventType, unknown>> = {
     signedBy: 'operator',
     reason: 'second verification pass',
   },
+  'privileged.decided': {
+    type: 'privileged.decided',
+    decisionId: 'gd_4d2e9a1f7c3b',
+    taskId: 'U-7f3a9c',
+    operator: 'operator',
+    operationSha: sha('3'),
+    expiresAt: OCCURRED_AT,
+    outcome: 'allow',
+  },
   'credential.issued': {
     type: 'credential.issued',
     grantId: 'G-4d2e',
@@ -141,12 +150,15 @@ const EXPECTED_AGGREGATE: Readonly<Record<EventType, ReturnType<typeof aggregate
   'spend.reserved': 'spend',
   'spend.recorded': 'spend',
   'envelope.raised': 'envelope',
+  // Both are authorization facts; the credential aggregate is reused on purpose so
+  // `audit`'s projection switch does not grow a second case for one event type.
+  'privileged.decided': 'credential',
   'credential.issued': 'credential',
   'store.quarantined': 'store',
   'recovery.completed': 'store',
 };
 
-describe('each of the 16 event types', () => {
+describe('each of the 17 event types', () => {
   for (const [type, payload] of Object.entries(VALID_PAYLOADS)) {
     it(`accepts a valid ${type} payload`, () => {
       expect(EventPayload.parse(payload).type).toBe(type);
@@ -155,8 +167,8 @@ describe('each of the 16 event types', () => {
 });
 
 describe('EventPayload', () => {
-  it('covers 16 event types', () => {
-    expect(Object.keys(VALID_PAYLOADS)).toHaveLength(16);
+  it('covers 17 event types', () => {
+    expect(Object.keys(VALID_PAYLOADS)).toHaveLength(17);
   });
 
   it('rejects an unknown event type', () => {
@@ -202,7 +214,7 @@ describe('the ledger envelope', () => {
     }
   });
 
-  it('declares the same 16 types the payload union declares', () => {
+  it('declares the same 17 types the payload union declares', () => {
     // The envelope enum is written out by hand in events.ts; reading the schema
     // is the only way to prove the two lists agree rather than assume it.
     const ledgerTypes = (LedgerEvent.shape.type as unknown as { options: readonly string[] })

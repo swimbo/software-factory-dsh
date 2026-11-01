@@ -31,19 +31,25 @@ import type { OperationClass } from '../../contracts/src/index.ts';
  * The brokered classes. Each one maps onto a contract `OperationClass` so a brokered
  * operation and a declared unit can be compared with the same vocabulary.
  */
-export const BROKERED_CLASSES = ['sudo', 'container', 'ci', 'cloud', 'macos-security', 'path-write'] as const;
+export const BROKERED_CLASSES = [
+  'sudo',
+  'container',
+  'ci',
+  'cloud',
+  'macos-security',
+  'path-write',
+] as const;
 export type BrokeredClass = (typeof BROKERED_CLASSES)[number];
 
 /** What an operation class means for the contract. */
-export const CLASS_TO_OPERATION_CLASS: Readonly<Record<BrokeredClass, OperationClass>> =
-  {
-    sudo: 'privileged',
-    container: 'privileged',
-    ci: 'privileged',
-    cloud: 'privileged',
-    'macos-security': 'privileged',
-    'path-write': 'privileged',
-  };
+export const CLASS_TO_OPERATION_CLASS: Readonly<Record<BrokeredClass, OperationClass>> = {
+  sudo: 'privileged',
+  container: 'privileged',
+  ci: 'privileged',
+  cloud: 'privileged',
+  'macos-security': 'privileged',
+  'path-write': 'privileged',
+};
 
 export interface OperationRule {
   /** Stable id. Appears in the audit trail, so it is never renamed. */

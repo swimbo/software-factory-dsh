@@ -4,9 +4,15 @@
  * A gate is a capability, not a request (`architecture.md` §2.4): it either allows an
  * effect or refuses it, and the refusal is the *same string* on screen, in `--json` and
  * in the ledger (`ux-plan.md` §5.2). So each gate returns a decision object whose
- * `decisionHash` is a deterministic function of the decision — that hash is what the
- * store turns into a `GateDecision` row (`data-map.md` §2.20, `gate_decision_id =
- * gd_<hash[0:24]>`), which is why this module mints the id but never the timestamp.
+ * `decisionHash` is a deterministic function of the decision — that hash is what
+ * `gate_decision_id = gd_<hash[0:24]>` is derived from, which is why this module mints
+ * the id but never the timestamp.
+ *
+ * **Persistence:** there is no `gate_decisions` table in `packages/store` (verified:
+ * `grep -rn "gate_decision" packages/store/src` returns nothing), so the promise that a
+ * `GateDecision` becomes a row is *not* implemented. What exists is the ledger event
+ * (`credential.issued`, `privileged.decided`) plus the `FACTORY_HOME/gates/` artifact.
+ * Recorded here rather than papered over; `data-map.md` §2.20 needs the same correction.
  *
  * The clock is isolated here on purpose. `readWallClock` is the only function in
  * `packages/gates` that consults the system time, and only the credential gate needs
@@ -16,7 +22,13 @@
 import { contentHash, type ErrorCode } from '@factory/contracts';
 
 /** The four capability boundaries the factory has (`data-map.md` §2.20 `gate_kind`). */
-export const GATE_KINDS = ['budget', 'destructive_op', 'promotion', 'credential'] as const;
+export const GATE_KINDS = [
+  'budget',
+  'destructive_op',
+  'promotion',
+  'credential',
+  'privileged',
+] as const;
 export type GateKind = (typeof GATE_KINDS)[number];
 
 /** `require_human` is a decision, not an error: the gate is open, waiting for a person. */

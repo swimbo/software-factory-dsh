@@ -106,6 +106,19 @@ export const EventPayload = z.discriminatedUnion('type', [
     reason: z.string(),
   }),
   z.object({
+    // A brokered privileged operation: either a human decision to allow one exact
+    // operation, or the refusal of one. Recorded as an event so the decision can be
+    // audited after the fact — a decision that lives only in the proxy's memory is not
+    // a decision the factory can defend the next morning.
+    type: z.literal('privileged.decided'),
+    decisionId: z.string(),
+    taskId: z.string(),
+    operator: z.string(),
+    operationSha: hash,
+    expiresAt: iso,
+    outcome: z.enum(['allow', 'deny']),
+  }),
+  z.object({
     type: z.literal('credential.issued'),
     grantId: z.string(),
     repo: z.string(),
@@ -149,6 +162,7 @@ export const LedgerEvent = z.object({
     'spend.reserved',
     'spend.recorded',
     'envelope.raised',
+    'privileged.decided',
     'credential.issued',
     'store.quarantined',
     'recovery.completed',
@@ -171,5 +185,9 @@ export function aggregateOf(
   if (type.startsWith('spend.')) return 'spend';
   if (type.startsWith('envelope.')) return 'envelope';
   if (type.startsWith('credential.')) return 'credential';
+  // `privileged.decided` reuses the credential aggregate: both are authorization facts.
+  // Widening this union to a new `gate` aggregate would ripple into `audit`'s projection
+  // switch, which owns that decision.
+  if (type.startsWith('privileged.')) return 'credential';
   return 'store';
 }
