@@ -93,7 +93,36 @@ The pattern is the one this repository keeps re-learning: **the mechanism was co
 not.** Offline fixtures had the receipt shape the wall wanted; the real receipt had the shape the
 factory actually produces, and the difference only appears when a real worker runs.
 
-## 4. What this probe does **not** prove
+## 4. The first verified unit (2026-11-01, second paid run)
+
+After the three defects above were fixed, one more real run — unit `U-4a340469fe0d`, attempt
+`A-66c646aa681e` — produced the first **genuine pass** in this repository's history, read from the
+attempt's own store:
+
+```
+outcome: pass   reasons: []   delta: {baseRate 0, candidateRate 1, threshold 0.2, checked true}
+faithfulness:scope   replayed 5 of 8 recorded commands; 0 mismatched
+faithfulness:06/07   pass  — not replayed, with reasons (git status: untracked / ignored entries)
+faithfulness:01      pass  — not replayed (worker-launch)
+faithfulness:02-05,08 pass — exit code and output hash reproduced
+acceptance:suite-green, suite, holdout:01, holdout:quality (1 of 1 distinguishing) — all pass
+receipt exitCode 0 · 8 commands, provenance as designed
+CLI: exit 0 · state verified · wallVersion wall/0.1.0+local · fakeWall false
+usage: step 1 101 in / 95 out / 8,132 total (7,936 cached); step 2 223 / 92 / 8,379 (8,064 cached)
+```
+
+That is the whole claim of the project, measured once: a dark agent produced a change, the wall
+rejected neither it nor its evidence, the holdout discriminated the change from the base, and the
+verdict carried no reason at all.
+
+The spec that ran it was still red — **on its own guard**, which looked for `receipt.json` in the
+attempt directory. The real executor never writes that file: the receipt is a row in
+`state/factory.db`, and the attempt directory holds `launch.json`, `attempt.patch`, `command-
+provenance.json`, `stdout.log` and the session tree. A test asserting an artifact only the fake executor
+ever produced is the same defect the audit keeps finding, one level up: the guard was describing a
+system that does not exist.
+
+## 5. What this probe does **not** prove
 
 - **Not the factory's path.** This overlay was hand-written. The factory builds its own
   (`packages/dsh-adapter/src/overlay.ts`), and until the integration below lands, the fact that DSH can
