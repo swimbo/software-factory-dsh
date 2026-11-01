@@ -57,6 +57,16 @@ export {
 } from './receipt.ts';
 
 export {
+  ALERT_CODES,
+  ALERT_SEVERITIES,
+  Alert,
+  AlertsV1,
+  type Alert as AlertType,
+  type AlertCode,
+  type AlertSeverity,
+} from './alerts.ts';
+
+export {
   WALL_REASON_CODES,
   type WallReasonCode,
   ScenarioResult,

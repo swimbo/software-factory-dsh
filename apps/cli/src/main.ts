@@ -30,6 +30,7 @@ import {
 } from './exit.ts';
 import { limitsFor } from './render/limits.ts';
 import { abortVerb } from './verbs/abort.ts';
+import { alertsVerb } from './verbs/alerts.ts';
 import { auditVerb } from './verbs/audit.ts';
 import { ledgerVerb } from './verbs/ledger.ts';
 import { budgetVerb } from './verbs/budget.ts';
@@ -51,6 +52,7 @@ export const VERB_SPECS: readonly VerbSpec[] = [
   statusVerb,
   receiptsVerb,
   auditVerb,
+  alertsVerb,
   recoverVerb,
   abortVerb,
   promoteVerb,

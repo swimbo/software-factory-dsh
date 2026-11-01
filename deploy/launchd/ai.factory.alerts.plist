@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ai.factory.alerts — the daily evidence-expiry check.
+
+  Copy to ~/Library/LaunchAgents/ and load it. Replace @REPO@ and @NODE_BIN@ before you do; both are
+  absolute on purpose, because launchd does not read your shell profile and a relative path here would
+  fail at 04:00 and nowhere else.
+
+  What it does: `factory alerts` asks the two expiry questions — is the anchor fresh, is any class
+  certificate still current — and exits 0 (nothing expired), 9 (expired evidence) or 8 (the anchor host
+  could not be reached). It is read-only: it never anchors, never re-certifies, never writes.
+
+  Why 04:00: the anchor job runs at 03:00. An alert that runs before the anchor it checks would report
+  yesterday's staleness every morning.
+
+  Why no retry: a scheduled monitor that retries into the same broken transport only fills the log, and
+  a log full of the same line is a log nobody reads. The next day's run is the retry.
+
+  The log is the page until a real channel exists. launchd appends stdout and stderr to the same file,
+  both are line-buffered, and the verb writes one line per alert plus the exit code on exit — so
+  `tail -n 40 ~/.factory/alerts.log` answers "did anything expire, and when".
+
+  Nothing here sets FACTORY_MODEL_ID on purpose: this job is offline, so certificates are compared on
+  policy version only. When the wall starts stamping certificates with a model id, add it here — a
+  monitor that compares a model id it did not run under would call every class stale.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.factory.alerts</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd @REPO@ &amp;&amp; @NODE_BIN@ apps/cli/src/main.ts alerts</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@NODE_BIN_DIR@:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- The same target `factory ledger verify` uses; an alert that checks a different anchor is
+         a monitor of nothing. -->
+    <key>FACTORY_ANCHOR_SSH</key>
+    <string>hermes-control</string>
+    <key>FACTORY_ANCHOR_PATH</key>
+    <string>$HOME/.factory/anchors/software-factory-dsh.jsonl</string>
+    <!-- The ledger being audited: the operator's real factory home, not a throwaway. -->
+    <key>FACTORY_HOME</key>
+    <string>/Users/bo/.factory</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- If the machine was asleep at 04:00, run once on the next wake rather than skipping the day. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/bo/.factory/alerts.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/bo/.factory/alerts.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

@@ -15,6 +15,7 @@ export const VERBS = [
   'status',
   'receipts',
   'audit',
+  'alerts',
   'recover',
   'abort',
   'promote',
@@ -97,6 +98,14 @@ const SPECIFIC: Readonly<Record<Verb, readonly string[]>> = {
     '`audit` is read-only and works on a quarantined store.',
     'The escape-rate sample asks you to re-validate; it never re-validates for you.',
     'Printing the trace says nothing about safety — see the block this command prints verbatim.',
+  ],
+  alerts: [
+    'Read-only: `alerts` never anchors, never re-certifies and never writes to the store or ledger.',
+    'It runs the same judgements as `ledger verify` and `audit --certifications`, not a second copy.',
+    'An unreachable anchor is exit 8 (environment), never 0: a monitor that calls a transport failure',
+    '  "fine" is worse than no monitor at all.',
+    'It prints and logs; it does not page. There is no notification channel in v1 — ~/.factory/alerts.log',
+    '  is the page, and a warning-severity alert does not change the exit code.',
   ],
   recover: [
     '`recover` never re-dispatches, never retries and never deletes. It reconciles and reports.',
