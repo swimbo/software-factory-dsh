@@ -85,7 +85,7 @@ than an anchor that was already written, before any verdict from it is trusted.
 
 ## When it does not work
 
-- **`verify` says `MISSING` after a successful `anchor`** — the read succeeded and there is no record
+- **`verify` says `MISSING` after a successful `anchor`** — _the read succeeded_ and there is no record
   there, so the transport wrote somewhere else (`FACTORY_ANCHOR_PATH` vs the path your `ssh` reads) or
   the host answered and discarded the append. Run `ssh -o BatchMode=yes <host> 'tail -1 <path>'` by
   hand. A host that cannot be reached is no longer one of the causes: that exits **8** with ssh's own
@@ -95,6 +95,12 @@ than an anchor that was already written, before any verdict from it is trusted.
   this is fixed, and `factory alerts` reports it as exit 8 (never 0) for the same reason. Test it in the
   context the job runs in — `ssh -o BatchMode=yes <host> true` — because launchd has no ssh-agent: a key
   with a passphrase works in your terminal and fails at 03:00.
+- **`verify` exits 8 with `could not be read` or `holds no readable record`, and the anchor is local** —
+  the file is there and was not usable: `EACCES` (an anchor written by one user and read by another —
+  common once the job runs under launchd), a path that is a directory, a file whose lines no longer
+  parse, or a record written by a schema this build does not know. This is **not** `MISSING`: `MISSING`
+  means the read succeeded and there is no anchor. `factory alerts` reports the local and the off-host
+  case at exit **8** for the same reason, because both transports route through one function.
 - **No anchor target configured** — exit **8** naming both variables. Set `FACTORY_ANCHOR_SSH` (off-host)
   or accept the weaker local anchor explicitly.
 - **Alerting is built now, notification is not:** `factory alerts` (daily 04:00 → `~/.factory/alerts.log`)
