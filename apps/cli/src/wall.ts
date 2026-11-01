@@ -272,6 +272,13 @@ export interface WallInputs {
   readonly nowIso: string;
   readonly policyVersion: string;
   /**
+   * Which model produced the attempt, when the caller knows it. `undefined` is honest: a
+   * certificate recorded without a model id cannot be proven current after the operator points
+   * `FACTORY_MODEL_ID` somewhere else, and `audit --certifications` says `re-certify: model unknown`
+   * rather than assuming the model did not change.
+   */
+  readonly modelId?: string | undefined;
+  /**
    * The operator's home, for `~` expansion in the broker's path rules. `null` means the
    * classifier cannot expand `~`, which makes it refuse rather than guess.
    */
@@ -331,6 +338,7 @@ export async function evaluateReceipt(input: WallInputs): Promise<WallOutcome> {
     },
     diff: patchDiffInspector(input.patchFile, input.policy.testRoot),
     nowIso: input.nowIso,
+    ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
   });
 
   return { verdict, holdoutLoaded: holdout !== null };

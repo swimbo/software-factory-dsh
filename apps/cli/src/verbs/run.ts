@@ -636,6 +636,13 @@ async function evaluateRealWall(
     nowIso: ctx.nowIso(),
     policyVersion: ctx.policyVersion,
     home: ctx.env['HOME'] ?? null,
+    // The certificate records the model the attempt actually ran under, so a later policy or model
+    // change can be detected instead of inferred. Absent is `null`, which the audit treats as
+    // "cannot prove current" rather than "unchanged".
+    ...(() => {
+      const configured = (ctx.env['FACTORY_MODEL_ID'] ?? '').trim();
+      return configured === '' ? {} : { modelId: configured };
+    })(),
   });
   if (!outcome.holdoutLoaded) {
     ctx.ui.err(

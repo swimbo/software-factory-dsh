@@ -2786,6 +2786,17 @@ export function openStore(options: OpenStoreOptions): Store {
     };
   }
 
+  /**
+   * A verdict as the store returns it: reconstructed from the `verdicts` columns, **not** the
+   * original JSON. That is deliberate — the promotion-signature payload is computed over this
+   * object, so its shape must not grow silently when a package adds a field to the contract.
+   *
+   * Two contract fields are consequently absent here on purpose:
+   *   - `certification` and `modelId` live in the `class_certificates` projection (one fact, one
+   *     place, written inside the same transaction as the verdict). Read them with
+   *     `classCertificates()` / `certificatesForClass()`, or through `factory audit
+   *     --certifications`; adding them back here would change every promotion signature.
+   */
   function mapVerdict(row: VerdictDbRow): VerdictRow {
     const delta = JSON.parse(row.delta_json) as VerdictType['delta'];
     return {
