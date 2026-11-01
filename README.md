@@ -72,8 +72,14 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
 - **No off-host anchor** (ND4), **no verdict-store split by uid** (ND2), **no proxy metering**
   (ND3), **no certification operating point** (ND1). These are open human decisions, recorded in
   `architecture.md §11` as NEEDS_HUMAN_DECISION rather than quietly defaulted.
-- **No live DSH turn in CI.** The `@live` specs skip without a key; the DSH integration is proven
-  by adapter tests and one recorded probe (`evidence/phase-9b-dsh-integration-probe.md`).
+- **The live layer needs an operator key, and it forwards that key to `dsh`.** The `@live` specs
+  skip unless `BIFROST_API_KEY` **and** `DSH_BIN` are set, so the offline gate stays free. When they
+  do run they forward exactly one credential name to the child (`FACTORY_LIVE_MODEL=1`, recorded as
+  `credentialsForwarded: ['BIFROST_API_KEY']` in `launch.json`), because v1 has no credential proxy
+  container — every offline and container path keeps the original "worker never holds the key"
+  guarantee, the live path does not. ADR-006 records the amendment.
+- **No model-call budget of its own.** Spend is bounded by the operator's gateway route, not by the
+  factory; the factory's `budget` reserves an _estimate_ per attempt and never measures tokens.
 - **No container isolation on this host.** The 4 `@docker` specs are tagged and skipped; the local
   runner measures behaviour, not containment.
 - **DSH's sandbox is not a security boundary**, and is not treated as one anywhere.
@@ -81,6 +87,15 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   the agent-client-protocol path is not implemented, so "one-shot **or** ACP workers" is delivered as
   **one-shot only**. An ACP worker would need a second executor behind the same `Executor` port and
   the same launch record — the seam exists, the implementation does not.
+
+## What has actually been executed against a model
+
+One real unit — not a fixture — was verified end to end on 2026-11-01: a `dsh` one-shot turn through
+Bifrost (`auto` → `deepseek-v4.1-flash:1017`), receipt written, wall measured, verdict
+**`pass` with no reasons**, `replayed 5 of 8 recorded commands; 0 mismatched`, holdout discriminating,
+CLI exit 0, `12,706` tokens over two steps. The numbers, the three defects that run exposed, and the
+replay-policy decisions they forced are in
+[`docs/planning/dark-factory-dsh/evidence/phase-9b-live-model-probe.md`](docs/planning/dark-factory-dsh/evidence/phase-9b-live-model-probe.md).
 
 ## Documents
 
