@@ -1,6 +1,6 @@
 # ADR-006 — DeepSeek only, behind Bifrost, and no paid call in any test
 
-**Status:** accepted (Phase 9b/9d); the proxy half is **not built**
+**Status:** accepted (Phase 9b/9d); amended 2026-11-01 for the live-model path; the credential proxy half is **not built**
 **Context:** [architecture.md](../planning/dark-factory-dsh/architecture.md) §9, [consensus-plan.md](../planning/dark-factory-dsh/consensus-plan.md) constraint C5
 **Proven by:** `packages/dsh-adapter` (overlay + executor tests), `docs/verification/*/summary.json` (`modelKeys: {BIFROST_API_KEY: false, DEEPSEEK_API_KEY: false}`)
 
@@ -32,6 +32,33 @@ promise, and it is checked on every verification run, not just at review time.
   key (`@live`), and their bodies are `expect.unreachable()` so a future implementation must be
   written deliberately. The verification summary records the key state next to the results, so a
   run that did have a key would be visible in the artifact.
+
+## Amendment (2026-11-01) — the live path, and the one credential it must forward
+
+The original decision made "no paid call in any test" structural by never passing a key to a child.
+That held while no live call existed. The operator then provisioned a Bifrost program key, and the
+first real run proved the model path — which forced one honest exception rather than a quiet one:
+
+- **`FACTORY_LIVE_MODEL=1` forwards exactly one credential name**, `BIFROST_API_KEY`, to the `dsh`
+  child, and records `credentialsForwarded: ['BIFROST_API_KEY']` in `launch.json` — the **name**, never
+  the value (`packages/dsh-adapter/src/launch-record.ts`). With the flag unset the allowlist is
+  unchanged and the key is dropped; both directions are pinned in specs.
+- **The reason is the missing proxy, not a change of mind.** In v1 there is no credential proxy
+  container, so the process that talks to the gateway must hold the gateway credential. The container
+  path (E2E-44) is the one that removes that need, and it is still `UNKNOWN`.
+- **C5 is unchanged as a gate.** The offline suite and `scripts/verify.sh` stay free: both `@live`
+  specs skip unless `BIFROST_API_KEY` **and** `DSH_BIN` are set, and the verification summary records
+  which of them were present. A run with the key unset prints
+  `live-model SKIPPED — BIFROST_API_KEY is not set`.
+- **The credential is a program key, not a virtual-user key.** It lives on `hermes-control` with mode
+  `0600`, is read per command over SSH, and must never be written into this repository, a launch
+  record, or a receipt. `git grep` for the value returns nothing, and a spec asserts no key bytes
+  appear in `launch.json`.
+
+What this amendment does **not** buy: the worker still receives a credential when live mode is on, so
+"the worker never receives the key" is true of every offline and container path and **false** of the
+live path until the proxy exists. That is stated in `README.md` next to the limitation, because a
+security claim that silently changes scope is worse than one that is narrower than advertised.
 
 ## Alternatives rejected
 

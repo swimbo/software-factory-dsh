@@ -1,0 +1,7 @@
+{"type":"status","phase":"step_end","turn":1,"step":1,"usage":{"inputTokens":205,"outputTokens":124,"totalTokens":6089,"cacheReadTokens":5760}}
+{"type":"status","phase":"step_end","turn":1,"step":2,"usage":{"inputTokens":786,"outputTokens":71,"totalTokens":6617,"cacheReadTokens":5760}}
+{"type":"status","phase":"step_end","turn":1,"step":3,"usage":{"inputTokens":919,"outputTokens":408,"totalTokens":7343,"cacheReadTokens":6016}}
+{"type":"status","phase":"step_end","turn":1,"step":4,"usage":{"inputTokens":118,"outputTokens":250,"totalTokens":7664,"cacheReadTokens":7296}}
+{"type":"status","phase":"step_end","turn":1,"step":5,"usage":{"inputTokens":1189,"outputTokens":103,"totalTokens":7820,"cacheReadTokens":6528}}
+{"type":"status","phase":"step_end","turn":1,"step":6,"usage":{"inputTokens":444,"outputTokens":151,"totalTokens":8147,"cacheReadTokens":7552}}
+{"type":"status","phase":"turn_end","turn":1,"reason":{"kind":"completed"}}
