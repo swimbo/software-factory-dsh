@@ -1,6 +1,6 @@
 # Runbooks
 
-Seven 2am procedures. Each one is written for the person who did not build the thing: the symptom,
+Eight 2am procedures. Each one is written for the person who did not build the thing: the symptom,
 what the factory will refuse to do, the exact commands, what "fixed" looks like, and what to do when
 it does not work. Every command here was run against this tree; every limit that is real is labelled
 **not built** rather than described as a plan.
@@ -14,6 +14,7 @@ it does not work. Every command here was run against this tree; every limit that
 | [rotate-operator-key.md](rotate-operator-key.md)         | every promotion is refused with `PROMOTION_UNSIGNED`             | `5`                |
 | [ledger-anchor.md](ledger-anchor.md)                     | `ledger verify` says the anchor is stale, missing or behind      | `9`, `8`           |
 | [certificate-expired.md](certificate-expired.md)         | `audit --certifications` says a class certificate is stale       | `9`, `8`           |
+| [evidence-expiry.md](evidence-expiry.md)                 | the morning check: did anything expire overnight?                | `9`, `8`           |
 
 Common ground, so no runbook has to repeat it:
 

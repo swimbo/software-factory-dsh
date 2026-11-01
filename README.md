@@ -79,8 +79,12 @@ warning.
 
 What that still is not: a **scheduled** re-certification. Nothing runs the measurement again on a
 policy or model change; the audit tells you the certificate expired and a person decides to re-run the
-class. Alerting works the same way — `ledger verify` exits 9 and `audit --certifications` exits 9, but
-nothing pages anyone.
+class. **What checks it.** `factory alerts` runs both judgements in one read-only command — importing
+`verifyAnchor` and `certificateRecency`, not restating them — and exits `0` clean, `9` for an integrity
+alert, `8` when the anchor host is unreachable. A launchd job runs it daily at 04:00 into
+`~/.factory/alerts.log`. **Still true:** nothing pages a person. There is no email, webhook or channel —
+an alert is a line in a log and an exit code a timer ignores, so a host that stops running jobs goes
+quiet, not loud. Expiry is _detectable_; it is not _escalated_.
 
 ## Packages
 
@@ -123,9 +127,13 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   are in `findings.md` § DECIDED and the implementation record in
   `evidence/phase-13-nd-decisions.md`. The **daily anchor job is installed** on this host
   (`deploy/launchd/ai.factory.anchor.plist`, 03:00, first records written 2026-11-01 and verified
-  `FRESH · off-host` against `hermes-control`). Still not built: **alerting on a stale anchor** —
-  `ledger verify` exits 9, but nothing pages anyone — and **re-certification**, which is being turned
-  from prose into a stored certificate now.
+  `FRESH · off-host` against `hermes-control`). The daily **`factory alerts`** job (04:00,
+  `~/.factory/alerts.log`) asks both expiry questions in one read-only command and answers in an exit
+  code: `0` clean, `9` a stale/missing/rolled-back anchor, a quarantined store or an expired class
+  certificate, `8` when the anchor host cannot be reached — a transport failure is never reported as
+  "fine". Still not built: **notification** (the log is the page; nothing reaches a phone or an inbox)
+  and **scheduled re-certification** (a monitor says a certificate expired; a person decides to
+  re-measure the class).
   ND3's ceiling is proven **through the real executor** (a paid `@live` spec arms it and crosses it on
   one turn, ~1 cent, with the crossing recorded in `usage_records`), and ND2's two-uid path is proven
   in a `node:26-bookworm` container rather than on the Linux target itself.
