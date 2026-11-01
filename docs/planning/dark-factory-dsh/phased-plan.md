@@ -82,7 +82,9 @@ Captured 2026-11-01, before planning began.
 
 ## Current phase
 
-Phases 1–8 **complete** (the mandatory Phase 5 architecture debate returned 2026-11-01 and is folded into `architecture.md > §11`) · **Phase 9a–9e implemented** · Phases 10–14 in progress.
+Phases 1–8 **complete** (the mandatory Phase 5 architecture debate returned 2026-11-01 and is folded into `architecture.md > §11`) · **Phase 9a–9e implemented** · **Phase 10 started** (process + browser suites) · **Phases 11–12 harness and evidence delivered** · Phase 13 (gap audit) and 14 (fixes) next.
+
+Current gate: `bash scripts/verify.sh` → **6 passed, 1 skipped, 0 failed**; `pnpm test` → **1014 passed, 10 skipped** across 63 files (unit, integration, process e2e, browser specs). Live-model stages stay skipped without `BIFROST_API_KEY`, by design (constraint C5).
 
 ## Phases
 
