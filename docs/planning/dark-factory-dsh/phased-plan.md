@@ -86,6 +86,13 @@ Phases 1–8 **complete** (the mandatory Phase 5 architecture debate returned 20
 
 Current gate: `bash scripts/verify.sh` → **6 passed, 1 skipped, 0 failed**; `pnpm test` → **1036 passed, 10 skipped** across 68 files (unit, integration, process e2e). The 41 browser specs run via `pnpm run test:e2e:panel` and stay outside the gate until the host has chromium revision 1248; the 4 `@docker` and 2 `@live` specs are skipped and counted as unverified, never as pass. Live-model stages stay skipped without `BIFROST_API_KEY`, by design (constraint C5).
 
+## Phase evidence index
+
+[`evidence/README.md`](evidence/README.md) maps every one of the 18 phases to the artefact and the
+command that proves it, including the four phases whose proof lives only in their suites. It also
+lists what is **not** evidenced: the two `@live` specs, the DSH worker inside the wall container, and
+the browser suite's absence from the acceptance gate.
+
 ## Phases
 
 | Phase | Name                                                 | Output                                                                                                           | Status                                                                                                                       |
