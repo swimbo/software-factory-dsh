@@ -23,7 +23,7 @@ Design the system — four planes, ten components, two API surfaces, integration
 - [x] `evidence-ledger.md` — every factual claim used in the debate with its source (research file + line, or URL), so an unsourced argument cannot win.
 - [x] `debate-transcript.md` — round-by-round record naming the persona, the claim, the rebuttal and the outcome, referencing the **current** `architecture.md`.
 - [x] Fold the consensus back into `architecture.md`: replace the `## 11. Debate Outcomes` placeholder with what changed, what was rejected and why, and any new component/API edits.
-- [ ] Log every unresolved disagreement as a `NEEDS_HUMAN_DECISION` row in `findings.md` (the section currently reads "none yet"), each with the decision needed and the default if unanswered.
+- [x] Log every unresolved disagreement as a `NEEDS_HUMAN_DECISION` row in `findings.md` (the section currently reads "none yet"), each with the decision needed and the default if unanswered.
 - [ ] `phased-plan.md > ## Delegated work` — add the debate row with status and artifact links.
 
 ## Delegation plan
@@ -43,7 +43,7 @@ Five personas run in parallel and are **read-only**: each reads `architecture.md
 - [x] **Non-functional requirements**: performance, scalability, availability, and observability targets recorded.
 - [x] **Adversarial debate invoked**: /debate (with the argument "<path to architecture.md>") has been run. Evidence: `consensus-plan.md` and `debate-transcript.md` exist and reference the current `architecture.md`.
 - [x] **Consensus incorporated**: `architecture.md` has been updated to reflect resolved decisions from `consensus-plan.md`. A `## Debate Outcomes` section summarizes what changed.
-- [ ] **Unresolved items escalated**: any disagreements the debate could not resolve are logged in `findings.md` tagged `NEEDS_HUMAN_DECISION`.
+- [x] **Unresolved items escalated**: any disagreements the debate could not resolve are logged in `findings.md` tagged `NEEDS_HUMAN_DECISION`.
 - [ ] **User resolution**: every `NEEDS_HUMAN_DECISION` item from this phase is resolved by the user before the phase is marked `complete`. Resolutions recorded in `progress.md`.
 
 ### Project-specific evidence
@@ -51,7 +51,7 @@ Five personas run in parallel and are **read-only**: each reads `architecture.md
 - [x] `consensus-plan.md`, `evidence-ledger.md` and `debate-transcript.md` all exist and quote `architecture.md` section headings that still exist in the current file (no stale reference to a renamed §).
 - [~] `architecture.md > ## 11. Debate Outcomes` is no longer the placeholder sentence — it lists each of the six pre-committed proposals as _upheld_, _modified_ or _overturned_.
 - [~] `evidence-ledger.md` has no unsourced claim: each row cites a `research/*.md` line range or a URL.
-- [~] Every `NEEDS_HUMAN_DECISION` row in `findings.md` has a stated default and a phase that blocks on it.
+- [x] Every `NEEDS_HUMAN_DECISION` row in `findings.md` has a stated default and a phase that blocks on it.
 
 ## Acceptance criteria
 
@@ -63,4 +63,4 @@ Components, APIs, data ownership, integrations and infrastructure are chosen and
 - The debate is the only place the six pre-committed proposals are allowed to lose. If no proposal is seriously contested, the debate was theatre — that is itself a finding for `consensus-plan.md`.
 - Alternatives must stay honest: Restate/Temporal's ops burden, ACP's richer seam and Apple Containerization's egress allowlist are real and are recorded as revisit triggers, not dismissed.
 
-**Unproven (audit 2026-11-01):** 52 `architecture.md §11` records amendments A1… and 'consensus: not reached' rather than adjudicating the six proposals as upheld/modified/overturned; 53 the evidence ledger's per-row sourcing was spot-checked, never machine-checked; 54 vacuous — `findings.md:225` is still the 'none yet' placeholder, so the per-row default/blocking-phase check passes on an empty set.
+**Unproven (audit 2026-11-01, revised):** 52 `architecture.md §11` records amendments A1… and "consensus: not reached" rather than adjudicating the six proposals as upheld/modified/overturned (`[~]`, and arguably better than the box asked); 53 the evidence ledger's per-row sourcing was spot-checked, never machine-checked. **26/46/54 were `[ ]` at first pass because `findings.md` still said "none yet"; they are now `[x]`** — `findings.md:223` carries ND1–ND4 with a default and a blocked-claim column, each pointing at `architecture.md §11`. **47 stays open:** the user has not resolved any of the four, and that is the whole point of escalating them.

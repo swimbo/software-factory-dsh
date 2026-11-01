@@ -4,7 +4,7 @@
 **Surface:** `apps/cli` (C9) — the operator CLI. The status page is [`ui-plan.md`](ui-plan.md); its UX rules are inherited from §6 and §7 here.
 **Companions:** [`architecture.md`](architecture.md) · [`phased-plan.md`](phased-plan.md) · [`findings.md`](findings.md) · [`research/pain-points.md`](research/pain-points.md) · [`ui-plan.md`](ui-plan.md) · [`e2e-tests.md`](e2e-tests.md) · [`user-stories.md`](user-stories.md) (Phase 4; the `US-…` ids referenced here are defined in the _Story registry_ at the end of this file)
 
-**Research basis:** `research/ux-design.md` (Nielsen heuristics, Shneiderman's eight golden rules, the 14-category dark-pattern taxonomy, 12-factor CLI, Heroku CLI style guide, Microsoft HAX, terminal/screen-reader accessibility) · `research/kickoff-research.md` §Phase 7/8 (`NO_COLOR` semantics, FreeBSD a11y guidance) · `research/pain-points.md` T6/T7.
+**Research basis:** `research/kickoff-research.md` §Phase 7/8 (the `NO_COLOR` standard and its finding that `NO_COLOR` does _not_ cover bold/underline meaning; FreeBSD accessibility guidance on never using colour as the only carrier; the 2026 terminal-UI state of the art) · `findings.md` §Phase 7 (UX Planning) Kickoff · `research/pain-points.md` T6 (human review was already degrading) and T7 (intent ambiguity is upstream) · `architecture.md` §11. **There is no separate design-research artefact, and this plan does not reference one:** the general references it leans on — Nielsen's heuristics, Shneiderman's eight golden rules, the 14-category dark-pattern taxonomy, 12-factor CLI, the Heroku CLI style guide, Microsoft HAX — are applied inline (§6 accessibility, §7 dark-pattern audit, §8 CLI standards) and named at the point of use. The absence is recorded as DEV5 in `progress.md:117`.
 
 ---
 
@@ -622,7 +622,7 @@ The CLI is keyboard-only by construction. The status page (see `ui-plan.md`) con
 
 ## 7. Dark-pattern audit (of our own design)
 
-Audited against the 14-category taxonomy in `research/ux-design.md` ("Dark Pattern Classification"), plus the three factory-specific inversions that matter more than any generic category: **does the UI wording subvert "unknown is not pass"? does a green status hide an estimated-not-measured budget? does the CLI nudge the operator to skip a gate?**
+Audited against the 14-category dark-pattern taxonomy (applied here rather than cited from an artefact — see the research-basis note at the top of this file), plus the three factory-specific inversions that matter more than any generic category: **does the UI wording subvert "unknown is not pass"? does a green status hide an estimated-not-measured budget? does the CLI nudge the operator to skip a gate?**
 
 ### 7.1 Taxonomy sweep
 

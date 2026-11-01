@@ -222,7 +222,16 @@ A `--patch` overlay applied last **can decouple them**. Verified composition wit
 
 ## NEEDS_HUMAN_DECISION
 
-_(none yet — items surface from the Architecture and Tech Guide debates)_
+Four decisions the Phase 5 debate could not settle. Each is argued in full — with the arithmetic or the unverified fact that stopped it — in [`architecture.md §11`](architecture.md#needs_human_decision); they are escalated here because this is the file the phase gates read. The **default if unanswered** and **what it blocks** columns are recorded here for the first time (they were owed by `phase-5-plan.md` and `phase-6-plan.md` and their absence is why two boxes in those plans cannot be ticked): the defaults are the positions the plan already takes, so leaving a decision open costs a _claim_, not a feature.
+
+| #       | Decision                                                                                                         | Default if unanswered                                                                                   | What it blocks                                                                                   |
+| ------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| **ND1** | Certification operating point — trial unit, m, k, per-scenario quorum, with published α and β                    | No pass-rate claim at all; the wall reports measured Δ and names the operating point as undecided (A14) | Any "certified" wording; the Phase 12 honest-claims line; a future pass-rate NFR                 |
+| **ND2** | Verdict store placement, whether a second OS uid ships in v1, and therefore the wall's process topology          | One host, one uid, one store; "two failure domains" stays withdrawn (§11)                               | Phase 9c's leak-proof claims; the `@docker` isolation suite's scope; R5's topology half          |
+| **ND3** | Proxy metering semantics — what the proxy counts, where the signed usage record lands, reconciliation vs Bifrost | Spend is an estimate with `unknown` propagated; the ceiling **refuses** but does not **enforce** spend  | R3's "harness-owned ceilings" wording; Phase 9d's budget-gate claims; `BUDGET_UNKNOWN` semantics |
+| **ND4** | Off-host anchor scope for v1.1                                                                                   | Nothing ships in v1; a local watermark cannot detect the coordinated rollback it exists for             | Nothing in v1 — recorded so it is not silently forgotten                                         |
+
+All four are **claim-blockers, not ship-blockers**: the code is correct under either answer, and what changes is the sentence the operator is allowed to say. None of them may be closed by an agent.
 
 ## Contradiction log (resolved 2026-11-01)
 

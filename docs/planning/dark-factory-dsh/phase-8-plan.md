@@ -46,7 +46,7 @@ Single writer: `ui-author` owns `ui-plan.md`. It can run in parallel with Phase 
 - [~] **Brand stance**: `ui-plan.md > ## Brand` states whether the product uses a distinct brand palette or a neutral one; Anthropic-brand palette referenced only if explicitly requested.
 - [x] **Alignment with UX**: every flow in `ux-plan.md` can be composed from components in this inventory. No orphan flows.
 - [~] **Anti-pattern audit**: `ui-plan.md > ## Anti-Pattern Audit` confirms we are not committing the visual AI-slop failure modes (gradient soup, generic card grids, inconsistent rhythm, decorative-only shadows).
-- [~] **Cross-reference to research**: `research/ui-design.md` cited where applicable.
+- [x] **Cross-reference to research**: `research/ui-design.md` cited where applicable.
 
 ### Project-specific evidence
 
@@ -67,4 +67,4 @@ There is a token set with measured WCAG AA contrast, a minimal component invento
 - The page is a **read-only** surface on loopback with a token: no auth flow, no session, no CSRF surface by construction. Do not let UI scope creep add write actions — the operator CLI is the write surface (Phase 7).
 - Color contrast is the one place a plausible-looking plan can be wrong; ratios must be measured, not estimated.
 
-**Unproven (audit 2026-11-01):** 26/48 no `## Anti-Pattern Audit` section — each component lists 'Anti-pattern avoided' inline; 44 no iconography decision is stated; 46 no brand-stance section; 49/57 `ui-plan.md:7` cites `research/ui-design.md`, which does not exist (DEV5); 56 `/api/status` health keys drifted from the planned `{controlPlane, wall, docker, dsh}` to seven keys (`store`, `controlPlane`, `executor`, `wall`, `outbox`, `dshVersion`, `taskClasses`).
+**Unproven (audit 2026-11-01, revised):** 26/48 no `## Anti-Pattern Audit` section — each component lists "Anti-pattern avoided" inline; 44 no iconography decision is stated; 46 no brand-stance section; 56 `/api/status` health keys drifted from the planned `{controlPlane, wall, docker, dsh}` to seven keys (`store`, `controlPlane`, `executor`, `wall`, `outbox`, `dshVersion`, `taskClasses`). **49/57 were `[~]` for a dead citation: `ui-plan.md:7` (and three inline rows at `:287`, `:322`, `:336`) pointed at `research/ui-design.md` / `research/ux-design.md`. All four now name the pattern inline instead of citing a file that does not exist, so 49 is `[x]`.**

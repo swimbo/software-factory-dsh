@@ -44,7 +44,7 @@ Single writer: the `ux-author` teammate owns `ux-plan.md`; the Lead owns the kic
 - [x] **CLI / TUI guidance** _(if applicable)_: 12-Factor CLI principles and Heroku CLI standards referenced; help output, exit codes, progress signals, machine-readable mode planned.
 - [x] **IDE plugin guidance** _(if applicable)_: host-platform affordances (VS Code containers, JetBrains UI paradigms) respected.
 - [~] **AI interaction guidance** _(if applicable)_: Microsoft HAX guidelines considered — disclose AI, handle uncertainty, allow correction/undo.
-- [~] **Cross-reference to research**: `research/ux-design.md` cited where applicable.
+- [x] **Cross-reference to research**: `research/ux-design.md` cited where applicable.
 - [x] **User stories covered**: every P0/P1 story from `user-stories.md` is represented in at least one flow.
 
 ### Project-specific evidence
@@ -65,4 +65,4 @@ Every P0/P1 story has a walked-through CLI flow with explicit error, empty, load
 - The message-asymmetry rule is a security property (R2's opaque feedback) expressed as UX. If the operator-facing and generator-facing strings share a code path, the opacity will erode — the plan should require two distinct formatters.
 - Do not invent a TUI. The plan is CLI-first with plain stdout; the only graphical surface is Phase 8's read-only status page.
 
-**Unproven (audit 2026-11-01):** 23/41 there is no empty/loading/partial-states section — the states are described inside flows and §5.5; 46 no Microsoft HAX or AI-interaction guidance anywhere (`grep -i hax ux-plan.md` → none); 47/55 `ux-plan.md:7` cites `research/ux-design.md`, which does not exist (DEV5 explains the deviation but the header still reads as a live citation); 54 no terminal transcript is attached to prove `NO_COLOR=1` rendering.
+**Unproven (audit 2026-11-01, revised):** 23/41 there is no empty/loading/partial-states section — the states are described inside flows and §5.5; 46 no Microsoft HAX or AI-interaction guidance anywhere (`grep -i hax ux-plan.md` → none, and the header no longer claims it as a research artefact); 54 no terminal transcript is attached to prove `NO_COLOR=1` rendering. **47/55 were `[~]` for a dead citation: `ux-plan.md:7` and `:625` pointed at `research/ux-design.md`, which does not exist. Both now cite the files that actually informed the plan and state the absence plainly (DEV5, `progress.md:117`), so 47 is `[x]`.**
