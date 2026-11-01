@@ -78,7 +78,10 @@ function readTurn(recordDir: string): {
   readonly errors: readonly string[];
 } {
   const path = join(recordDir, 'stdout.log');
-  if (!existsSync(path)) return { completed: false, usage: null, errors: [] };
+  // A helper that returns "nothing happened" when the file is absent is how a test stops
+  // measuring: the attempt directory either holds the transcript or the spec is looking in the
+  // wrong place, and those are different failures.
+  expect(existsSync(path), `no stdout.log in ${recordDir}`).toBe(true);
   let completed = false;
   let usage: TurnFact | null = null;
   const errors: string[] = [];
@@ -173,26 +176,32 @@ describe.skipIf(!READY)(
           timeoutMs: 300_000,
         });
 
-        // Assert the CLI's own account first: everything below reads files the run writes, and
-        // an ENOENT on `receipt.json` says nothing about why the launch failed.
+        // Assert the CLI's own account first: everything below reads what the run recorded.
         const verdict = jsonOf(run);
         const attemptId = String(verdict['attemptId']);
+        // The real executor keeps the attempt *artifacts* (launch.json, task.md, stdout.log, the
+        // patch) under `attempts/<unit>/<attempt>`, while the child runs in `state/attempts/<id>`
+        // and the receipt itself exists only in the store — three different places, and the guard
+        // that read a `receipt.json` file here was describing one that is never written.
         const recordDir = join(fixture.home, 'attempts', unitId, attemptId);
         const turn = readTurn(recordDir);
-        // Before parsing: a run that stops in `launching` writes no receipt, and an ENOENT is not an
-        // account of what happened. The guard carries the CLI's exit code, its last status line and
-        // the attempt state, so a missing file is reported as a missing receipt — the same class of
-        // defect as a verdict that cites a table nobody created.
-        const receiptMissing = !existsSync(join(recordDir, 'receipt.json'));
-        if (receiptMissing) {
+
+        const store = openStore({ dir: join(fixture.home, 'state') });
+        let stored: ReturnType<typeof store.latestReceiptForUnit> = null;
+        try {
+          stored = store.latestReceiptForUnit(unitId);
+        } finally {
+          store.close();
+        }
+        if (stored === null) {
           const lastStatus = run.stderr
             .split('\n')
             .map((line) => line.trim())
             .filter((line) => line !== '')
             .slice(-1)[0];
           expect.fail(
-            'the launch produced no receipt for this attempt — nothing was measured and nothing was ' +
-              'spent that can be checked\n' +
+            'no receipt row in the store for this attempt — the run recorded nothing that can be ' +
+              'checked\n' +
               `  cli exit code   ${String(run.code)}\n` +
               `  attempt state   ${String(verdict['attemptState'])} (unit state ${String(
                 verdict['state'],
@@ -202,19 +211,7 @@ describe.skipIf(!READY)(
               `  stdout          ${run.stdout.trim().split('\n').slice(-1)[0] ?? ''}`,
           );
         }
-        const receipt = JSON.parse(readFileSync(join(recordDir, 'receipt.json'), 'utf8')) as {
-          exitCode: number | null;
-          ceilings: { hit: string[]; turnsUsed: number };
-          diff: { filesChanged: number };
-          commands: {
-            argv: string[];
-            cwd: string;
-            exitCode: number | null;
-            source?: string;
-            replayable?: boolean;
-            replaySkipReason?: string;
-          }[];
-        };
+        const receipt = stored.receipt;
         const launch = JSON.parse(readFileSync(join(recordDir, 'launch.json'), 'utf8')) as {
           profile: { requested: string; effective: string | null };
           overlay: { sha256: string | null };
@@ -230,8 +227,8 @@ describe.skipIf(!READY)(
           )} / total ${String(turn.usage?.totalTokens ?? 0)} · outcome ${String(verdict['outcome'])}`,
         );
 
-        // 1. a real attempt is promotable: the wall replayed the factory-verification group in
-        //    recorded order from the receipt's base (7 of 8 commands), the launch was not replayed
+        // 1. a real attempt is promotable: the wall replayed the deterministic half of the
+        //    factory-verification group, in recorded order, from the receipt's base (5 of 8 commands), the launch was not replayed
         //    because it is the attempt under test, and nothing mismatched. A verdict of `unknown`
         //    here would mean every real worker is unpromotable, which is not caution, it is a wall
         //    that can never open.
@@ -239,12 +236,12 @@ describe.skipIf(!READY)(
         expect(run.code).toBe(0);
         expect(verdict['reasons']).not.toContain('faithfulness_partial');
 
-        // 2. the scope line, read from the stored verdict rather than from stdout: it must say how
-        //    much was replayed, and that the one command left out is the launch.
-        const store = openStore({ dir: join(fixture.home, 'state') });
+        // 2. the scope line, read from the stored verdict rather than from stdout: it must say
+        //    how much was replayed, that nothing mismatched, and name the launch as excluded.
+        const verdictStore = openStore({ dir: join(fixture.home, 'state') });
         let scope = '';
         try {
-          const row = store.latestVerdictForUnit(unitId);
+          const row = verdictStore.latestVerdictForUnit(unitId);
           expect(row).not.toBeNull();
           const faithfulness = (row?.verdict.scenarios ?? []).filter(
             (scenario) => scenario.source === 'faithfulness',
@@ -254,7 +251,7 @@ describe.skipIf(!READY)(
             .map((scenario) => `${scenario.id} ${scenario.observed ?? ''}`)
             .join(' | ');
         } finally {
-          store.close();
+          verdictStore.close();
         }
         expect(scope).toMatch(/replayed\s+5\s+of\s+8/u);
         expect(scope).toMatch(/commands\[0\]|worker-launch/u);
