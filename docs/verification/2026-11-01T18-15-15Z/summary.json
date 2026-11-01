@@ -1,0 +1,93 @@
+{
+  "schema": "verify/1",
+  "plan": "dark-factory-dsh",
+  "runId": "2026-11-01T18-15-15Z",
+  "startedAt": "2026-11-01T18-15-15Z",
+  "ok": false,
+  "counts": {
+    "pass": 5,
+    "skip": 0,
+    "fail": 2
+  },
+  "environment": {
+    "node": "v26.12.1",
+    "pnpm": "10.33.0",
+    "git": {
+      "branch": "feat/dark-factory-dsh",
+      "head": "6beed2b",
+      "dirtyPaths": 6
+    },
+    "dsh": {
+      "available": true,
+      "path": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+      "version": "0.2.1-rc.3"
+    },
+    "modelKeys": {
+      "BIFROST_API_KEY": true,
+      "DEEPSEEK_API_KEY": false
+    }
+  },
+  "stages": [
+    {
+      "name": "preflight",
+      "command": "bash scripts/preflight.sh",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 383,
+      "reason": null
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm run typecheck",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 1393,
+      "reason": null
+    },
+    {
+      "name": "lint",
+      "command": "pnpm run lint",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 843,
+      "reason": null
+    },
+    {
+      "name": "format:check",
+      "command": "pnpm run format:check",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 12806,
+      "reason": null
+    },
+    {
+      "name": "test",
+      "command": "pnpm exec vitest run",
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": 125961,
+      "reason": " Start at 13:15:32 Duration 124.96s (tests 98%, import 2%) "
+    },
+    {
+      "name": "build",
+      "command": "pnpm run build",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 1042,
+      "reason": null
+    },
+    {
+      "name": "live-model",
+      "command": "pnpm run test:live",
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": 104550,
+      "reason": " Duration 103.94s (tests 98%, import 2%)  ELIFECYCLE  Command failed with exit code 1. "
+    }
+  ],
+  "unknowns": [],
+  "artifacts": {
+    "log": "docs/verification/2026-11-01T18-15-15Z/verify.log",
+    "summary": "docs/verification/2026-11-01T18-15-15Z/summary.json"
+  }
+}

@@ -46,12 +46,7 @@
       "completed",
       "{\"conversation_id\": \"8222ca33-ac0b-56a7-ab83-7395e37f50d8\", \"git_revision\": \"d8bf750a3c8c0b03c3481b9d8c07b508fc3fc3f3\", \"status\": \"completed\"}"
     ],
-    "metadata": [
-      [
-        "1b889a60-bdb1-4994-bc75-3bd826fdd0ef",
-        15
-      ]
-    ],
+    "metadata": [["1b889a60-bdb1-4994-bc75-3bd826fdd0ef", 15]],
     "anchor": {
       "store_id": "1b889a60-bdb1-4994-bc75-3bd826fdd0ef",
       "generation": 15
@@ -136,12 +131,7 @@
       "completed",
       "{\"conversation_id\": \"8222ca33-ac0b-56a7-ab83-7395e37f50d8\", \"git_revision\": \"d8bf750a3c8c0b03c3481b9d8c07b508fc3fc3f3\", \"status\": \"completed\"}"
     ],
-    "metadata": [
-      [
-        "1b889a60-bdb1-4994-bc75-3bd826fdd0ef",
-        15
-      ]
-    ],
+    "metadata": [["1b889a60-bdb1-4994-bc75-3bd826fdd0ef", 15]],
     "anchor": {
       "store_id": "1b889a60-bdb1-4994-bc75-3bd826fdd0ef",
       "generation": 15

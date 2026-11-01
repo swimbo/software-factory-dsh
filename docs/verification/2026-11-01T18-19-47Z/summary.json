@@ -1,0 +1,93 @@
+{
+  "schema": "verify/1",
+  "plan": "dark-factory-dsh",
+  "runId": "2026-11-01T18-19-47Z",
+  "startedAt": "2026-11-01T18-19-47Z",
+  "ok": false,
+  "counts": {
+    "pass": 6,
+    "skip": 0,
+    "fail": 1
+  },
+  "environment": {
+    "node": "v26.12.1",
+    "pnpm": "10.33.0",
+    "git": {
+      "branch": "feat/dark-factory-dsh",
+      "head": "6beed2b",
+      "dirtyPaths": 7
+    },
+    "dsh": {
+      "available": true,
+      "path": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+      "version": "0.2.1-rc.3"
+    },
+    "modelKeys": {
+      "BIFROST_API_KEY": true,
+      "DEEPSEEK_API_KEY": false
+    }
+  },
+  "stages": [
+    {
+      "name": "preflight",
+      "command": "bash scripts/preflight.sh",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 143,
+      "reason": null
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm run typecheck",
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": 595,
+      "reason": "packages/dsh-adapter/tests/profile.test.ts(86,59): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ DSH_HOME: string; DSH_TELEMETRY_DISABLED: string; }'. No index signature with a parameter of type 'string' was found on type '{ DSH_HOME: string; DSH_TELEMETRY_DISABLED: string; }'.  ELIFECYCLE  Command failed with exit code 1. "
+    },
+    {
+      "name": "lint",
+      "command": "pnpm run lint",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 508,
+      "reason": null
+    },
+    {
+      "name": "format:check",
+      "command": "pnpm run format:check",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 5810,
+      "reason": null
+    },
+    {
+      "name": "test",
+      "command": "pnpm exec vitest run",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 91253,
+      "reason": null
+    },
+    {
+      "name": "build",
+      "command": "pnpm run build",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 601,
+      "reason": null
+    },
+    {
+      "name": "live-model",
+      "command": "pnpm run test:live",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 95559,
+      "reason": null
+    }
+  ],
+  "unknowns": [],
+  "artifacts": {
+    "log": "docs/verification/2026-11-01T18-19-47Z/verify.log",
+    "summary": "docs/verification/2026-11-01T18-19-47Z/summary.json"
+  }
+}

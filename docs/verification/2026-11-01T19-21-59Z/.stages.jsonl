@@ -1,0 +1,4 @@
+{"name":"preflight","command":"bash scripts/preflight.sh","exitCode":0,"status":"pass","durationMs":317,"reason":""}
+{"name":"typecheck","command":"pnpm run typecheck","exitCode":0,"status":"pass","durationMs":1678,"reason":""}
+{"name":"lint","command":"pnpm run lint","exitCode":0,"status":"pass","durationMs":966,"reason":""}
+{"name":"format:check","command":"pnpm run format:check","exitCode":0,"status":"pass","durationMs":6430,"reason":""}

@@ -61,12 +61,7 @@
       "completed",
       "{\"conversation_id\": \"4e99d26e-f899-519e-b930-9232b44e1afa\", \"git_revision\": \"dfcfdf4470a443f4f82d191a291aba95992bae52\", \"status\": \"completed\"}"
     ],
-    "metadata": [
-      [
-        "1b889a60-bdb1-4994-bc75-3bd826fdd0ef",
-        8
-      ]
-    ],
+    "metadata": [["1b889a60-bdb1-4994-bc75-3bd826fdd0ef", 8]],
     "anchor": {
       "store_id": "1b889a60-bdb1-4994-bc75-3bd826fdd0ef",
       "generation": 8

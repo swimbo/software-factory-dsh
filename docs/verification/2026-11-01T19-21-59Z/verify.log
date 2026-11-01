@@ -1,0 +1,41 @@
+verify: plan dark-factory-dsh, run 2026-11-01T19-21-59Z
+verify: repo /Users/bo/code/software-factory-dsh
+verify: log docs/verification/2026-11-01T19-21-59Z/verify.log
+
+verify: node v26.12.1, pnpm 10.33.0, git feat/dark-factory-dsh@76f9f94 (13 dirty paths)
+verify: dsh 0.2.1-rc.5 at /Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh
+verify: BIFROST_API_KEY not set, DEEPSEEK_API_KEY not set
+
+
+$ bash scripts/preflight.sh
+preflight: node 26.12.1 ok
+preflight: dsh 0.2.1-rc.5 at /Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh
+
+$ pnpm run typecheck
+
+> dark-factory-dsh@0.1.0 typecheck /Users/bo/code/software-factory-dsh
+> tsc -p tsconfig.json --noEmit && tsc -p e2e/panel/tsconfig.json --noEmit
+
+
+$ pnpm run lint
+
+> dark-factory-dsh@0.1.0 lint /Users/bo/code/software-factory-dsh
+> bash scripts/discipline-lint.sh
+
+ok    no unjustified @ts-expect-error
+ok    no `as any` outside tests
+ok    no .only / .skip in tests
+ok    no eslint-disable comments
+ok    no Date.now() outside allowlisted clock sites
+ok    process.env read only at composition roots
+ok    no DSH package imports outside the adapter
+
+discipline-lint: 7 checks passed
+
+$ pnpm run format:check
+
+> dark-factory-dsh@0.1.0 format:check /Users/bo/code/software-factory-dsh
+> prettier --check .
+
+Checking formatting...
+All matched files use Prettier code style!

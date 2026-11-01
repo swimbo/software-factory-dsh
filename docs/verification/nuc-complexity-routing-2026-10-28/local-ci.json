@@ -6,13 +6,7 @@
   "steps": [
     {
       "name": "secrets",
-      "command": [
-        "gitleaks",
-        "dir",
-        ".",
-        "--redact",
-        "--no-banner"
-      ],
+      "command": ["gitleaks", "dir", ".", "--redact", "--no-banner"],
       "exit_code": 0,
       "log_sha256": "9eea46d1d2660a92768993d2b4a5d563a1a047f9c6d700fb2e56add678d3d00a"
     },
@@ -35,31 +29,19 @@
     },
     {
       "name": "dependencies",
-      "command": [
-        "npm",
-        "ci",
-        "--ignore-scripts"
-      ],
+      "command": ["npm", "ci", "--ignore-scripts"],
       "exit_code": 0,
       "log_sha256": "5f443b566dcb4cbde6c6952e542c7bad74abb3c3810f2c6dde74dbaaca3eec87"
     },
     {
       "name": "audit",
-      "command": [
-        "npm",
-        "audit",
-        "--audit-level=high"
-      ],
+      "command": ["npm", "audit", "--audit-level=high"],
       "exit_code": 0,
       "log_sha256": "6d8c5c8f3d7684adb070417bd608d01ae90aa3dc26a65af03ffda4955f38d9a3"
     },
     {
       "name": "build",
-      "command": [
-        "npm",
-        "run",
-        "build"
-      ],
+      "command": ["npm", "run", "build"],
       "exit_code": 0,
       "log_sha256": "f78a4b179b39a62de1f139ab98ad784486d0ff3aa0a49605d3db25bf38eb470d"
     },

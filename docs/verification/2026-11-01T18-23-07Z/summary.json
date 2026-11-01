@@ -1,0 +1,93 @@
+{
+  "schema": "verify/1",
+  "plan": "dark-factory-dsh",
+  "runId": "2026-11-01T18-23-07Z",
+  "startedAt": "2026-11-01T18-23-07Z",
+  "ok": true,
+  "counts": {
+    "pass": 7,
+    "skip": 0,
+    "fail": 0
+  },
+  "environment": {
+    "node": "v26.12.1",
+    "pnpm": "10.33.0",
+    "git": {
+      "branch": "feat/dark-factory-dsh",
+      "head": "6beed2b",
+      "dirtyPaths": 8
+    },
+    "dsh": {
+      "available": true,
+      "path": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+      "version": "0.2.1-rc.3"
+    },
+    "modelKeys": {
+      "BIFROST_API_KEY": true,
+      "DEEPSEEK_API_KEY": false
+    }
+  },
+  "stages": [
+    {
+      "name": "preflight",
+      "command": "bash scripts/preflight.sh",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 176,
+      "reason": null
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm run typecheck",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 735,
+      "reason": null
+    },
+    {
+      "name": "lint",
+      "command": "pnpm run lint",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 497,
+      "reason": null
+    },
+    {
+      "name": "format:check",
+      "command": "pnpm run format:check",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 5948,
+      "reason": null
+    },
+    {
+      "name": "test",
+      "command": "pnpm exec vitest run",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 114758,
+      "reason": null
+    },
+    {
+      "name": "build",
+      "command": "pnpm run build",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 532,
+      "reason": null
+    },
+    {
+      "name": "live-model",
+      "command": "pnpm run test:live",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 112698,
+      "reason": null
+    }
+  ],
+  "unknowns": [],
+  "artifacts": {
+    "log": "docs/verification/2026-11-01T18-23-07Z/verify.log",
+    "summary": "docs/verification/2026-11-01T18-23-07Z/summary.json"
+  }
+}

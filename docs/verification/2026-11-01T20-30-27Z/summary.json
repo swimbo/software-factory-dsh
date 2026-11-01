@@ -1,0 +1,101 @@
+{
+  "schema": "verify/1",
+  "plan": "dark-factory-dsh",
+  "runId": "2026-11-01T20-30-27Z",
+  "startedAt": "2026-11-01T20-30-27Z",
+  "ok": true,
+  "counts": {
+    "pass": 8,
+    "skip": 0,
+    "fail": 0
+  },
+  "environment": {
+    "node": "v26.12.1",
+    "pnpm": "10.33.0",
+    "git": {
+      "branch": "feat/dark-factory-dsh",
+      "head": "10483f7",
+      "dirtyPaths": 1
+    },
+    "dsh": {
+      "available": true,
+      "path": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+      "version": "0.2.1-rc.5"
+    },
+    "modelKeys": {
+      "BIFROST_API_KEY": true,
+      "DEEPSEEK_API_KEY": false
+    }
+  },
+  "stages": [
+    {
+      "name": "preflight",
+      "command": "bash scripts/preflight.sh",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 141,
+      "reason": null
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm run typecheck",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 979,
+      "reason": null
+    },
+    {
+      "name": "lint",
+      "command": "pnpm run lint",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 494,
+      "reason": null
+    },
+    {
+      "name": "format:check",
+      "command": "pnpm run format:check",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 2963,
+      "reason": null
+    },
+    {
+      "name": "test",
+      "command": "pnpm exec vitest run",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 102662,
+      "reason": null
+    },
+    {
+      "name": "build",
+      "command": "pnpm run build",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 387,
+      "reason": null
+    },
+    {
+      "name": "panel",
+      "command": "pnpm run test:e2e:panel",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 17777,
+      "reason": null
+    },
+    {
+      "name": "live-model",
+      "command": "pnpm run test:live",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 91161,
+      "reason": null
+    }
+  ],
+  "unknowns": [],
+  "artifacts": {
+    "log": "docs/verification/2026-11-01T20-30-27Z/verify.log",
+    "summary": "docs/verification/2026-11-01T20-30-27Z/summary.json"
+  }
+}

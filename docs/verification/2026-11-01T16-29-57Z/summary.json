@@ -1,0 +1,98 @@
+{
+  "schema": "verify/1",
+  "plan": "dark-factory-dsh",
+  "runId": "2026-11-01T16-29-57Z",
+  "startedAt": "2026-11-01T16-29-57Z",
+  "ok": true,
+  "counts": {
+    "pass": 6,
+    "skip": 1,
+    "fail": 0
+  },
+  "environment": {
+    "node": "v26.12.1",
+    "pnpm": "10.33.0",
+    "git": {
+      "branch": "feat/dark-factory-dsh",
+      "head": "bb250ca",
+      "dirtyPaths": 9
+    },
+    "dsh": {
+      "available": true,
+      "path": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+      "version": "0.2.1-rc.3"
+    },
+    "modelKeys": {
+      "BIFROST_API_KEY": false,
+      "DEEPSEEK_API_KEY": false
+    }
+  },
+  "stages": [
+    {
+      "name": "preflight",
+      "command": "bash scripts/preflight.sh",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 138,
+      "reason": null
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm run typecheck",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 530,
+      "reason": null
+    },
+    {
+      "name": "lint",
+      "command": "pnpm run lint",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 388,
+      "reason": null
+    },
+    {
+      "name": "format:check",
+      "command": "pnpm run format:check",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 3939,
+      "reason": null
+    },
+    {
+      "name": "test",
+      "command": "pnpm exec vitest run",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 66540,
+      "reason": null
+    },
+    {
+      "name": "build",
+      "command": "pnpm run build",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 659,
+      "reason": null
+    },
+    {
+      "name": "live-model",
+      "command": "pnpm run test:live",
+      "status": "skipped",
+      "exitCode": 0,
+      "durationMs": 0,
+      "reason": "BIFROST_API_KEY is not set; live model tests are not part of offline verification"
+    }
+  ],
+  "unknowns": [
+    {
+      "stage": "live-model",
+      "reason": "BIFROST_API_KEY is not set; live model tests are not part of offline verification"
+    }
+  ],
+  "artifacts": {
+    "log": "docs/verification/2026-11-01T16-29-57Z/verify.log",
+    "summary": "docs/verification/2026-11-01T16-29-57Z/summary.json"
+  }
+}

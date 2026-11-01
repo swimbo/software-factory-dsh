@@ -1,0 +1,4 @@
+
+> dark-factory-dsh@0.1.0 typecheck /Users/bo/code/software-factory-dsh
+> tsc -p tsconfig.json --noEmit && tsc -p e2e/panel/tsconfig.json --noEmit
+

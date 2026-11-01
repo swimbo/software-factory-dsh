@@ -1,0 +1,25 @@
+verify: plan dark-factory-dsh, run 2026-11-01T16-20-00Z
+verify: repo /Users/bo/code/software-factory-dsh
+verify: log docs/verification/2026-11-01T16-20-00Z/verify.log
+
+verify: node v26.12.1, pnpm absent, git feat/dark-factory-dsh@4422bfc (20 dirty paths)
+verify: dsh 0.2.1-rc.3 at /Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh
+verify: BIFROST_API_KEY not set, DEEPSEEK_API_KEY not set
+
+verify: FAIL — node and pnpm must both be on PATH (node v26.12.1, pnpm absent)
+
+$ pnpm run test:live
+(skipped) BIFROST_API_KEY is not set; live model tests are not part of offline verification
+
+verify: results
+
+stage         status   exit  duration  command
+------------- -------- ----- --------- -------
+toolchain     FAIL    127   0.00s     node+pnpm on PATH
+                └─ node or pnpm missing from PATH (node v26.12.1, pnpm absent); no stage could run
+live-model    SKIPPED 0     0.00s     pnpm run test:live
+                └─ BIFROST_API_KEY is not set; live model tests are not part of offline verification
+
+verify: 0 passed, 1 skipped, 1 failed — NOT OK
+verify: failed stages: toolchain
+verify: log docs/verification/2026-11-01T16-20-00Z/verify.log

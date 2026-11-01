@@ -1,0 +1,92 @@
+{
+  "schema": "verify/1",
+  "plan": "dark-factory-dsh",
+  "runId": "2026-11-01T14-26-43Z",
+  "startedAt": "2026-11-01T14-26-43Z",
+  "ok": false,
+  "counts": {
+    "pass": 2,
+    "skip": 1,
+    "fail": 4
+  },
+  "environment": {
+    "node": "v26.12.1",
+    "pnpm": "10.33.0",
+    "git": {
+      "branch": "feat/dark-factory-dsh",
+      "head": "b5fe329",
+      "dirtyPaths": 55
+    },
+    "dsh": {
+      "available": true,
+      "path": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+      "version": "0.2.1-rc.3"
+    },
+    "modelKeys": {
+      "BIFROST_API_KEY": false,
+      "DEEPSEEK_API_KEY": false
+    }
+  },
+  "stages": [
+    {
+      "name": "preflight",
+      "command": "bash scripts/preflight.sh",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 174,
+      "reason": null
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm run typecheck",
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": 528,
+      "reason": " Type 'string[]' is not assignable to type '('code-change' | 'config-change' | 'credential-use' | 'data-delete' | 'dependency-upgrade' | 'force-push' | 'network-egress' | 'schema-migration' | 'test-change')[]'. Type 'string' is not assignable to type ''code-change' | 'config-change' | 'credential-use' | 'data-delete' | 'dependency-upgrade' | 'force-push' | 'network-egress' | 'schema-migration' | '"
+    },
+    {
+      "name": "lint",
+      "command": "pnpm run lint",
+      "status": "fail",
+      "exitCode": 2,
+      "durationMs": 366,
+      "reason": "https://eslint.org/chat/help to chat with the team.  ELIFECYCLE  Command failed with exit code 2. "
+    },
+    {
+      "name": "format:check",
+      "command": "pnpm run format:check",
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": 28038,
+      "reason": "[warn] stapled-factory/worker/CONTEXT_PROFILE.md [warn] Code style issues found in 1356 files. Run Prettier with --write to fix.  ELIFECYCLE  Command failed with exit code 1. "
+    },
+    {
+      "name": "test",
+      "command": "pnpm exec vitest run",
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": 24118,
+      "reason": " Start at 09:27:13 Duration 23.79s (tests 89%, import 9%, transform 2%) "
+    },
+    {
+      "name": "build",
+      "command": "pnpm run build",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 552,
+      "reason": null
+    },
+    {
+      "name": "live-model",
+      "command": "pnpm run test:live",
+      "status": "skipped",
+      "exitCode": 0,
+      "durationMs": 0,
+      "reason": "BIFROST_API_KEY is not set; live model tests are not part of offline verification"
+    }
+  ],
+  "artifacts": {
+    "log": "docs/verification/2026-11-01T14-26-43Z/verify.log",
+    "summary": "docs/verification/2026-11-01T14-26-43Z/summary.json"
+  }
+}

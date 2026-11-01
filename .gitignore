@@ -1,18 +1,23 @@
-.DS_Store
-/target/
+# dark-factory-dsh
+node_modules/
+dist/
 .env
 .env.*
-/operator.local.json
-# runtime data (Restate RocksDB, local sqlite stores)
-restate-data/
+!.env.example
 *.db
+*.db-wal
+*.db-shm
+.factory/
+artifacts/
+playwright-report/
+test-results/
+coverage/
 
+# OS noise
+.DS_Store
 
-# Local dependencies and Python caches
-node_modules/
-__pycache__/
-.pytest_cache/
-.venv/
-stapled-factory/spine/dist/
+# Vendored Python env inside the previous plan tree (353 MB, 17 k files)
+stapled-factory/worker/.venv/
 
+# Local-CI receipts from the previous (removed) project must never be re-added.
 .local-ci/

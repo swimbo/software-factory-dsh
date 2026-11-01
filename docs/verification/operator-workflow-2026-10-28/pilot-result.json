@@ -26,9 +26,7 @@
     }
   },
   "revision": "0227f9123d17f29cecb10151c316afc4032a9640",
-  "changed": [
-    ".github/README.md"
-  ],
+  "changed": [".github/README.md"],
   "budget": {
     "budgets": [
       [

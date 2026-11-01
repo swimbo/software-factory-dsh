@@ -1,0 +1,98 @@
+{
+  "schema": "verify/1",
+  "plan": "dark-factory-dsh",
+  "runId": "2026-11-01T14-46-32Z",
+  "startedAt": "2026-11-01T14-46-32Z",
+  "ok": false,
+  "counts": {
+    "pass": 4,
+    "skip": 1,
+    "fail": 2
+  },
+  "environment": {
+    "node": "v26.12.1",
+    "pnpm": "10.33.0",
+    "git": {
+      "branch": "feat/dark-factory-dsh",
+      "head": "b5fe329",
+      "dirtyPaths": 56
+    },
+    "dsh": {
+      "available": true,
+      "path": "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
+      "version": "0.2.1-rc.3"
+    },
+    "modelKeys": {
+      "BIFROST_API_KEY": false,
+      "DEEPSEEK_API_KEY": false
+    }
+  },
+  "stages": [
+    {
+      "name": "preflight",
+      "command": "bash scripts/preflight.sh",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 126,
+      "reason": null
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm run typecheck",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 394,
+      "reason": null
+    },
+    {
+      "name": "lint",
+      "command": "pnpm run lint",
+      "status": "fail",
+      "exitCode": 2,
+      "durationMs": 379,
+      "reason": "https://eslint.org/chat/help to chat with the team.  ELIFECYCLE  Command failed with exit code 2. "
+    },
+    {
+      "name": "format:check",
+      "command": "pnpm run format:check",
+      "status": "fail",
+      "exitCode": 1,
+      "durationMs": 24170,
+      "reason": "[warn] stapled-factory/worker/CONTEXT_PROFILE.md [warn] Code style issues found in 1326 files. Run Prettier with --write to fix.  ELIFECYCLE  Command failed with exit code 1. "
+    },
+    {
+      "name": "test",
+      "command": "pnpm exec vitest run",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 23387,
+      "reason": null
+    },
+    {
+      "name": "build",
+      "command": "pnpm run build",
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 372,
+      "reason": null
+    },
+    {
+      "name": "live-model",
+      "command": "pnpm run test:live",
+      "status": "skipped",
+      "exitCode": 0,
+      "durationMs": 0,
+      "reason": "BIFROST_API_KEY is not set; live model tests are not part of offline verification"
+    }
+  ],
+  "unknowns": [
+    {
+      "stage": "live-model",
+      "reason": "BIFROST_API_KEY is not set; live model tests are not part of offline verification"
+    }
+  ],
+  "artifacts": {
+    "log": "docs/verification/2026-11-01T14-46-32Z/verify.log",
+    "summary": "docs/verification/2026-11-01T14-46-32Z/summary.json"
+  }
+}

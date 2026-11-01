@@ -6,9 +6,7 @@
     "head_sha": "c97b52ef4ffe2322b9d504d8731b3bdbfcc69ab4",
     "head_verified_live": true
   },
-  "reviewers": [
-    "independent correctness/security/recovery source reviewer"
-  ],
+  "reviewers": ["independent correctness/security/recovery source reviewer"],
   "findings": [
     {
       "title": "Preserve wall request semantics through the candidate bridge",
