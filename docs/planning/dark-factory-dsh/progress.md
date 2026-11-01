@@ -213,3 +213,39 @@ Also this round: one receipt identity (`receiptShaFor`) so a narrative can no lo
 **Recorded rather than smoothed:** IN #6's no-progress detector is not built — it needs step-level signals DSH owns — so its e2e id is withdrawn and `README.md` says so in the same list where it says what _is_ built.
 
 Counts: `verify: 6 passed, 1 skipped, 0 failed`; `1117 passed | 6 skipped (1123)` across 78 files; e2e ids **45 closed of 53**, 8 open and each with a reason (`@docker` worker path, `@live` key, the proxy-token clauses). Pushed as `8711cbc`.
+
+### Round 6 — the live layer, and the five defects a real run exposed (2026-11-01)
+
+The operator provisioned a Bifrost program key (endpoint `https://hermes-control.tail…/openai/v1`,
+header `x-bf-vk`, model `auto`, key held on `hermes-control` 0600). The claim that had been
+`UNKNOWN` since Phase 11 — "DeepSeek via Bifrost" — is now **measured**: both `@live` specs pass, real
+turns, real usage, and the full gate with the live stage is `7 passed, 0 skipped, 0 failed`
+(`docs/verification/2026-11-01T18-23-07Z/`).
+
+Getting there was not a wiring exercise. **Five defects, each invisible to the offline suite, each
+found by a paid run:**
+
+1. The wall replayed `receipt.commands[0]` — the worker launch itself. Replaying it starts another
+   worker; on a live attempt that spends money.
+2. The first fix replayed nothing (`0 of 8`), so every real attempt was `unknown`, and by L3 a real
+   worker could never produce a promotable unit. A gate that can never open is not caution.
+3. Two `git status` reads were claimed replayable while their output depends on untracked/ignored
+   worktree contents — unreconstructable from a commit. Now unreplayable-with-reason: `replayed 5 of 8`.
+4. The scope row printed `2 mismatched` while carrying `outcome: pass`.
+5. The live spec's oracle finder matched the word "suite" **inside the prompt**, which is an argv
+   element of the launch — so the assertion executed `dsh` a second time: a paid model call made by a
+   test. It failed only because that second launch exited non-zero.
+
+Plus two specs that were measuring the developer's shell rather than the code: `help.test.ts` asserted
+`dshVersionObserved` was `null`, and `profile.test.ts` inherited `process.env` to prove a fresh
+`DSH_HOME` fails closed — both went red the moment a real key and `DSH_BIN` were exported. Both now
+control their own environment.
+
+**Design decisions recorded rather than smoothed:** the wall decides the verification class (a receipt
+must not be able to keep the gate shut by declaring itself unreplayable — L2); `FACTORY_LIVE_MODEL=1`
+forwards exactly one credential **name** because v1 has no credential proxy (ADR-006 amendment); the
+live gate stage is opt-in (`FACTORY_VERIFY_LIVE=1`) because each run spends.
+
+**Measured, for the record:** the first genuine unit verified by this factory — `outcome: pass`,
+`reasons: []`, `replayed 5 of 8`, `0 mismatched`, holdout discriminating, CLI exit 0, ~8.5–12.7k tokens
+per run, `wall/0.1.0+local`, `fakeWall: false`.
