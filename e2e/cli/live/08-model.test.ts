@@ -33,6 +33,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { openStore } from '../../../packages/store/src/index.ts';
+import { selectSuiteCommand, testRefusal } from '../../harness/suite-command.ts';
 import { readTurn } from '../../harness/turn-facts.ts';
 import { jsonOf, runFactory } from '../../harness/factory.ts';
 import { createWallFixture, type WallFixture } from '../../harness/wall-fixture.ts';
@@ -246,14 +247,28 @@ describe.skipIf(!READY)(
         expect(launch.credentialsForwarded).toStrictEqual(['BIFROST_API_KEY']);
         expect(JSON.stringify(launch)).not.toContain(KEY);
 
-        // 7. the suite the receipt names still passes when re-run by hand, in the directory the
-        //    receipt says it ran in
-        const oracle = receipt.commands.find((command) => command.argv.join(' ').includes('suite'));
-        const argv = oracle?.argv ?? ['node', 'tests/suite.js'];
-        const cwd = oracle?.cwd ?? join(fixture.home, 'state', 'attempts', attemptId);
-        expect(() =>
-          execFileSync(argv[0] ?? 'node', argv.slice(1), { cwd, encoding: 'utf8' }),
-        ).not.toThrow();
+        // 7. the suite the receipt names still passes when re-run by hand — selected structurally,
+        //    and refused if the selection is ever the worker itself. A substring finder on the
+        //    argv matched `commands[0]` (the launch carries the whole prompt, and the prompt says
+        //    "suite"), which executed `dsh` a second time: a paid model call made by a test.
+        const oracle = selectSuiteCommand(receipt.commands);
+        // The real receipt records **no** suite command: the wall runs the suite itself as its own
+        // oracle (`acceptance`/`suite` scenarios), and the attempt's `commands[]` are the launch
+        // plus the factory's git reads. So the absence is the expected shape and is asserted as
+        // such — the fallback to a guess is what made the old finder reachable, and it executed
+        // `dsh` a second time.
+        if (oracle !== null) {
+          const refusal = testRefusal(oracle.argv, DSH_BIN);
+          expect(refusal, `refusing to execute ${oracle.argv.join(' ')}`).toBeNull();
+          const cwd = oracle.cwd ?? join(fixture.home, 'attempts', unitId, attemptId);
+          expect(() =>
+            execFileSync(oracle.argv[0] ?? 'node', oracle.argv.slice(1), { cwd, encoding: 'utf8' }),
+          ).not.toThrow();
+        }
+        // Whatever the receipt holds, the launch is present and a test refuses to execute it.
+        const launchCommand = receipt.commands[0];
+        expect(launchCommand?.source).toBe('worker-launch');
+        expect(testRefusal(launchCommand?.argv ?? [], DSH_BIN)).toMatch(/never re-run the worker/u);
         passed = true;
       } finally {
         if (passed) fixture.cleanup();
