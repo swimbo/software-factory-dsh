@@ -4,14 +4,14 @@ export default defineConfig({
   test: {
     include: ['packages/**/*.test.ts', 'apps/**/*.test.ts', 'e2e/cli/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
-    // 20 s is a per-test budget, and the e2e specs are not per-test cheap: each one
-    // spawns real `factory` children, and several run a git clone plus a wall
-    // evaluation inside the attempt. With ten cores all in flight at once, two of
-    // them were starving past 20 s on an idle machine -- not a slow test, a
-    // throughput mismatch. Cap the workers so the budget measures the test and not
-    // the queue: raising the timeout instead would hide the next stall rather than
-    // the current one.
-    testTimeout: 20_000,
+    // The per-test budget has to be longer than the slowest legitimate test, or it
+    // measures the scheduler instead of the code. The e2e specs spawn real `factory`
+    // children and several run a git clone plus a wall evaluation inside the attempt:
+    // 15-25 s is ordinary, and at 20 s three different untouched specs timed out in
+    // different runs -- each one passing in isolation. 60 s still catches a hang (the
+    // whole test stage is ~40 s quietly), and the cap below keeps the queue from
+    // becoming the thing that fails.
+    testTimeout: 60_000,
     maxWorkers: 4,
   },
 });
