@@ -1,6 +1,6 @@
 # Phase 10 — E2E Test Generation
 
-**Status:** pending
+**Status:** complete for the offline layers (see completion evidence; the two skipped layers are counted as `unknown`, never pass)
 **Owner:** lead (+ `e2e-author` teammate)
 **Artifacts produced:** `docs/planning/dark-factory-dsh/e2e-tests.md`, test sources under `/Users/bo/code/dark-factory-dsh/e2e/` (`*.e2e.test.ts`), `/Users/bo/code/dark-factory-dsh/e2e/panel/*.spec.ts`, `/Users/bo/code/dark-factory-dsh/playwright.config.ts`
 
@@ -60,3 +60,7 @@ Tests exist, are discovered by the canonical commands, every P0 story and primar
 - A flaky safety test is a **blocker, not a retry**: `retries: 0` for safety-critical cases, and any observed flake is recorded as a Phase 13 gap rather than papered over.
 - The leak probe must run twice conceptually — a unit-level probe for the test suite and the `@docker` container probe for the real boundary — because the in-process probe proves the path check, not the container's mount set (C8).
 - `kill -9` assertions depend on `recover()` being read-only; if implementation redispatchs, the e2e goes red and Phase 9a's contract is violated. That is the intended failure.
+
+### Phase 10 — completion evidence (2026-11-01)
+
+[`evidence/phase-10-implementation.md`](evidence/phase-10-implementation.md) — what exists per artifact, the eight adversarial scenarios with their state and proof, the totals at commit `b92f5cc` (`1017 passed, 10 skipped`; e2e 57 passed / 6 skipped; panel 41 passed), and what the phase does **not** prove: the 4 `@docker` specs and 2 `@live` specs have never run on this host, and the browser suite is not in `verify.sh` because this machine lacks the chromium revision — so a green panel run elsewhere is claimed here, not reproduced by the acceptance script.
