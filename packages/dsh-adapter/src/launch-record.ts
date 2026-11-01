@@ -154,18 +154,23 @@ export const WORKER_LAUNCH_PROVENANCE: CommandProvenance = {
 };
 
 /**
- * The factory's own post-attempt git reads.
+ * The factory's own post-attempt git reads — replayable, **as a sequence**.
  *
  * `git diff --cached` is read-only in intent but not in fact: its output depends on the
- * `GIT_INDEX_FILE` the attempt staged into, so a replay that does not first reconstruct that
- * index measures a different tree. Not replayable until the wall rebuilds the index.
+ * `GIT_INDEX_FILE` the attempt staged into. The precondition is therefore part of the claim:
+ * these commands are replayable only in recorded order, starting from the receipt's base, after
+ * the wall has reconstructed the attempt index (`packages/wall/src/replay.ts` does exactly that
+ * — `read-tree`, then `add`, then the two `diff` reads). Replayed out of order or against a
+ * different index they measure a different tree, which is why the recorder states the
+ * precondition rather than leaving a reader to assume the commands are independent.
+ *
+ * Without this, no real attempt could ever be promotable: the launch can never be replayed, so
+ * a receipt whose only other commands are refused would replay 0 of N and leave every real
+ * worker at `unknown` forever.
  */
 export const FACTORY_VERIFICATION_PROVENANCE: CommandProvenance = {
   source: 'factory-verification',
-  replayable: false,
-  replaySkipReason:
-    'index-state dependent: the output depends on the staged tree in the attempt GIT_INDEX_FILE, ' +
-    'so a replay that does not first reconstruct that index measures a different tree',
+  replayable: true,
 };
 
 export interface EnvFingerprint {
