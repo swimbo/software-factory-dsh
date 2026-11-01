@@ -54,7 +54,9 @@
         "exitCode": 0,
         "timedOut": false,
         "outputSha": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-        "durationMs": 5
+        "durationMs": 5,
+        "source": "worker-command",
+        "replayable": true
       }
     ],
     "suite": {

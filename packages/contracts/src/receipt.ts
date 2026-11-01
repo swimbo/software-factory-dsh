@@ -11,15 +11,67 @@ import { z } from 'zod';
 
 import { contentHash } from './canonical.ts';
 
-export const CommandRecord = z.object({
-  argv: z.array(z.string().min(1)).min(1).max(64),
-  cwd: z.string().min(1),
-  exitCode: z.number().int().nullable(),
-  timedOut: z.boolean(),
-  /** Hash of the captured stdout+stderr, so the wall can re-execute and compare without storing megabytes. */
-  outputSha: z.string().regex(/^sha256:[0-9a-f]{64}$/),
-  durationMs: z.number().int().nonnegative(),
-});
+/**
+ * Where a recorded command came from.
+ *
+ * The distinction exists because the wall replays commands, and not every recorded command
+ * can be replayed: the worker launch is the thing under test (non-deterministic, side
+ * effecting, and on a live attempt it costs money), and the factory's own post-attempt
+ * `git diff` reads depend on index state the wall does not reconstruct. Without provenance
+ * the wall had one option — replay everything — and the first live attempt was refused with
+ * `receipt_unfaithful` for re-running things that cannot be re-run.
+ */
+export const COMMAND_SOURCES = ['worker-launch', 'worker-command', 'factory-verification'] as const;
+export type CommandSource = (typeof COMMAND_SOURCES)[number];
+
+export const CommandRecord = z
+  .object({
+    argv: z.array(z.string().min(1)).min(1).max(64),
+    cwd: z.string().min(1),
+    exitCode: z.number().int().nullable(),
+    timedOut: z.boolean(),
+    /** Hash of the captured stdout+stderr, so the wall can re-execute and compare without storing megabytes. */
+    outputSha: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    durationMs: z.number().int().nonnegative(),
+    /**
+     * Provenance. Optional so historical receipts still parse; a record without it is
+     * **not** replayable, because "no provenance" must never be read as "safe to re-run".
+     */
+    source: z.enum(COMMAND_SOURCES).optional(),
+    /**
+     * May the wall re-execute this command?
+     *
+     * Set where the command is recorded, never defaulted: absent means `false` in the wall's
+     * policy, so an adapter that forgets the field loses replay coverage (loudly, via
+     * `faithfulness_partial`) rather than silently re-running a model.
+     */
+    replayable: z.boolean().optional(),
+    /** Why not. Required whenever `replayable` is explicitly `false`, so the verdict can say it. */
+    replaySkipReason: z.string().min(1).max(500).optional(),
+  })
+  .superRefine((command, ctx) => {
+    if (command.replayable === false && command.replaySkipReason === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['replaySkipReason'],
+        message: 'a command marked replayable: false must say why',
+      });
+    }
+    // The launch is the thing under test: replaying it would re-run the worker (and, on a
+    // live attempt, pay for it), and its output cannot be reproduced by construction.
+    if (command.source === 'worker-launch' && command.replayable === true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['replayable'],
+        message: 'a worker-launch command is never replayable',
+      });
+    }
+    // `factory-verification` reads *are* replayable — as a sequence, from the receipt's base,
+    // in an index the wall rebuilds (see `packages/wall/src/replay.ts`). The recorder may mark
+    // them either way; the wall decides by class and sequence, because a receipt that marks
+    // them unreplayable would leave every real attempt unmeasurable (`unknown` refuses gates,
+    // and a gate that can never open is not caution). No issue here, deliberately.
+  });
 export type CommandRecord = z.infer<typeof CommandRecord>;
 
 export const SuiteResult = z.object({

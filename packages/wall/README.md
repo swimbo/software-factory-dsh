@@ -205,6 +205,53 @@ known edges.
     set on a verifying verdict in an uncertifiable class; nothing here enforces that
     the promotion gate honours it. That enforcement belongs to `packages/gates`.
 
+## Which recorded commands the wall replays
+
+The wall re-executes commands from the receipt to check that the attempt's mechanical claims
+survive an independent run. Two live-attempt defects shaped this policy, in opposite directions:
+
+1. The first genuine, paid attempt was refused with `receipt_unfaithful` because the wall
+   replayed **every** command — including the worker launch (`dsh …`, so replaying it re-runs
+   the model and spends money) and the factory's `git diff --cached` / `--numstat` reads run
+   _in isolation and out of order_, which cannot reproduce.
+2. Refusing all of those instead made every real receipt have zero replayable commands, so the
+   verdict was always `unknown`; by law L3 that refuses every gate, which means **no real
+   worker could ever produce a promotable unit**. A gate that can never open is not caution.
+
+The policy, in one sentence: **the wall replays every command it can reconstruct — worker
+commands the recorder marked `replayable`, and the factory's verification reads with the index
+rebuilt from the receipt's base by the replay itself — never the launch, and it states in the
+verdict which commands it did not re-execute.**
+
+| Command source         | Replayed?                       | Why                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `worker-launch`        | **never**                       | It is the attempt under test: non-deterministic, side-effecting, and on a live run replaying it costs money. A receipt that marks it replayable is refused, not believed.                                                                                                                                                                                                                                                   |
+| `worker-command`       | only if `replayable: true`      | The recorder knows whether the command is deterministic. `replayable: false` must carry a reason.                                                                                                                                                                                                                                                                                                                           |
+| `factory-verification` | **yes, with the index rebuilt** | `git diff --cached`/`--numstat`/`status`/`ls-files` are deterministic functions of (base commit, staged tree). The wall replays each as `git read-tree <base> && git add --all -- . && <recorded argv>` in its scratch copy, so the index is rebuilt by the replay rather than assumed. Decided by class, not by the receipt's flag, because a receipt that says "unreplayable" would otherwise close the gate permanently. |
+| absent provenance      | never                           | Absence is not "probably safe": a historical receipt still parses, but it cannot prove faithfulness.                                                                                                                                                                                                                                                                                                                        |
+
+The recorded order is load-bearing when the receipt records the reconstruction commands: a read
+captured before `git read-tree`, or an `add` before it, makes the group **unreplayable with a
+reason** rather than replayed anyway. If the sequence diverges at a read, that is
+`receipt_unfaithful` with the index named — not "partial".
+
+| Verdict                            | When                                                                                                                                                                                      |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pass`, no reason code             | ≥1 command replayed, zero mismatches. `faithfulness:scope` says `replayed N of M recorded commands; 0 mismatched; not replayed: commands[i] (…)`. A real receipt reads `replayed 7 of 8`. |
+| `fail` + `receipt_unfaithful`      | a replayed command's exit code or output hash did not reproduce.                                                                                                                          |
+| `unknown` + `faithfulness_partial` | nothing could be replayed (launch only, or no provenance). Never `fail`: the change may be good, the measurement is unavailable.                                                          |
+
+A faithfulness **pass** therefore requires at least one replayed command and zero mismatches: it
+can never mean "everything was replayed". The partial note is deliberately _not_ a reason code on
+a passing verdict, because `assertVerdictIsEarned` refuses a pass that carries reasons and that
+guard is a never-regress control; the operator reads the scope from `faithfulness:scope`, which
+`oneLineReason` promotes whenever the verdict is not a pass.
+
+`replayable` is set where the command is recorded — `packages/dsh-adapter/src/launch-record.ts`
+— and never defaulted to `true`. The container runner cannot replay the verification reads at
+all (its image carries no `git`), so those commands are reported unreplayable-with-reason there
+and the verdict says so.
+
 ## The three runners
 
 `evaluate()` never constructs a runner; execution is injected, so the decision module stays

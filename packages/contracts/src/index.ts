@@ -40,7 +40,9 @@ export {
 } from './unit.ts';
 
 export {
+  COMMAND_SOURCES,
   CommandRecord,
+  type CommandSource,
   type CommandRecord as CommandRecordType,
   SuiteResult,
   Ceilings,

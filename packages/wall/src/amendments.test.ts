@@ -120,6 +120,8 @@ function makeReceipt(statusPaths?: string[]): DecisionReceipt {
         exitCode: 0,
         timedOut: false,
         outputSha: OK_SHA,
+        source: 'worker-command',
+        replayable: true,
         durationMs: 5,
       },
     ],

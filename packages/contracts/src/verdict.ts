@@ -15,6 +15,16 @@ export const WALL_REASON_CODES = [
   'acceptance_unmet',
   'acceptance_unmeasured',
   'receipt_unfaithful',
+  /**
+   * Faithfulness was measured over a **subset** of the recorded commands: some could not be
+   * replayed (the worker launch, the factory's own `git diff` reads) and are reported as
+   * `not-replayed` with their reason. Advisory, not disqualifying: a pass still requires at
+   * least one replayed command and zero mismatches, so this code means "the reproduced
+   * subset reproduced" and never "everything was reproduced". It is deliberately the only
+   * code allowed to accompany a `pass` (see `ADVISORY_REASON_CODES` in the wall) — a
+   * disqualifying code always accompanies a failing check, and a failing check cannot pass.
+   */
+  'faithfulness_partial',
   'receipt_unavailable',
   /**
    * A recorded command needed a person's decision and had none. The factory will not

@@ -157,3 +157,92 @@ describe('toDecisionReceipt — the L1 barrier', () => {
     expect(hasNarrative).toBe(false);
   });
 });
+
+/**
+ * Command provenance — the fix for the first live attempt.
+ *
+ * The wall replays commands. A live attempt recorded the worker launch (`dsh …`) and the
+ * factory's own post-attempt `git diff --cached` / `--numstat` reads alongside the real
+ * worker commands, so "replay everything" meant re-running a paid model and diffing an index
+ * the wall does not reconstruct. The wall refused a good change with `receipt_unfaithful`.
+ *
+ * The fix is provenance on the record, set where the command is recorded, so the schema
+ * enforces what can and cannot be replayed instead of leaving it to the wall's memory.
+ */
+describe('CommandRecord provenance', () => {
+  const baseCommand = () => ({
+    argv: ['pnpm', 'test'],
+    cwd: 'worktree',
+    exitCode: 0,
+    timedOut: false,
+    outputSha: `sha256:${'d'.repeat(64)}`,
+    durationMs: 12,
+  });
+
+  const withCommand = (command: Record<string, unknown>) => ({
+    ...validReceipt(),
+    commands: [{ ...baseCommand(), ...command }],
+  });
+
+  it('rejects a worker-launch marked replayable: the attempt under test is not re-runnable', () => {
+    const parsed = WorkerReceipt.safeParse(
+      withCommand({ source: 'worker-launch', replayable: true }),
+    );
+    expect(parsed.success).toBe(false);
+    // Not merely "some error": the message has to name the reason, because whoever reads it
+    // is deciding whether to change the adapter.
+    expect(JSON.stringify(parsed.error?.issues)).toContain('never replayable');
+  });
+
+  it('accepts a replayable factory-verification: the reads are deterministic from the base', () => {
+    // This used to be a rejection. It was wrong: the reads are functions of (base commit,
+    // staged tree) and the wall reconstructs that state, so refusing them left every real
+    // receipt with zero replayable commands — `unknown` forever, which is a gate that cannot
+    // open. The wall still refuses a *launch*, which is the command that truly cannot be re-run.
+    const parsed = WorkerReceipt.safeParse(
+      withCommand({ source: 'factory-verification', replayable: true }),
+    );
+    expect(parsed.success).toBe(true);
+    // And an unreplayable one is still fine, as long as it says why.
+    const explained = WorkerReceipt.safeParse(
+      withCommand({
+        source: 'factory-verification',
+        replayable: false,
+        replaySkipReason: 'captured on a checkout whose index could not be rebuilt',
+      }),
+    );
+    expect(explained.success).toBe(true);
+  });
+
+  it('requires a skip reason whenever a command says it is not replayable', () => {
+    const bare = WorkerReceipt.safeParse(
+      withCommand({ source: 'worker-command', replayable: false }),
+    );
+    expect(bare.success).toBe(false);
+    expect(JSON.stringify(bare.error?.issues)).toContain('must say why');
+
+    const explained = WorkerReceipt.safeParse(
+      withCommand({
+        source: 'worker-command',
+        replayable: false,
+        replaySkipReason: 'the test hits an external service whose responses are not reproducible',
+      }),
+    );
+    expect(explained.success).toBe(true);
+  });
+
+  it('accepts a replayable worker command, which is the only thing the wall may re-run', () => {
+    const parsed = WorkerReceipt.safeParse(
+      withCommand({ source: 'worker-command', replayable: true }),
+    );
+    expect(parsed.success).toBe(true);
+  });
+
+  it('still parses a historical receipt with no provenance, and the wall treats it as not replayable', () => {
+    // Backwards compatibility is a parsing promise, not a replay promise: an old receipt
+    // must still load (the ledger is history), but absence is never read as "safe to re-run".
+    const parsed = WorkerReceipt.safeParse(withCommand({}));
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.commands[0]?.replayable).toBeUndefined();
+  });
+});

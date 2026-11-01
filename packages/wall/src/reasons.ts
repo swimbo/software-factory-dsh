@@ -82,7 +82,10 @@ export function oneLineReason(verdict: Verdict): string {
   // `test-surface` and `scope` are promoted for the same reason (A5/A6): the operator has
   // to know which surface moved, and a changed path is something the agent wrote, so it
   // reveals nothing it does not already know. Scenario ids and holdout argv stay out.
-  const promotedIds = ['holdout:quality', 'diff', 'test-surface', 'scope'];
+  // `faithfulness:scope` is promoted for the same reason: when faithfulness could not be
+  // measured over the whole receipt, the operator line has to say which recorded commands
+  // were not re-executed instead of leaving it in a scenario nobody reads.
+  const promotedIds = ['holdout:quality', 'diff', 'test-surface', 'scope', 'faithfulness:scope'];
   const promoted = verdict.scenarios.find(
     (scenario) => promotedIds.includes(scenario.id) && scenario.outcome !== 'pass',
   );

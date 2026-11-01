@@ -128,6 +128,10 @@ function commandRecord(
     timedOut: false,
     outputSha,
     durationMs: 5,
+    // Provenance is explicit from now on: the wall replays only commands the recorder
+    // marked replayable, and these fixtures mean "a worker command the wall may re-run".
+    source: 'worker-command',
+    replayable: true,
   };
 }
 

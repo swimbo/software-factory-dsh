@@ -46,6 +46,7 @@ import {
 } from '@factory/contracts';
 import { assessDiscrimination } from './criteria-log.ts';
 import { PrivilegedBrokerRefusal } from './local.ts';
+import { replayArgv, verificationSequenceProblem } from './replay.ts';
 import type { CriteriaLogEntry, CriteriaLogPort, DiscriminationReport } from './criteria-log.ts';
 import type { HoldoutScenario, HoldoutStore } from './holdout.ts';
 import { assessSecurityPaths, SENSITIVE_OPERATION_CLASSES } from './security-path.ts';
@@ -456,6 +457,91 @@ function exitSetJudge(
  * divergence stops the verdict at `receipt_unfaithful` rather than letting the
  * candidate be judged on a story that already failed.
  */
+/**
+ * Can the wall re-execute this recorded command, and if not, why not?
+ *
+ * The rule is opt-in: only an explicit `replayable: true` is replayed. Absent provenance
+ * means "not replayable", never "probably fine" — an adapter that forgets the field loses
+ * replay coverage loudly (the verdict says which commands were not re-run) instead of
+ * silently re-running a model, which on a live attempt spends money.
+ *
+ * `worker-launch` and `factory-verification` are refused even if a receipt asserts they are
+ * replayable: the launch is the attempt under test (non-deterministic, side-effecting,
+ * billed), and the factory's own `git diff --cached`/`--numstat` reads depend on index
+ * state the wall does not reconstruct. A receipt that claims otherwise is wrong, and the
+ * wall does not take the receipt's word for what can be replayed.
+ */
+function replayPolicy(
+  command: DecisionReceipt['commands'][number],
+  context: {
+    readonly baseRev: string;
+    readonly verificationProblem: string | null;
+    readonly runnerKind?: 'container' | 'local';
+  },
+): {
+  readonly replayable: boolean;
+  readonly note: string | null;
+  readonly argv?: readonly string[];
+} {
+  const source = command.source ?? 'unattributed';
+
+  // The launch is the attempt under test. It is never replayed, whatever the receipt claims:
+  // replaying it re-runs the worker, and on a live attempt that spends money.
+  if (command.source === 'worker-launch') {
+    return {
+      replayable: false,
+      note: 'worker-launch: the attempt under test is never replayed (non-deterministic, side-effecting, billed)',
+    };
+  }
+
+  // The factory's own reads are decided by the wall, not by the receipt's flag: they are
+  // deterministic given (base commit, staged tree), and the wall reconstructs that state. A
+  // receipt that still marks them unreplayable (an adapter that has not been updated, or a
+  // historical row) must not be able to close the gate forever — `unknown` would refuse every
+  // real worker, which is the consequence this policy exists to avoid.
+  if (command.source === 'factory-verification') {
+    if (context.runnerKind === 'container') {
+      return {
+        replayable: false,
+        note: "factory-verification: the wall's container image carries no git, so the index cannot be reconstructed there",
+      };
+    }
+    if (context.verificationProblem !== null) {
+      return { replayable: false, note: `factory-verification: ${context.verificationProblem}` };
+    }
+    const replayArgvForCommand = replayArgv(context.baseRev, command.argv);
+    if (replayArgvForCommand === null) {
+      return {
+        replayable: false,
+        note: 'factory-verification: the recorded argv cannot be replayed without a shell quoting surface the wall refuses to introduce',
+      };
+    }
+    return { replayable: true, note: null, argv: replayArgvForCommand };
+  }
+
+  if (command.replayable === true) {
+    return { replayable: true, note: null, argv: command.argv };
+  }
+  const why =
+    command.replaySkipReason ??
+    (command.source === undefined
+      ? 'the receipt recorded no replay provenance'
+      : 'the recorder marked it not replayable');
+  return { replayable: false, note: `${source}: ${why}` };
+}
+
+/** `commands[2] (worker-launch: …)` for each skipped command, capped so `observed` fits. */
+function describeNotReplayed(
+  skipped: readonly { readonly index: number; readonly note: string }[],
+): string {
+  const shown = skipped
+    .slice(0, 8)
+    .map((entry) => `commands[${String(entry.index)}] (${entry.note})`);
+  if (skipped.length > shown.length)
+    shown.push(`…(+${String(skipped.length - shown.length)} more)`);
+  return shown.join(', ');
+}
+
 async function checkFaithfulness(input: EvaluateInput): Promise<CheckOutcome> {
   const { receipt, spec, policy, runner } = input;
 
@@ -488,18 +574,44 @@ async function checkFaithfulness(input: EvaluateInput): Promise<CheckOutcome> {
 
   const scenarios: ScenarioResult[] = [];
   const reasons: WallReasonCode[] = [];
+  const skipped: { index: number; note: string }[] = [];
+  let replayed = 0;
+  let mismatched = 0;
 
   for (let index = 0; index < receipt.commands.length; index += 1) {
     const command = receipt.commands[index];
     if (command === undefined) continue;
     const id = `faithfulness:${String(index + 1).padStart(2, '0')}`;
 
+    const verificationProblem = verificationSequenceProblem(receipt.commands, receipt.diff.baseRev);
+    const policyForCommand = replayPolicy(command, {
+      baseRev: receipt.diff.baseRev,
+      verificationProblem,
+      ...(runner.kind === undefined ? {} : { runnerKind: runner.kind }),
+    });
+    if (!policyForCommand.replayable) {
+      // Not replayed, and recorded as such rather than silently dropped: the verdict has to
+      // say which claims were not independently checked. The scenario passes because this
+      // command is not evidence *against* the change; the scope note carries the honesty.
+      skipped.push({ index, note: policyForCommand.note ?? 'not replayable' });
+      scenarios.push(
+        result(
+          id,
+          'faithfulness',
+          'pass',
+          `not replayed — ${policyForCommand.note ?? 'not replayable'}`,
+        ),
+      );
+      continue;
+    }
+    replayed += 1;
+
     let observed: ScenarioRunResult;
     try {
       observed = await runner.run({
         baseRev: receipt.diff.baseRev,
         patchFile: receipt.diff.patchFile,
-        argv: command.argv,
+        argv: policyForCommand.argv ?? command.argv,
         timeoutMs: policy.commandTimeoutMs,
       });
     } catch (error) {
@@ -522,6 +634,7 @@ async function checkFaithfulness(input: EvaluateInput): Promise<CheckOutcome> {
     }
 
     if (observed.exitCode !== command.exitCode || observed.outputSha !== command.outputSha) {
+      mismatched += 1;
       // The operator needs to know a divergence exists; the agent must not learn
       // which byte differed, because that is the signal it would optimise next.
       scenarios.push(
@@ -532,6 +645,38 @@ async function checkFaithfulness(input: EvaluateInput): Promise<CheckOutcome> {
     }
 
     scenarios.push(result(id, 'faithfulness', 'pass', 'exit code and output hash reproduced'));
+  }
+
+  // The scope note is the whole point of this rewrite. A faithfulness pass means "every
+  // command the wall *could* re-execute did reproduce" — never "everything was replayed" —
+  // and the verdict says which commands were left alone, with the reason for each.
+  const notReplayed = skipped.length === 0 ? null : describeNotReplayed(skipped);
+  const total = receipt.commands.length;
+  const scopeObserved = ((): string => {
+    const head = `replayed ${String(replayed)} of ${String(total)} recorded commands; ${String(mismatched)} mismatched`;
+    return notReplayed === null
+      ? `${head}; nothing skipped`
+      : `${head}; not replayed: ${notReplayed}`;
+  })();
+
+  if (replayed === 0) {
+    // Nothing was independently checked. That is an unavailable measurement, not a
+    // failure — the change may be perfectly good — and `unknown` refuses every gate.
+    scenarios.push(result('faithfulness:scope', 'faithfulness', 'unknown', scopeObserved));
+    if (!reasons.includes('faithfulness_partial')) reasons.push('faithfulness_partial');
+    return { scenarios, reasons };
+  }
+
+  // No `faithfulness_partial` on this path: a reason here would degrade the pass to
+  // `unknown` (the invariant below), and a change whose replayable commands reproduced has
+  // earned its pass. The scope note in `observed` is what carries the honesty — the operator
+  // reads it, and `oneLineReason` promotes it whenever the verdict is not a pass.
+  scenarios.push(result('faithfulness:scope', 'faithfulness', 'pass', scopeObserved));
+  // A refusal states its own scope too: on a `fail` the extra code cannot mask anything
+  // (a failure is already the outcome), and the operator should know that the launch was
+  // skipped before concluding that "the wall re-ran everything and it diverged".
+  if (mismatched > 0 && skipped.length > 0 && !reasons.includes('faithfulness_partial')) {
+    reasons.push('faithfulness_partial');
   }
 
   return { scenarios, reasons };
@@ -1642,6 +1787,12 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
 
   // Belt and braces for the invariant: a pass with any reason attached is a bug,
   // and the wall would rather report `unknown` than a pass it cannot justify.
+  //
+  // This is also why `faithfulness_partial` is not attached to a passing verdict: the
+  // contract's `assertVerdictIsEarned` refuses a pass that carries reasons, and that guard
+  // is a never-regress control. A pass therefore states its scope in the `faithfulness:scope`
+  // scenario's `observed` (which the operator reads) and carries no code; the code appears
+  // only when nothing could be replayed, where the verdict is `unknown` and must say why.
   if (outcome === 'pass' && merged.reasons.length > 0) outcome = 'unknown';
 
   const baseVersion =
