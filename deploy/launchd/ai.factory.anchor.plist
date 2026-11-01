@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ai.factory.anchor — the daily off-host anchor (ND4, ADR-008).
+
+  Copy to ~/Library/LaunchAgents/ and load it. Replace @REPO@ and @NODE_BIN@ before you do; both are
+  absolute on purpose, because launchd does not read your shell profile and a relative path here would
+  fail at 03:00 and nowhere else.
+
+  What it does: `factory ledger anchor` appends {seq, eventCount, headHash, anchoredAt} to the
+  configured off-host target. If it fails, it fails into the log — and `factory ledger verify` (exit 9
+  past 48 h) is what turns a silently stopped anchor into a refusal. Nothing here retries: a scheduled
+  job that retries into the same broken transport only fills the log.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.factory.anchor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd @REPO@ &amp;&amp; @NODE_BIN@ apps/cli/src/main.ts ledger anchor</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@NODE_BIN_DIR@:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- The anchor lives on the machine that already holds the operator's secrets, not on this host. -->
+    <key>FACTORY_ANCHOR_SSH</key>
+    <string>hermes-control</string>
+    <key>FACTORY_ANCHOR_PATH</key>
+    <string>$HOME/.factory/anchors/software-factory-dsh.jsonl</string>
+    <!-- The ledger this anchors: the operator's real factory home, not a throwaway. -->
+    <key>FACTORY_HOME</key>
+    <string>/Users/bo/.factory</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- If the machine was asleep at 03:00, run once on the next wake rather than skipping the day. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/bo/.factory/anchor.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/bo/.factory/anchor.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

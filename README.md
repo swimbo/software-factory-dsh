@@ -112,8 +112,11 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   not brokered.
 - **ND1–ND4 are decided and implemented; these are the parts still missing.** The decisions themselves
   are in `findings.md` § DECIDED and the implementation record in
-  `evidence/phase-13-nd-decisions.md`. Not built: **re-certification as a job** (ND1 half two), and
-  **alerting on a stale anchor** (ND4 — `ledger verify` is a command a cron job or a person runs).
+  `evidence/phase-13-nd-decisions.md`. The **daily anchor job is installed** on this host
+  (`deploy/launchd/ai.factory.anchor.plist`, 03:00, first records written 2026-11-01 and verified
+  `FRESH · off-host` against `hermes-control`). Still not built: **alerting on a stale anchor** —
+  `ledger verify` exits 9, but nothing pages anyone — and **re-certification**, which is being turned
+  from prose into a stored certificate now.
   ND3's ceiling is proven at the socket, not through the real executor (no paid e2e spec), and ND2's
   two-uid path is proven in a `node:26-bookworm` container rather than on the Linux target itself.
 - **The two-uid topology has not run on the Linux target**, only in a `node:26-bookworm` container:

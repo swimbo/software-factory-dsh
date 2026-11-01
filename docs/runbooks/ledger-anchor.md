@@ -40,12 +40,39 @@ Configuration (composition root, never data):
 | `FACTORY_ANCHOR_PATH` | path on that host (default `/var/lib/factory/ledger-anchors.jsonl`) | `off-host`     |
 | `FACTORY_ANCHOR_DIR`  | local directory, used only when no host is configured               | `LOCAL`        |
 
-Schedule the daily write where the machine already has a scheduler:
+### Installing the daily write
+
+**macOS (what this host runs).** The job template lives in the repo at
+`deploy/launchd/ai.factory.anchor.plist`; render it and load it:
 
 ```bash
-# launchd (macOS) / cron (Linux): one line, no output on success
-0 3 * * *  cd /path/to/software-factory-dsh && PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH" FACTORY_ANCHOR_SSH=hermes-control factory ledger anchor >>"$HOME/.factory/anchor.log" 2>&1
+cd /path/to/software-factory-dsh
+NODE_DIR="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin"
+sed -e "s|@REPO@|$PWD|g" -e "s|@NODE_BIN@|$NODE_DIR/node|g" -e "s|@NODE_BIN_DIR@|$NODE_DIR|g" \
+  deploy/launchd/ai.factory.anchor.plist > ~/Library/LaunchAgents/ai.factory.anchor.plist
+plutil -lint ~/Library/LaunchAgents/ai.factory.anchor.plist   # must print OK
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.factory.anchor.plist
+launchctl kickstart -k gui/$(id -u)/ai.factory.anchor          # run it once, now
+tail -6 ~/.factory/anchor.log                                  # "scope off-host" is the line that matters
 ```
+
+`launchctl print gui/$(id -u)/ai.factory.anchor | grep 'last exit code'` says whether the last run
+worked; the job does not retry, because a scheduled job retrying into a broken transport only fills the
+log. Both paths and the node binary are absolute in the plist on purpose: launchd does not read your
+shell profile, and a relative path here fails at 03:00 and nowhere else.
+
+**Linux (cron).**
+
+```bash
+0 3 * * *  cd /path/to/software-factory-dsh && PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH" \
+  FACTORY_ANCHOR_SSH=hermes-control FACTORY_ANCHOR_PATH='$HOME/.factory/anchors/software-factory-dsh.jsonl' \
+  node apps/cli/src/main.ts ledger anchor >>"$HOME/.factory/anchor.log" 2>&1
+```
+
+The destination used on this deployment is `$HOME/.factory/anchors/software-factory-dsh.jsonl` on
+`hermes-control` (mode `0700` on the directory, no root needed, same tailnet). It was chosen over
+`/var/lib/factory` because that path does not exist there and a root-owned anchor on a machine whose
+whole purpose is to hold unprivileged secrets buys nothing but another thing to provision.
 
 ## What "fixed" looks like
 
