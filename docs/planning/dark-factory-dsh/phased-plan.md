@@ -34,8 +34,8 @@ Locked, user-confirmed 2026-11-01.
 2. Deterministic, replay-safe workflow: all I/O in activities; **idempotency keys hashed from operation inputs**; crash recovery that reconciles without redispatching an ambiguous attempt.
 3. Effect outbox with per-kind ordering, exponential backoff, and a health surface.
 4. Claims/leases with fencing tokens and attempt identity preservation (inherited invariant #1).
-5. Concurrency scheduler with worker slots; human-priority slot; **wall-capacity as the throughput ceiling**.
-6. Liveness watchdog: token/turn/wall-clock ceilings, no-progress detector, kill switch that provably reaches child processes and orphaned DSH runs.
+5. Concurrency scheduler with worker slots; human-priority slot; **wall-capacity as the throughput ceiling**. — _Built as a refusal, not a queue (2026-11-01): `maxConcurrentAttempts` and `maxConcurrentWalls`, `CONCURRENCY_LIMIT` at exit 7, checked before dispatch so a refusal leaves no attempt/lease/reservation/effect. **Not built:** queueing, fairness, priorities, and the human-priority slot — refusing is the honest v1, because a queue is a promise about when work happens and there is no scheduler to keep it._
+6. Liveness watchdog: token/turn/wall-clock ceilings, no-progress detector, kill switch that provably reaches child processes and orphaned DSH runs. — _Built: wall-clock and output-byte ceilings, the kill switch (proven to reap grandchildren, with the leader-only control that orphans them), plus per-attempt usage recording. **Not built:** a no-progress detector — it needs step-level signals DSH owns, so the id is withdrawn rather than left as a gap that looks like an oversight; and token ceilings, which belong to DSH's own `step_end` accounting._
 
 **The qualifier (lane routing)** 7. Deterministic scoring: intent derivability (machine-checkable acceptance criteria + restate-back), reversibility/blast radius, outcome observability, task class, size, historical Δ and escape rate → `dark` | `lit` | `reject`, with the reason codes recorded. 8. Re-validation: a unit whose mandate no longer holds under a changed policy is stopped from proceeding (never silently resumed).
 

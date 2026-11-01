@@ -59,7 +59,13 @@ never a vendor SDK, and no test makes a paid call (constraint C5: the suite pass
 
 Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished product:
 
-- **No scheduler, no worker slots, no wall-capacity ceiling** (IN #5). One unit per `factory run`.
+- **No scheduler and no queue.** IN #5 is built as a _refusal_: `maxConcurrentAttempts` and
+  `maxConcurrentWalls` (both default 1) make a second dispatch exit 7 with `CONCURRENCY_LIMIT` before
+  anything is reserved. There is no queueing, no fairness, no priorities and no human-priority slot —
+  a queue would be a promise about _when_ work happens, and there is no scheduler to keep it.
+- **No no-progress detector** (IN #6). The watchdog enforces wall-clock and output-byte ceilings and
+  the kill switch, but detecting "the worker is doing nothing" needs step-level signals that DSH
+  owns; the e2e id for it is withdrawn rather than left looking unstarted.
 - **No credential proxy** (R5). `packages/proxy` does not exist; the destructive-command classifier
   is a post-hoc denylist that its own comment calls partial. Privileged operations are _refused_,
   not brokered.
