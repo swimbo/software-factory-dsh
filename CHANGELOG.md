@@ -37,6 +37,12 @@ now driven, and two claims turned out to be stale — in one case in the factory
   name), and both images ran a runtime that disagreed with the pins (now `node:26.12.1`, and
   `docker/factory-env` builds with `dsh 0.2.1-rc.5`).
 
+**Verified with the live stage included:** `8 passed, 0 skipped, 0 failed` (`docs/verification/2026-11-01T21-58-16Z/`)
+— the paid pair completing in 24.0 s and the refusal path exiting 5 in 5.3 s, the gateway reporting
+`8149` and `8594` total tokens across the two turns. Offline on the committed tree: `7 passed, 1 skipped`
+(`docs/verification/2026-11-01T21-56-19Z/`), 1314 passed / 6 skipped across 92 files, 41 panel specs in
+a real browser.
+
 **Still not built, unchanged by this round:** the _worker's_ container (E2E-45 stays `UNKNOWN` — there
 is no worker container to kill; the `ambiguous`/`recover` invariant is proven at process level), alerts
 on a stale anchor or an expired certificate, scheduled re-certification, ND3's ceiling through the real
