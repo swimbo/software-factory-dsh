@@ -415,6 +415,13 @@ _Purpose:_ one Δ measurement, per unit, per class — the metric that says whet
 
 ### 2.20 `GateDecision`
 
+> **Reality check (2026-11-01).** There is **no `gate_decisions` table**. `grep -rn gate_decision packages/store/src`
+> returns nothing; the gate decision is persisted as the `privileged.decided` / gate event in the ledger plus a
+> JSON artifact under `FACTORY_HOME/gates/`, with the id `gd_<hash[0:24]>` from `packages/gates/src/decision.ts`.
+> The schema below is therefore a design record, not a description of the database. Either the table is built
+> (Phase 14) or this section moves to an appendix marked "not built" — the one thing it must not do is stay
+> here reading like a table that exists.
+
 _Purpose:_ one policy decision at a capability boundary — including the human-gate requests. _Owner:_ C6. _Mutability:_ append-only; a human close is a new row that references the request. _Retention:_ forever.
 
 | Field                                                  | Type                                                                        | Notes                                        |
