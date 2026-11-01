@@ -1,6 +1,6 @@
 # Phase 11 — Testing & Verification
 
-**Status:** pending
+**Status:** partial — offline layers green and evidenced; the isolation and live-model layers are `UNKNOWN` and required for release
 **Owner:** lead (+ parallel evidence runs where the suites are disjoint)
 **Artifacts produced:** `docs/planning/dark-factory-dsh/evidence/` (`test-summary.md`, `<suite>-<sha>.log`, `chaos-kill9.json`, `audit-trace.txt`, `dogfood-<sha>.json`), plus `progress.md > ## Test Results` and `## Errors`
 
