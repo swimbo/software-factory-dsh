@@ -77,6 +77,10 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
 - **No container isolation on this host.** The 4 `@docker` specs are tagged and skipped; the local
   runner measures behaviour, not containment.
 - **DSH's sandbox is not a security boundary**, and is not treated as one anywhere.
+- **No ACP worker.** The adapter drives `dsh --profile headless` one-shot turns and reads NDJSON;
+  the agent-client-protocol path is not implemented, so "one-shot **or** ACP workers" is delivered as
+  **one-shot only**. An ACP worker would need a second executor behind the same `Executor` port and
+  the same launch record — the seam exists, the implementation does not.
 
 ## Documents
 
