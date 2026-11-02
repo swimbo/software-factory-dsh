@@ -25,18 +25,18 @@
  * If docker or the image is unavailable the suite is skipped **with the reason in its name**
  * and counted `UNKNOWN` in `e2e-tests.md` — never passed.
  *
- * ## The ids, and the one that is not here
+ * ## The ids
  *
  * The labels follow `e2e-tests.md`: E2E-43 is the network, E2E-44 is "writes only inside its work
  * dir" *plus* "cannot see the host's factory home, the holdout or an operator key" (two specs), and
- * E2E-46 is the cgroup limits. The second E2E-44 spec was labelled E2E-45 here for a while, which
- * is how a missing spec hides: E2E-45 in `e2e-tests.md` is *killing the worker container mid-attempt
- * ⇒ `ambiguous`, one attempt, no redispatch, `recover` idempotent*, and it cannot be measured yet
- * because **the worker does not run in a container** — `apps/cli/src/wall.ts` wires only
- * `createLocalRunner`, and `docker/factory-env` is an image nothing dispatches into. The invariant
- * itself is covered at the process level by `e2e/cli/default/06-recover.test.ts` (E2E-21/30/31/32);
- * the container-level id stays `UNKNOWN` rather than being asserted from a probe that never had a
- * worker container to kill.
+ * E2E-46 is the cgroup limits. The second E2E-44 spec was labelled E2E-45 here for a while, which is
+ * how a missing spec hides. E2E-45 in `e2e-tests.md` is *killing the worker container mid-attempt ⇒
+ * `ambiguous`, one attempt, no redispatch, `recover` idempotent, orphan sweep recorded*. That is no
+ * longer unmeasured: since `36e2ddd` the worker does run in a container
+ * (`FACTORY_WORKER_ISOLATION=container` dispatches into `docker/factory-env`), and
+ * `e2e/cli/docker/08-worker-container.test.ts` measures the kill/ambiguity half while
+ * `09-recover-sweep.test.ts` measures the orphan-sweep clause it names. Nothing here is
+ * `UNKNOWN` for lack of a worker container any more.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
