@@ -18,6 +18,7 @@ came from a commit or a teammate's report rather than a command I ran in this se
 | `052f63f` | `bash scripts/verify.sh` | **6 passed, 1 skipped, 1 failed** — `test` red: 4 `@docker` specs failed (E2E-45 timed out at 180 s; three egress specs "container is not running")                    | `docs/verification/2026-11-02T22-57-34Z/` |
 | `052f63f` | `bash scripts/verify.sh` | the same tree after removing the leftover containers by hand — **7 passed, 1 skipped, 0 failed**                                                                      | `docs/verification/2026-11-02T23-06-42Z/` |
 | `57db9b5` | `bash scripts/verify.sh` | **7 passed, 1 skipped, 0 failed**, with `07-isolation` (6), `08-worker-container` (3) and `09-recover-sweep` (2) all **run**, none skipped                              | `docs/verification/2026-11-02T23-17-11Z/` |
+| `8a77f07` | `bash scripts/verify.sh` | **7 passed, 1 skipped, 0 failed** on the release commit itself — the run the tag carries, `dirtyPaths: 1` (this run's own directory) | `docs/verification/2026-11-02T23-23-08Z/` |
 
 Test stage on the release run: **1472 passed | 7 skipped (1479) across 99 passed | 2 skipped files**.
 The seven skips are the same declared set phase 15 recorded (3 `@live`, 3 opt-in
