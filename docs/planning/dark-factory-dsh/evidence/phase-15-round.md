@@ -218,6 +218,15 @@ Zero paid calls. It executes the runbooks rather than describing them, and it st
 - **An ACP worker** — the seam exists, the implementation does not.
 - **β** — unmeasured, and it will stay that way without a known-bad corpus.
 - **CI.** `.github/workflows/` is empty; a green `verify.sh` is a local artifact with a recorded commit.
+- **`research/existing-state.md` is cited about thirty times across six planning artifacts and has
+  never existed in this tree** (`architecture.md`, `consensus-plan.md`, `findings.md`,
+  `evidence-ledger.md`, `debate-transcript.md`, `phase-1-plan.md` — the last of which ticks a box saying
+  it "exists (558 lines)"). This is the same class of defect as `ADR-008`'s link to a never-existent
+  ADR, but the fix is a judgement call rather than a one-line correction: the plan set is a historical
+  record, and the honest repair is either to mark the ~30 claims that rest on that file as
+  unverifiable, or to delete the citations. Recorded here rather than rewritten unilaterally; the
+  audit's rule is that a claim with no artefact behind it is `UNPROVEN`, and six ticked plan boxes
+  currently rest on one that does not exist.
 
 ## 9. What this round changed in the files a reader trusts
 
