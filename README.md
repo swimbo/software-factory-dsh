@@ -25,7 +25,7 @@ makes "2-of-3 runs" a weaker claim than it looks.
 export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 pnpm install
 pnpm run build            # tsc -p tsconfig.build.json
-pnpm test                 # 1314 passed, 6 skipped (92 files)
+pnpm test                 # 1372 passed, 7 skipped (97 files; measured at 36e2ddd, docker running)
 bash scripts/verify.sh    # preflight, typecheck, lint, format:check, test, build, panel, live-model(skip)
 bash scripts/provision-topology.sh   # report which topology this host can honour (--apply on Linux)
 factory ledger verify     # is the ledger head anchored off-host, and is the anchor fresh?
@@ -88,17 +88,21 @@ quiet, not loud. Expiry is _detectable_; it is not _escalated_.
 
 ## Packages
 
-| Package                | What it is                                                                                                                                                 |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/contracts`   | The pinned vocabulary: `StatusV1`, `Verdict`, `WorkerReceipt`, lane decisions, exit codes, canonical JSON hashing                                          |
-| `packages/store`       | `node:sqlite` ledger — units, attempts, leases, receipts, verdicts, promotions, effects, spend; every write is one transaction that also appends the event |
-| `packages/core`        | The state machine, the effect outbox, recovery, and the four never-regress rules                                                                           |
-| `packages/qualifier`   | Lane routing (dark / lit / refuse) from deterministic signals                                                                                              |
-| `packages/wall`        | Generator-blind holdout evaluation: pinned suite, Δ certification, three runners (container / local / fake)                                                |
-| `packages/gates`       | The three human gates: promotion signing, budget envelope, credential broker                                                                               |
-| `packages/dsh-adapter` | The only code that touches DeepSeek Harness (`@deepseek-ai/*`): per-trust-domain `DSH_HOME`, overlay composition, NDJSON, watchdog, egress probe           |
-| `apps/cli`             | `factory` — the operator surface, `--json` everywhere                                                                                                      |
-| `apps/panel`           | Read-only status page: token-gated, loopback only, no writes by construction                                                                               |
+| Package                     | What it is                                                                                                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/contracts`        | The pinned vocabulary: `StatusV1`, `Verdict`, `WorkerReceipt`, lane decisions, exit codes, canonical JSON hashing                                                  |
+| `packages/store`            | `node:sqlite` ledger — units, attempts, leases, receipts, verdicts, promotions, effects, spend; every write is one transaction that also appends the event         |
+| `packages/core`             | The state machine, the effect outbox, recovery, and the four never-regress rules                                                                                   |
+| `packages/qualifier`        | Lane routing (dark / lit / refuse) from deterministic signals                                                                                                      |
+| `packages/wall`             | Generator-blind holdout evaluation: pinned suite, Δ certification, three runners (container / local / fake)                                                        |
+| `packages/gates`            | The three human gates: promotion signing, budget envelope, credential broker                                                                                       |
+| `packages/proxy`            | The privileged-operation broker: post-expansion classifier, brokered-operation table, signed one-operation decision, six refusals                                  |
+| `packages/credential-proxy` | Per-attempt HTTP proxy that holds the gateway key: a 128-bit token bound to one attempt, one socket, one upstream prefix, revoked at settle (ADR-007)              |
+| `packages/anchor`           | The off-host ledger head: append one `{seq, headHash, eventCount, anchoredAt}` a day, refuse a head with no anchor newer than 48 h (ADR-008)                       |
+| `packages/effects`          | The outbox dispatcher: performs the effects the engine committed, at most once, keyed by content                                                                   |
+| `packages/dsh-adapter`      | The only code that touches DeepSeek Harness (`@deepseek-ai/*`): per-trust-domain `DSH_HOME`, overlay composition, NDJSON, watchdog, egress probe, worker container |
+| `apps/cli`                  | `factory` — the operator surface, `--json` everywhere                                                                                                              |
+| `apps/panel`                | Read-only status page: token-gated, loopback only, no writes by construction                                                                                       |
 
 The architecture is a **clean-room** build on DSH's package boundaries: nothing from
 `dsh-superagent-prototype` is vendored, and only `packages/dsh-adapter` imports DSH.
@@ -120,9 +124,30 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
 - **No no-progress detector** (IN #6). The watchdog enforces wall-clock and output-byte ceilings and
   the kill switch, but detecting "the worker is doing nothing" needs step-level signals that DSH
   owns; the e2e id for it is withdrawn rather than left looking unstarted.
-- **No credential proxy** (R5). `packages/proxy` does not exist; the destructive-command classifier
-  is a post-hoc denylist that its own comment calls partial. Privileged operations are _refused_,
-  not brokered.
+- **Privileged operations are refused or brokered, and the half that is wired can only refuse.**
+  `packages/proxy` is the broker R5 asked for: classification happens **after** expansion (a shell
+  `-c` string is tokenised, `env`/`xargs`/`nice`/`timeout` are unwrapped, `/usr/bin/sudo` is reduced to
+  `sudo`, `~`/`$HOME` are normalised, and a dynamic word in the command position is `ambiguous` and
+  therefore refused), six brokered classes (`sudo`, `container`, `ci`, `cloud`, `macos-security`,
+  `path-write`) are matched against a table of normalised argv shapes rather than a word denylist, and
+  the answer is `GATE_REQUIRED` (exit 5: no decision, unsigned, a retired key, not the operator's
+  phrase, already used, or an explicit deny) or `MANDATE_EXPIRED` (exit 3: expired, or a decision
+  granted for a different command). A `PrivilegedDecision` binds one `sha256` of the normalised
+  operation, one expiry and the operator key that signed it; its persistable forms are the
+  `privileged.decided` ledger event and a `FACTORY_HOME/gates/` artifact
+  (`packages/proxy/src/{classify,operations,decision,broker}.ts`). It
+  runs where the factory sees an argv: the wall's re-execution of a receipt's commands brokers
+  unconditionally (`apps/cli/src/wall.ts`), so a receipt claiming `sudo` measures `unknown`
+  (`privileged_unbrokered`), never `pass`, and the fake executor brokers its scripted steps only with
+  `FACTORY_PRIVILEGED_BROKERING=on` (default `off`, `packages/qualifier/src/policy.ts`). **Still not
+  built:** no verb mints a decision and neither call site passes a `DecisionSink`, so the allow path
+  is exercised only by a signed decision built in `packages/wall/src/local.test.ts` — there is no
+  end-to-end "a person signed, so it ran"; a real `dsh` turn's own tool calls are kept as an
+  agent-reported artefact (`packages/dsh-adapter/src/executor.ts`) and never reach the broker
+  (ADR-006); and there is no rule for arbitrary destructive verbs — the wall's denylist over recorded
+  argv is a second, knowingly partial line (`packages/wall/src/evaluate.ts`). The worker **credential**
+  is a different package: `packages/credential-proxy` holds the gateway key and hands the attempt a
+  scoped, revocable token — see the live-layer bullet below.
 - **ND1–ND4 are decided and implemented; these are the parts still missing.** The decisions themselves
   are in `findings.md` § DECIDED and the implementation record in
   `evidence/phase-13-nd-decisions.md`. The **daily anchor job is installed** on this host
@@ -191,13 +216,20 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
 ```bash
 export DSH_BIN="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 export BIFROST_API_KEY=…              # from the operator's secret store, never from this repo
-pnpm run test:live                    # both @live specs, one paid turn each
+pnpm run test:live                    # the whole suite with the two @live specs in it (see note)
 FACTORY_VERIFY_LIVE=1 bash scripts/verify.sh   # the whole gate, live stage included
 ```
 
-Measured: `verify: 7 passed, 0 skipped, 0 failed`. With the key unset the same gate is
-`6 passed, 1 skipped, 0 failed` and the live row is `SKIPPED` with its reason — the offline suite
-never spends (C5).
+Measured: the last recorded live run (`docs/verification/2026-11-01T21-58-16Z/`, commit `6a398cc`)
+reports `verify: 8 passed, 0 skipped, 0 failed`, `panel` and `live-model` both PASS. With the key
+unset the same gate is `7 passed, 1 skipped, 0 failed` at `36e2ddd`: `preflight`, `typecheck`, `lint`,
+`format:check`, `test`, `build` and `panel` pass, and the live row is `SKIPPED` with its reason — the
+offline suite never spends (C5).
+
+Note on `test:live`: the script in `package.json` is `FACTORY_TAGS=live vitest run`, and nothing in
+the tree reads `FACTORY_TAGS`, so it re-runs the whole suite (the `@live` specs skip without
+`BIFROST_API_KEY` and `DSH_BIN`). It is not a filter, and the live stage of `verify.sh` calls the same
+script.
 
 ## What has actually been executed against a model
 
