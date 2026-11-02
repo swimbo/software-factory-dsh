@@ -5,6 +5,11 @@
  * exits. It never anchors, never re-certifies, never writes an event. That is what makes it safe to
  * run from a timer on a quarantined store.
  *
+ * `--notify` adds a *side channel* — a macOS notification, or one POST to `FACTORY_ALERTS_WEBHOOK_URL`
+ * — and still writes nothing to the store or the ledger. It is opt-in so this verb's read-only
+ * contract does not change silently, and it cannot change the exit code: 0/8/9 describe the evidence,
+ * and a delivery that fails says so on stderr instead of pretending the evidence changed.
+ *
  * Two rules shape the design, and both exist because a monitor that lies is worse than no monitor:
  *
  *  - **It does not re-derive the judgements.** `verifyAnchor` from `@factory/anchor` decides whether
@@ -37,8 +42,9 @@ import {
 } from '@factory/wall';
 
 import { EXIT, UsageError } from '../exit.ts';
+import { deliverNotification } from '../notify.ts';
 import { field } from '../render/format.ts';
-import type { VerbInput, VerbSpec } from './types.ts';
+import { boolOption, type VerbInput, type VerbSpec } from './types.ts';
 
 /** What the anchor probe found, before it is turned into alerts. */
 export type AnchorProbe =
@@ -357,6 +363,18 @@ export async function runAlerts(input: VerbInput): Promise<number> {
       ctx.ui.err(`           next: ${alert.investigation}`);
     }
   }
+
+  // The alert set is printed and logged before anything is delivered, so a channel that fails still
+  // leaves the facts above it in the log. `--notify` is opt-in and the code below returns the
+  // decision's own exit code: the transport is never allowed to answer the question the evidence
+  // answers. A failed delivery prints one NOTIFY line and nothing else changes.
+  if (boolOption(input.options, 'notify')) {
+    await deliverNotification(document, decision.exitCode, {
+      env: ctx.env,
+      platform: process.platform,
+      warn: ctx.ui.err,
+    });
+  }
   return decision.exitCode;
 }
 
@@ -368,6 +386,12 @@ export const alertsVerb: VerbSpec = {
   verb: 'alerts',
   summary: 'Report expired evidence: the anchor, class certificates, a quarantined store',
   arguments: [],
-  configure: (command) => command,
+  // Off by default: adding a channel must not turn a read-only monitor into one that opens a socket
+  // for every existing caller (the launchd job, a script, a habit). The flag is the consent.
+  configure: (command) =>
+    command.option(
+      '--notify',
+      'also deliver the alert set: a macOS notification, or a POST to FACTORY_ALERTS_WEBHOOK_URL',
+    ),
   action: runAlerts,
 };

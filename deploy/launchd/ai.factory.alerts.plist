@@ -12,15 +12,26 @@
   certificate still current — and exits 0 (nothing expired), 9 (expired evidence) or 8 (the anchor host
   could not be reached). It is read-only: it never anchors, never re-certifies, never writes.
 
+  It also passes `--notify`: when there is something to report, the run raises one macOS notification
+  on this machine (or POSTs the same alerts.v1 document to FACTORY_ALERTS_WEBHOOK_URL, if that variable
+  is set). Delivery is best-effort — one attempt, at most one retry for the POST — and a failed
+  delivery changes neither the exit code nor the log entry. The log remains the record: launchd
+  appends stdout and stderr to the same file, both are line-buffered, and the verb writes one line per
+  alert plus one NOTIFY line, so `tail -n 40 ~/.factory/alerts.log` answers "did anything expire, and
+  was anyone told". Nothing retries a lost notification; the next day's run is the retry.
+
   Why 04:00: the anchor job runs at 03:00. An alert that runs before the anchor it checks would report
   yesterday's staleness every morning.
 
-  Why no retry: a scheduled monitor that retries into the same broken transport only fills the log, and
-  a log full of the same line is a log nobody reads. The next day's run is the retry.
+  Why no retry of the job: a scheduled monitor that retries into the same broken transport only fills
+  the log, and a log full of the same line is a log nobody reads. The next day's run is the retry.
 
-  The log is the page until a real channel exists. launchd appends stdout and stderr to the same file,
-  both are line-buffered, and the verb writes one line per alert plus the exit code on exit — so
-  `tail -n 40 ~/.factory/alerts.log` answers "did anything expire, and when".
+  Sleep and wake: the schedule below is `StartCalendarInterval`. Per launchd.plist(5), launchd runs a
+  calendar occurrence missed while the machine was asleep the next time it wakes, and coalesces several
+  missed occurrences into one run — unlike cron, which skips them. `RunAtLoad` is a *different* key: it
+  controls whether the job also runs when the agent is loaded (login/boot), and it is false here. A host
+  that is off for a week, or that never wakes again, delivers nothing at all; that limit is stated in
+  docs/runbooks/evidence-expiry.md rather than papered over here.
 
   Nothing here sets FACTORY_MODEL_ID on purpose: this job is offline, so certificates are compared on
   policy version only. When the wall starts stamping certificates with a model id, add it here — a
@@ -35,7 +46,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>cd @REPO@ &amp;&amp; @NODE_BIN@ apps/cli/src/main.ts alerts</string>
+    <string>cd @REPO@ &amp;&amp; @NODE_BIN@ apps/cli/src/main.ts alerts --notify</string>
   </array>
 
   <key>EnvironmentVariables</key>
@@ -51,6 +62,14 @@
     <!-- The ledger being audited: the operator's real factory home, not a throwaway. -->
     <key>FACTORY_HOME</key>
     <string>/Users/bo/.factory</string>
+    <!-- Optional, and unset on purpose: with it set, the alert set goes to this endpoint instead of
+         this machine's notification centre (exactly one POST of the alerts.v1 JSON, bounded, retried
+         at most once). The URL is usually a credential — the log line it produces keeps only the
+         scheme and host, but the plist itself is a file other users may be able to read. Uncomment
+         both lines to enable it; leave them as comments to keep the local notification.
+    <key>FACTORY_ALERTS_WEBHOOK_URL</key>
+    <string>https://example.invalid/hooks/factory-alerts</string>
+    -->
   </dict>
 
   <key>StartCalendarInterval</key>
@@ -61,7 +80,10 @@
     <integer>0</integer>
   </dict>
 
-  <!-- If the machine was asleep at 04:00, run once on the next wake rather than skipping the day. -->
+  <!-- RunAtLoad is *not* how a missed run is recovered, and it is false: this job does not run when
+       the agent is loaded, only at 04:00. A calendar occurrence missed while the machine slept is run
+       on the next wake and coalesced, which is StartCalendarInterval's behaviour (launchd.plist(5)),
+       not this key's. -->
   <key>RunAtLoad</key>
   <false/>
 

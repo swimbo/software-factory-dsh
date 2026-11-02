@@ -103,8 +103,11 @@ than an anchor that was already written, before any verdict from it is trusted.
   case at exit **8** for the same reason, because both transports route through one function.
 - **No anchor target configured** — exit **8** naming both variables. Set `FACTORY_ANCHOR_SSH` (off-host)
   or accept the weaker local anchor explicitly.
-- **Alerting is built now, notification is not:** `factory alerts` (daily 04:00 → `~/.factory/alerts.log`)
-  reports a stale, missing or rolled-back anchor as exit `9` and an unreachable host as exit `8` — see
-  [evidence-expiry.md](evidence-expiry.md). Nothing reaches a phone or an inbox; the log is the page.
+- **Alerting is built, notification is opt-in and local:** `factory alerts` (daily 04:00 →
+  `~/.factory/alerts.log`) reports a stale, missing or rolled-back anchor as exit `9` and an unreachable
+  host as exit `8`. With `--notify` the daily job also raises one macOS notification on this machine,
+  or POSTs the same `alerts.v1` document to an endpoint you configured with `FACTORY_ALERTS_WEBHOOK_URL`
+  — see [evidence-expiry.md](evidence-expiry.md). It does not reach a phone or an inbox, nothing retries
+  a lost notification, the log remains the record, and a host asleep at 04:00 stays quiet until it wakes.
 - **Still not built:** rotation of the anchor file, and any automatic reconciliation. `verify` remains
   the whole verification mechanism; a human schedules it and a human reads it.
