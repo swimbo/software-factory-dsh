@@ -413,15 +413,34 @@ suite(SUITE, () => {
     });
     const exited = new Promise<number | null>((resolve) => child.once('close', resolve));
 
-    // Wait for the worker container to exist, then kill it the way an operator would. The name
-    // prefix is ours alone (`factory-worker-<attemptId>`), so another suite's containers are not
-    // candidates.
+    // Wait for *this attempt's* worker container to exist, then kill it the way an operator would.
+    //
+    // The handle is the label the launcher writes — `org.factory.attempt=<attemptId>`, the same one
+    // `recover --sweep` uses to find an orphan (`packages/dsh-adapter/src/worker-container.ts`) —
+    // never a name glob. `name=factory-worker-` also matched the egress suite's container, which
+    // runs concurrently under `maxWorkers: 4`; this spec then killed a container it did not create
+    // and waited out its own timeout, and the leftovers poisoned every later run.
     const containerId = await waitFor(async () => {
-      const listed = docker(['ps', '-q', '--filter', 'name=factory-worker-']);
-      const first = listed.out.split('\n')[0] ?? '';
+      const attemptId = attemptIdOf(home, unitId);
+      if (attemptId === null) return null;
+      const listed = docker(['ps', '-q', '--filter', `label=org.factory.attempt=${attemptId}`]);
+      const first = listed.out.trim().split('\n')[0] ?? '';
       return first === '' ? null : first;
     }, 60_000);
     expect(containerId).not.toBeNull();
+
+    // Prove the container is ours *before* acting on it, rather than trusting the filter alone: a
+    // spec that kills a container it did not create is how one suite breaks another, and the label
+    // is the launcher's own identity for this attempt.
+    const ownedBy = docker([
+      'inspect',
+      '--format',
+      '{{ index .Config.Labels "org.factory.attempt" }}',
+      containerId ?? '',
+    ]);
+    expect(ownedBy.out.trim(), 'about to kill a container that is not this attempt').toBe(
+      attemptIdOf(home, unitId),
+    );
 
     const killed = docker(['kill', containerId ?? '']);
     expect(killed.ok).toBe(true);

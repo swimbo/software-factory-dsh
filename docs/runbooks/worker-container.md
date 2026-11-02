@@ -1,8 +1,8 @@
-# The worker's container: enabling it, and what a refusal means (`CONTAINER_UNAVAILABLE`, exit 8)
+# The worker's container: enabling it, and what a refusal means (`CONTAINER_UNAVAILABLE` / `CONFIGURATION_CONFLICT`, exit 8)
 
 ## Symptom
 
-Either you asked for the worker to run inside a container and `run` refused:
+Either you asked for the worker to run inside a container and `run` refused with `CONTAINER_UNAVAILABLE`:
 
 ```
 $ FACTORY_WORKER_ISOLATION=container factory run U-…
@@ -11,7 +11,9 @@ factory-env:runtime-pin. runbook: docker build --tag factory-env:rc5 docker/fact
 (or set FACTORY_WORKER_IMAGE to the tag you built). Nothing was dispatched and no budget was reserved.
 ```
 
-or you want to turn it on and need to know what it does and does not buy.
+or it refused with `CONFIGURATION_CONFLICT` (the daemon is fine; two settings cannot both be
+honoured — see [below](#when-the-two-settings-cannot-both-be-honoured)), or you want to turn it on
+and need to know what it does and does not buy.
 
 **`CONTAINER_UNAVAILABLE` means the turn could have run, just not where you asked it to.** The factory
 never falls back to a host process: a silent fallback would make the README's isolation sentence false
@@ -93,6 +95,52 @@ container is **still listed**, then asserts `factory recover` exits `4`, records
 spec covers the negative case — an attempt whose record says `container: null` is not swept, and
 no docker client is spawned for it. With no `factory-env:rc5` image the suite skips with its build
 command rather than passing, so a green here means it ran.
+
+## When the two settings cannot both be honoured
+
+A **different** refusal, on the same exit code, with the opposite next action: nothing is missing.
+
+```
+$ FACTORY_WORKER_ISOLATION=container FACTORY_LIVE_MODEL=1 BIFROST_API_KEY=sk-… factory run U-…
+CONFIGURATION_CONFLICT: FACTORY_WORKER_ISOLATION=container runs the worker with `--network none`,
+but a live model (FACTORY_LIVE_MODEL=1) authenticates through the credential proxy, which binds
+127.0.0.1 on the host. A container with no network cannot reach this host's loopback, so the model
+call inside the worker could never be authenticated. Two ways forward: unset FACTORY_WORKER_ISOLATION
+to drop the container and run this turn on the host (the default), or unset FACTORY_LIVE_MODEL and
+run the model call on the host, outside the containerised worker. Nothing was dispatched and no
+budget was reserved.
+traceId T-…
+  runbook: docs/runbooks/worker-container.md §"When the two settings cannot both be honoured" — the
+daemon and the image are fine; unset FACTORY_WORKER_ISOLATION (drop the container) or
+FACTORY_LIVE_MODEL (call the model from the host), then re-run: factory run <unitId>
+$ echo $?
+8
+```
+
+Why it cannot work: the container's network namespace is empty (`--network none`), and "this host's
+`127.0.0.1`" is a different machine from inside that namespace — the proxy is not reachable at any
+address the container has. The alternative — putting the proxy _inside_ the container — would put
+the operator's credential where the worker runs, which is what the container is for.
+
+Why it is refused **before** dispatch: the worker would otherwise start, fail to authenticate, and
+die as an unexplained 401 that looks like a model fault. The probe is the last place where "nothing
+was dispatched and no budget was reserved" is still true, so the refusal lives there (exit 8, no
+`usage_records` row, no attempt directory).
+
+**`CONFIGURATION_CONFLICT` is not `CONTAINER_UNAVAILABLE`, and the code says which one you have.**
+If you were sent here by `docker build` advice, that is the other code and this section is the wrong
+one: the daemon and the image are fine, and rebuilding them changes nothing. Pick one:
+
+```bash
+# Drop the container: run this turn on the host (the default).
+unset FACTORY_WORKER_ISOLATION
+
+# Or keep the container and call the model from the host, outside it.
+unset FACTORY_LIVE_MODEL BIFROST_API_KEY
+```
+
+A factory cannot honour both at once, and it will not pick for you: "we silently ran it on the host"
+is the kind of quiet downgrade that makes an isolation claim false while the tests stay green.
 
 ## When it does not work
 

@@ -3,8 +3,8 @@
 **Severity:** medium — nothing has been double-launched, but work the operator asked for is not
 running, and the outbox is the only record that it was ever asked for.
 **Exit codes you will see:** `8` (`EXECUTOR_UNAVAILABLE`, `CONTAINER_UNAVAILABLE`,
-`DSH_VERSION_MISMATCH` — retryable), `6`/`3`/`7` (a decision-class refusal — exhausted), `0` from
-`recover` in both cases.
+`CONFIGURATION_CONFLICT`, `DSH_VERSION_MISMATCH` — retryable), `6`/`3`/`7` (a decision-class refusal —
+exhausted), `0` from `recover` in both cases.
 
 ## Symptom
 
@@ -46,8 +46,11 @@ and the reservation, _before_ the worker is launched (ADR-005). Three things lea
 This build has no daemon; factory recover launches it once the lease expires.` Nothing is wrong;
   until `recover` runs, work you asked for is not running.
 - **A crash between the commit and the launch** — `recover` is exactly the catch-up path.
-- **A launch that failed environmentally** — `EXECUTOR_UNAVAILABLE`, `CONTAINER_UNAVAILABLE` or
-  `DSH_VERSION_MISMATCH` settle as `retryable`, so the row stays `pending` with `attempts > 0`.
+- **A launch that failed environmentally** — `EXECUTOR_UNAVAILABLE`, `CONTAINER_UNAVAILABLE`,
+  `CONFIGURATION_CONFLICT` or `DSH_VERSION_MISMATCH` settle as `retryable`, so the row stays `pending`
+  with `attempts > 0`. `CONFIGURATION_CONFLICT` is the one where the _operator_ edited a setting
+  (`FACTORY_WORKER_ISOLATION` with a live model): nothing started, and `recover` may try again once
+  the two levers are consistent.
 
 **A host with no `dsh` at all does not produce this state.** `factory run` refuses _before_ the
 transaction ("Nothing was dispatched and no budget was reserved"), so no effect is written. If you see

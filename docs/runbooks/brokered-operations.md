@@ -271,6 +271,8 @@ someone else's bad edit.
 
 - [`rotate-operator-key.md`](rotate-operator-key.md) — the key pair, and what rotation does to
   existing signatures.
-- [`worker-container.md`](worker-container.md) — the isolation the worker runs under. Note:
-  `FACTORY_WORKER_ISOLATION=container` together with a live model is refused at probe time (exit 8)
-  because the container has no network and the credential proxy is on loopback.
+- [`worker-container.md`](worker-container.md) — the isolation the worker runs under, and
+  [§"When the two settings cannot both be honoured"](worker-container.md#when-the-two-settings-cannot-both-be-honoured):
+  `FACTORY_WORKER_ISOLATION=container` together with a live model is refused at probe time with exit 8
+  `CONFIGURATION_CONFLICT` — deliberately not `CONTAINER_UNAVAILABLE`, because the daemon and the
+  image are fine and the operator's next action is to unset one lever, not to build anything.

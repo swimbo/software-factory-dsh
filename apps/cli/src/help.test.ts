@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { VERB_SPECS } from './main.ts';
-import { BYPASS_FLAGS, EXIT } from './exit.ts';
+import { BYPASS_FLAGS, EXIT, runbookFor } from './exit.ts';
 import { jsonOf, runCli } from './testing.ts';
 
 describe('--help', () => {
@@ -24,6 +24,16 @@ describe('--help', () => {
     const result = runCli(['--help']);
     expect(result.stdout).toContain('2 usage');
     expect(result.stdout).toContain('9 integrity');
+  });
+
+  it('says exit 8 has two next actions, because two codes share it', () => {
+    // `CONTAINER_UNAVAILABLE` and `CONFIGURATION_CONFLICT` are both 8, and the numbers cannot tell
+    // them apart — so the help names the distinction. Without it, a reader who has memorised
+    // "8 means build the image" will rebuild a daemon and an image that are both fine.
+    const help = runCli(['--help']).stdout;
+    expect(help).toContain('CONTAINER_UNAVAILABLE');
+    expect(help).toContain('CONFIGURATION_CONFLICT');
+    expect(help).toMatch(/unset one/u);
   });
 
   it('says there is no -y in the general help', () => {
@@ -84,6 +94,36 @@ describe('every verb', () => {
       const help = runCli([verb, '--help']).stdout;
       expect(declaration.test(help), verb).toBe(false);
     }
+  });
+});
+
+describe('the class-8 runbook lines', () => {
+  it('sends a missing image to docker build, and a configuration conflict to the settings', () => {
+    // The whole point of the second code: same exit, opposite next action. A reader told to
+    // `docker build` when the daemon and the image are both fine rebuilds something that was
+    // never broken, and is refused again for the same reason.
+    const missing = runbookFor('CONTAINER_UNAVAILABLE') ?? '';
+    const conflict = runbookFor('CONFIGURATION_CONFLICT') ?? '';
+    expect(missing).toContain('docker build');
+    expect(conflict).not.toContain('docker build');
+    expect(conflict).toContain('unset FACTORY_WORKER_ISOLATION');
+    expect(conflict).toContain('FACTORY_LIVE_MODEL');
+    expect(conflict).toContain('worker-container.md');
+    // The code names the *conflict*, so the line must say the pair cannot both be honoured.
+    expect(conflict).toMatch(/both be honoured/u);
+  });
+
+  it('has a runbook line for every code that can reach exit 8 through a launch', () => {
+    // Not every ErrorCode: `INTERNAL` (1) and the exits 3-7 codes have their own rendering. These
+    // three are the ones a `factory run` refusal can carry, and each names a different action.
+    for (const code of [
+      'EXECUTOR_UNAVAILABLE',
+      'CONTAINER_UNAVAILABLE',
+      'CONFIGURATION_CONFLICT',
+    ]) {
+      expect(runbookFor(code), code).not.toBeNull();
+    }
+    expect(runbookFor('EXECUTOR_UNAVAILABLE')).toMatch(/install the pinned dsh/u);
   });
 });
 

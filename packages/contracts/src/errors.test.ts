@@ -54,6 +54,7 @@ const EXPECTED_EXIT_CODES: Readonly<Record<ErrorCode, number>> = {
   EXECUTOR_UNAVAILABLE: 8,
   DSH_VERSION_MISMATCH: 8,
   CONTAINER_UNAVAILABLE: 8,
+  CONFIGURATION_CONFLICT: 8,
   // 9 — integrity
   STORE_QUARANTINED: 9,
   // 1 — internal

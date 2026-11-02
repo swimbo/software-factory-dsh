@@ -51,6 +51,16 @@ export const ERROR_CODES = [
   'DSH_VERSION_MISMATCH',
   'CONTAINER_UNAVAILABLE',
   /**
+   * Two settings are each valid and cannot both be honoured — today the only case is
+   * `FACTORY_WORKER_ISOLATION=container` with a live model: the container runs with
+   * `--network none`, and the credential proxy that fronts the gateway binds `127.0.0.1` on this
+   * host. Exit 8 like the other "the environment cannot do this" codes, but distinct because the
+   * next action is the opposite of `CONTAINER_UNAVAILABLE`'s: nothing is missing and nothing needs
+   * to be built, so a reader sent to `docker build` would rebuild a daemon and an image that are
+   * both fine. The fix is to unset one of the two levers.
+   */
+  'CONFIGURATION_CONFLICT',
+  /**
    * A dispatch ceiling the operator set is already reached. Exit 7 (conflict), like
    * `LEASE_HELD`: the request is well-formed and the factory is healthy — the *world* is
    * busy. Distinct from `BUDGET_EXCEEDED` (6) because nothing was spent, and from
@@ -91,6 +101,7 @@ const EXIT: Record<ErrorCode, number> = {
   EXECUTOR_UNAVAILABLE: 8,
   DSH_VERSION_MISMATCH: 8,
   CONTAINER_UNAVAILABLE: 8,
+  CONFIGURATION_CONFLICT: 8,
   CONCURRENCY_LIMIT: 7,
   STORE_QUARANTINED: 9,
   INTERNAL: 1,

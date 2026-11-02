@@ -160,7 +160,18 @@ async function runProbe(
  */
 function leftovers(): string[] {
   const ids = new Set<string>();
-  for (const filter of [`label=org.factory.run=${RUN_TOKEN}`, 'name=factory-wall-']) {
+  // Three handles, each scoped to *this* suite: the run label every runner in this file is built
+  // with, and the two names the wall's container runner derives from it (`factory-wall-<label>-<n>`)
+  // or from the building process when a caller passes no label (`factory-wall-<pid>-<n>` — the shape
+  // the timeout spec's leaked container had, which is why the label alone was not enough). The old
+  // broad `name=factory-wall-` glob was the same idea with the scoping left out: under
+  // `maxWorkers: 4` it can match a concurrently running suite's wall container and report a foreign
+  // container as our leak — and, worse, invites a "cleanup" that acts on it.
+  for (const filter of [
+    `label=org.factory.run=${RUN_TOKEN}`,
+    `name=factory-wall-${RUN_TOKEN}-`,
+    `name=factory-wall-${String(process.pid)}-`,
+  ]) {
     const listed = spawnSync('docker', ['ps', '-aq', '--filter', filter], { encoding: 'utf8' });
     for (const line of (listed.stdout ?? '').trim().split('\n')) {
       if (line.length > 0) ids.add(line.trim());

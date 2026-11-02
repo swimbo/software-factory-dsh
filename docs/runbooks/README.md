@@ -5,17 +5,17 @@ what the factory will refuse to do, the exact commands, what "fixed" looks like,
 it does not work. Every command here was run against this tree; every limit that is real is labelled
 **not built** rather than described as a plan.
 
-| Runbook                                                  | When to open it                                                                   | Exit codes         |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------ |
-| [ambiguous-attempt.md](ambiguous-attempt.md)             | a unit is `ambiguous` and `status` says it needs you                              | `4`, `5`           |
-| [outbox-effect-stuck.md](outbox-effect-stuck.md)         | `status` shows the outbox degraded, or `recover` keeps deferring                  | `8`, `6`, `7`, `3` |
-| [store-quarantine.md](store-quarantine.md)               | every write is refused with "the ledger integrity check failed"                   | `9`, `8`           |
-| [budget-envelope-refusal.md](budget-envelope-refusal.md) | `run` refuses with `BUDGET_EXCEEDED` before anything starts                       | `6`, `5`           |
-| [rotate-operator-key.md](rotate-operator-key.md)         | every promotion is refused with `PROMOTION_UNSIGNED`                              | `5`                |
-| [ledger-anchor.md](ledger-anchor.md)                     | `ledger verify` says the anchor is stale, missing or behind                       | `9`, `8`           |
-| [certificate-expired.md](certificate-expired.md)         | `audit --certifications` says a class certificate is stale                        | `9`, `8`           |
-| [evidence-expiry.md](evidence-expiry.md)                 | the morning check: did anything expire overnight?                                 | `9`, `8`           |
-| [worker-container.md](worker-container.md)               | `run` refuses with `CONTAINER_UNAVAILABLE`, or you want the worker in a container | `8`, `4`           |
+| Runbook                                                  | When to open it                                                                                               | Exit codes         |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------ |
+| [ambiguous-attempt.md](ambiguous-attempt.md)             | a unit is `ambiguous` and `status` says it needs you                                                          | `4`, `5`           |
+| [outbox-effect-stuck.md](outbox-effect-stuck.md)         | `status` shows the outbox degraded, or `recover` keeps deferring                                              | `8`, `6`, `7`, `3` |
+| [store-quarantine.md](store-quarantine.md)               | every write is refused with "the ledger integrity check failed"                                               | `9`, `8`           |
+| [budget-envelope-refusal.md](budget-envelope-refusal.md) | `run` refuses with `BUDGET_EXCEEDED` before anything starts                                                   | `6`, `5`           |
+| [rotate-operator-key.md](rotate-operator-key.md)         | every promotion is refused with `PROMOTION_UNSIGNED`                                                          | `5`                |
+| [ledger-anchor.md](ledger-anchor.md)                     | `ledger verify` says the anchor is stale, missing or behind                                                   | `9`, `8`           |
+| [certificate-expired.md](certificate-expired.md)         | `audit --certifications` says a class certificate is stale                                                    | `9`, `8`           |
+| [evidence-expiry.md](evidence-expiry.md)                 | the morning check: did anything expire overnight?                                                             | `9`, `8`           |
+| [worker-container.md](worker-container.md)               | `run` refuses with `CONTAINER_UNAVAILABLE` or `CONFIGURATION_CONFLICT`, or you want the worker in a container | `8`, `4`           |
 
 Common ground, so no runbook has to repeat it:
 

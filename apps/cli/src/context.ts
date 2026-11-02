@@ -23,7 +23,7 @@ import { createRequire } from 'node:module';
 
 import type { LaneDecision } from '@factory/contracts';
 import { createEngine, type Engine, type QualifyInput } from '@factory/core';
-import { newTraceIdForCli } from './exit.ts';
+import { CONFIGURATION_CONFLICT_RUNBOOK, newTraceIdForCli } from './exit.ts';
 import {
   currentPolicyVersion,
   DEFAULT_POLICY,
@@ -128,6 +128,16 @@ export interface ExecutorProbe {
   readonly detail: string;
   readonly runbook: string;
   /**
+   * The contract code a refusal must be reported under, when the probe knows better than the
+   * default. `run` turns `available: false` into a `FactoryError`, and the choice between
+   * `EXECUTOR_UNAVAILABLE`, `CONTAINER_UNAVAILABLE` and `CONFIGURATION_CONFLICT` decides which
+   * runbook line the operator reads — so it is a property of *why* the probe refused, not something
+   * the verb can re-derive from `isolation.mode`. `undefined` means "derive it the old way": no
+   * executor at all, so `EXECUTOR_UNAVAILABLE`.
+   */
+  readonly refusalCode?:
+    'EXECUTOR_UNAVAILABLE' | 'CONTAINER_UNAVAILABLE' | 'CONFIGURATION_CONFLICT';
+  /**
    * Where the turn will run, and what it will run inside.
    *
    * `mode: 'host'` is the default and means a child of this process. `mode: 'container'` carries
@@ -223,11 +233,6 @@ function moduleResolves(specifier: string): boolean {
 const CONTAINER_LIVE_MODEL_REASON =
   'container isolation and a live model cannot both be honoured: the worker has no network and ' +
   'the credential proxy is on this host';
-
-const CONTAINER_LIVE_MODEL_RUNBOOK =
-  'runbook: this is a configuration conflict, not a missing tool — unset FACTORY_WORKER_ISOLATION ' +
-  '(drop the container, run this turn on the host) or unset FACTORY_LIVE_MODEL (keep the container, ' +
-  'run the model call on the host), then re-run: factory run <unitId>';
 
 function containerLiveModelRefusal(
   env: Readonly<Record<string, string | undefined>>,
@@ -334,7 +339,8 @@ export function probeExecutor(
       // `run` renders `detail` into the refusal message (`verbs/run.ts`), so the two levers and
       // the two ways forward live here rather than in a runbook line keyed by the exit code.
       detail: conflict,
-      runbook: CONTAINER_LIVE_MODEL_RUNBOOK,
+      runbook: CONFIGURATION_CONFLICT_RUNBOOK,
+      refusalCode: 'CONFIGURATION_CONFLICT',
       isolation: { mode: 'refused', reason: CONTAINER_LIVE_MODEL_REASON, container: null },
     };
   }
@@ -358,6 +364,8 @@ export function probeExecutor(
       // too — the same shape `resolveMirror` uses for its refusals).
       detail: `${choice.reason}. ${choice.runbook}`,
       runbook: choice.runbook,
+      // The daemon or the image is missing: the turn could run, just not where it was asked to.
+      refusalCode: 'CONTAINER_UNAVAILABLE',
       isolation: { mode: 'refused', reason: choice.reason, container: null },
     };
   }

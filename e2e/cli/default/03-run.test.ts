@@ -102,7 +102,9 @@ describe('run', () => {
     const message = String(json['message']);
 
     expect(run.code).toBe(8);
-    expect(json['code']).toBe('CONTAINER_UNAVAILABLE');
+    // Not `CONTAINER_UNAVAILABLE`: the daemon is fine and the image may be fine too, so advice to
+    // `docker build` would be a wrong next action for a configuration mistake.
+    expect(json['code']).toBe('CONFIGURATION_CONFLICT');
     // Both levers, by name: the message has to tell the operator which *two* settings made
     // the combination impossible, not merely that the combination was impossible.
     expect(message).toContain('FACTORY_WORKER_ISOLATION');
@@ -113,6 +115,14 @@ describe('run', () => {
     // ... and both ways forward.
     expect(message).toMatch(/unset FACTORY_WORKER_ISOLATION/u);
     expect(message).toMatch(/unset FACTORY_LIVE_MODEL/u);
+
+    // The printed runbook line is the operator's next action, and for this refusal it must not be
+    // the image one: the daemon and the image are not the problem, and rebuilding them changes
+    // nothing. (The message above already names the two levers; this is about what to *do*.)
+    expect(run.stderr).toMatch(/CONFIGURATION_CONFLICT/u);
+    expect(run.stderr).toContain('unset FACTORY_WORKER_ISOLATION');
+    expect(run.stderr).not.toMatch(/docker build/u);
+    expect(run.stderr).toContain('worker-container.md');
 
     // Nothing was dispatched and nothing was spent: no attempt row, no attempt directory,
     // and no metered usage. A refusal that leaves a reservation behind is a failed dispatch

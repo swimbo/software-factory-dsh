@@ -100,6 +100,9 @@ function buildProgram(ui: CliUi, overrides: CliContextOverrides): Command {
       `dsh version this build pins: ${PINNED_DSH_VERSION}`,
       'Exit codes: 0 ok · 1 internal · 2 usage · 3 policy · 4 unknown/ambiguous · 5 gate ·',
       '            6 budget · 7 conflict · 8 environment · 9 integrity',
+      '  8 has two next actions, and the code names which: CONTAINER_UNAVAILABLE means the host is',
+      '  missing something (a daemon, an image) — build it; CONFIGURATION_CONFLICT means two settings',
+      '  cannot both be honoured — unset one (the message says which two).',
       'No gate can be bypassed: -y, --yes, --force, -f and --assume-yes are usage errors (exit 2).',
     ].join('\n'),
   );

@@ -45,8 +45,8 @@ export type EffectSettlement = 'applied' | 'retryable' | 'exhausted';
  *
  * The test is not "is this error class 8" but **did the worker start**:
  *
- * - `EXECUTOR_UNAVAILABLE` / `CONTAINER_UNAVAILABLE` — the launcher was missing, so no
- *   process exists. Install it and `recover` may try again.
+ * - `EXECUTOR_UNAVAILABLE` / `CONTAINER_UNAVAILABLE` / `CONFIGURATION_CONFLICT` — the launcher was
+ *   missing or a setting was inconsistent, so no process exists. Fix it and `recover` may try again.
  * - `DSH_VERSION_MISMATCH` — the binary is there but the wrong one; the operator can pin
  *   the right version, so it is retryable for the same reason.
  * - everything else that can reach here (gate, budget, lease, mandate, quarantine,
@@ -58,6 +58,9 @@ export type EffectSettlement = 'applied' | 'retryable' | 'exhausted';
 const SETTLEMENTS: Readonly<Partial<Record<ErrorCode, EffectSettlement>>> = {
   EXECUTOR_UNAVAILABLE: 'retryable',
   CONTAINER_UNAVAILABLE: 'retryable',
+  // A setting the operator edits, not a fact about the work: nothing started, so once the
+  // configuration is consistent `recover` may try the launch again.
+  CONFIGURATION_CONFLICT: 'retryable',
   DSH_VERSION_MISMATCH: 'retryable',
   ATTEMPT_AMBIGUOUS: 'applied',
 };

@@ -258,12 +258,16 @@ export async function runRun(input: VerbInput): Promise<number> {
     );
   }
   if (!ctx.executor.available) {
-    // Two environment faults, two codes, one exit: `EXECUTOR_UNAVAILABLE` means there is no way to
-    // run a turn at all, `CONTAINER_UNAVAILABLE` means the turn could run but not where it was asked
-    // to. The difference matters at 2am — one is "install the runtime", the other is "build the
-    // image" — and `probeExecutor` already puts the exact command in the detail for the second.
+    // Three environment faults, three codes, one exit: `EXECUTOR_UNAVAILABLE` means there is no way
+    // to run a turn at all, `CONTAINER_UNAVAILABLE` means the turn could run but not where it was
+    // asked to, and `CONFIGURATION_CONFLICT` means two settings are each valid and cannot both be
+    // honoured. The difference is the operator's next action — install the runtime, build the image,
+    // or unset one lever — so the code comes from the probe, which is the only thing that knows why.
     const code =
-      ctx.executor.isolation.mode === 'refused' ? 'CONTAINER_UNAVAILABLE' : 'EXECUTOR_UNAVAILABLE';
+      ctx.executor.refusalCode ??
+      (ctx.executor.isolation.mode === 'refused'
+        ? 'CONTAINER_UNAVAILABLE'
+        : 'EXECUTOR_UNAVAILABLE');
     throw new FactoryError(
       code,
       `${code}: ${ctx.executor.detail}. Nothing was dispatched and no budget was reserved.`,
