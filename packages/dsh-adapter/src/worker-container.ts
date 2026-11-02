@@ -20,9 +20,10 @@
  * 3. **The container is named, labelled, and reaped.** `docker run` is a *client*: killing it does
  *    not kill the container, and `--rm` is a promise about the client's lifetime, not the
  *    container's. So the launch carries `--cidfile` and `org.factory.attempt=<attemptId>`, and
- *    every exit path sweeps by label. A container left behind by a killed attempt is a leak, and
- *    the wall suite already holds itself to zero leftovers; the worker path is held to the same
- *    standard.
+ *    every exit path sweeps by label, and {@link sweepAttemptContainers} is the form
+ *    `factory recover` calls when the process that would have swept is the one that died. A
+ *    container left behind by a killed attempt is a leak, and the wall suite already holds itself
+ *    to zero leftovers; the worker path is held to the same standard.
  *
  * The flags are the wall's, deliberately: `--network none`, `--read-only`, `--tmpfs /tmp`,
  * `--cap-drop ALL`, `--security-opt no-new-privileges`, `--memory`, `--pids-limit`. A worker that
@@ -480,42 +481,147 @@ export function killContainer(plan: WorkerContainerPlan, containerId: string): b
   return (run.status ?? 1) === 0 || /no such container/i.test(run.stderr ?? '');
 }
 
+/** The one filter this module ever sweeps by: the attempt label, and nothing else. */
+function attemptFilter(attemptId: string): string {
+  return `label=${ATTEMPT_LABEL}=${attemptId}`;
+}
+
+/** The first line of docker's stderr, which is where it puts the reason a call failed. */
+function firstLine(text: string): string {
+  return (text.trim().split('\n')[0] ?? '').trim();
+}
+
+/**
+ * `docker ps -aq` for one attempt label, with the failure a caller has to be able to see.
+ *
+ * Distinguished from "no ids" on purpose: an unreadable daemon and an empty listing are the same
+ * bytes on stdout and opposite facts. Collapsing them is how a sweep reports "0 removed, clean"
+ * about a machine it never reached.
+ */
+type ContainerList =
+  | { readonly ok: true; readonly ids: readonly string[] }
+  | { readonly ok: false; readonly detail: string };
+
+function listAttemptContainers(dockerBin: string, attemptId: string): ContainerList {
+  const run = spawnSync(dockerBin, ['ps', '-aq', '--filter', attemptFilter(attemptId)], {
+    encoding: 'utf8',
+    timeout: 20_000,
+  });
+  if (run.error !== undefined) {
+    return { ok: false, detail: `cannot run ${JSON.stringify(dockerBin)}: ${run.error.message}` };
+  }
+  if ((run.status ?? 1) !== 0) {
+    const reason = firstLine(run.stderr ?? '') || 'no stderr';
+    return {
+      ok: false,
+      detail: `${JSON.stringify(dockerBin)} ps exited ${String(run.status ?? '(no status)')}: ${reason}`,
+    };
+  }
+  return {
+    ok: true,
+    ids: (run.stdout ?? '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== ''),
+  };
+}
+
+/**
+ * What a sweep of one attempt's containers actually did — never a bare count.
+ *
+ * `status: 'swept'` is only returned when docker answered the listing and nothing labelled for
+ * this attempt remains; `removed: []` with `status: 'swept'` therefore means a true clean.
+ * Everything a caller cannot know (no docker client, no daemon, a `rm` that did not take effect)
+ * is `failed` with a `reason`, because "swept 0" about a daemon nobody reached is the false clean
+ * this type exists to prevent.
+ */
+export interface AttemptContainerSweep {
+  /** The attempt whose label was swept. This is the only filter used. */
+  readonly attemptId: string;
+  readonly status: 'swept' | 'failed';
+  readonly removed: readonly string[];
+  readonly remaining: readonly string[];
+  /** `null` only when `status` is `'swept'`; otherwise the reason a person needs. */
+  readonly reason: string | null;
+}
+
+/**
+ * `docker rm -f` every container labelled for this attempt, and say whether the label is clear.
+ *
+ * Takes the client rather than a {@link WorkerContainerPlan} because a *recovery* process has no
+ * plan: the attempt it is sweeping was launched by a different invocation, and the only thing it
+ * may use from that invocation is the attempt id. That narrowness is the safety rule — sweeping by
+ * image or by a bare label would let a sweep remove a container it cannot account for.
+ */
+export function sweepAttemptContainers(
+  dockerBin: string,
+  attemptId: string,
+): AttemptContainerSweep {
+  const listed = listAttemptContainers(dockerBin, attemptId);
+  if (!listed.ok) {
+    return { attemptId, status: 'failed', removed: [], remaining: [], reason: listed.detail };
+  }
+  if (listed.ids.length === 0) {
+    return { attemptId, status: 'swept', removed: [], remaining: [], reason: null };
+  }
+  const removed: string[] = [];
+  const failures: string[] = [];
+  for (const id of listed.ids) {
+    const rm = spawnSync(dockerBin, ['rm', '-f', id], { encoding: 'utf8', timeout: 30_000 });
+    if (rm.error !== undefined) {
+      failures.push(`${id} (${rm.error.message})`);
+      continue;
+    }
+    if ((rm.status ?? 1) !== 0) {
+      failures.push(`${id} (${firstLine(rm.stderr ?? '') || 'docker rm failed'})`);
+      continue;
+    }
+    removed.push(id);
+  }
+  const again = listAttemptContainers(dockerBin, attemptId);
+  if (!again.ok) {
+    return {
+      attemptId,
+      status: 'failed',
+      removed,
+      remaining: [],
+      reason: `removed ${String(removed.length)} container(s), then the label listing failed: ${again.detail}`,
+    };
+  }
+  if (again.ids.length === 0) {
+    return { attemptId, status: 'swept', removed, remaining: [], reason: null };
+  }
+  const detail =
+    failures.length > 0
+      ? failures.join('; ')
+      : 'docker rm reported success but the label listing still returns the container';
+  return {
+    attemptId,
+    status: 'failed',
+    removed,
+    remaining: again.ids,
+    reason: `${String(again.ids.length)} container(s) still carry ${attemptFilter(attemptId)} after rm -f: ${detail}`,
+  };
+}
+
 /**
  * `docker rm -f` every container labelled for this attempt, and report what was left.
  *
  * Called on every exit path, including the one where the client was killed: `--rm` removes a
  * container when *its client* exits normally, and a kill is not a normal exit. This is the sweep
  * that makes "zero leftovers" true rather than hoped for.
+ *
+ * A listing that could not be read yields empty `removed`/`remaining`, exactly as it did before
+ * {@link AttemptContainerSweep} existed; the launcher has no reporting channel for it. The
+ * recover-side caller uses {@link sweepAttemptContainers} directly, because a recovery that
+ * cannot see the daemon must say so rather than report a clean.
  */
 export function reapAttemptContainers(
   plan: WorkerContainerPlan,
   attemptId: string,
 ): { readonly removed: readonly string[]; readonly remaining: readonly string[] } {
-  const listed = spawnSync(
-    plan.dockerBin,
-    ['ps', '-aq', '--filter', `label=${ATTEMPT_LABEL}=${attemptId}`],
-    { encoding: 'utf8', timeout: 20_000 },
-  );
-  const ids = (listed.stdout ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
-  if (ids.length === 0) return { removed: [], remaining: [] };
-  const removed: string[] = [];
-  for (const id of ids) {
-    const rm = spawnSync(plan.dockerBin, ['rm', '-f', id], { encoding: 'utf8', timeout: 30_000 });
-    if ((rm.status ?? 1) === 0) removed.push(id);
-  }
-  const again = spawnSync(
-    plan.dockerBin,
-    ['ps', '-aq', '--filter', `label=${ATTEMPT_LABEL}=${attemptId}`],
-    { encoding: 'utf8', timeout: 20_000 },
-  );
-  const remaining = (again.stdout ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
-  return { removed, remaining };
+  const sweep = sweepAttemptContainers(plan.dockerBin, attemptId);
+  return { removed: sweep.removed, remaining: sweep.remaining };
 }
 
 /** The probe a decision about the *host* does not need: nothing was asked of docker. */

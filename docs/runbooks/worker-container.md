@@ -55,10 +55,21 @@ mountsDenied, labels}` — and `container: null` means "host process", never "un
   container, not an account boundary on the machine. A root-level attacker on the host is out of scope.
 - **Network isolation is pinned by the argv spec, not probed from inside.** Deleting `--network none`
   does not redden this suite; the wall's E2E-43 covers egress with a host control.
-- **A `SIGKILL`ed control plane can leave its container behind.** `--rm` is a promise about the
-  _client's_ lifetime, and the launcher's sweep runs in the process that just died. Closing that needs
-  a `recover`-side sweep, which is **not built** (the engine finding is in
-  `docs/planning/dark-factory-dsh/evidence/phase-15-round.md`).
+- **A `SIGKILL`ed control plane cannot clean up after itself — `factory recover` does.** `--rm` is a
+  promise about the _client's_ lifetime, and the launcher's sweep runs in the process that just
+  died, so the next recovery is the only later process that still knows the attempt id. For the
+  attempts **this invocation** reconciles to `ambiguous`, `recover` reads that attempt's
+  `launch.json`, and only when the record says the worker ran in a container does it remove every
+  container labelled `org.factory.attempt=<attemptId>` — by that id and nothing else, never by
+  image and never by a bare label. It never sweeps an attempt whose lease is still live (a live
+  attempt may be someone's running worker), never re-sweeps an attempt an earlier recovery already
+  reconciled, and does nothing at all for a `container: null` record. Docker missing, the daemon
+  down, an unreadable or malformed record, and a container that survives `rm -f` are each reported
+  as `skipped`/`failed` with the reason, in the text and in `recover --json`'s `sweeps[]` value —
+  never as "swept 0". A sweep that cannot fail loudly is the same leak one layer down. A failed
+  sweep does not change `recover`'s exit code (`4` for the ambiguity it produced, `8` for a
+  quarantined store); it is a fact reported beside the ambiguity, not a verdict about it. The
+  engine finding is in `docs/planning/dark-factory-dsh/evidence/phase-15-round.md`.
 
 ## What "fixed" looks like
 
@@ -66,8 +77,22 @@ mountsDenied, labels}` — and `container: null` means "host process", never "un
 factory run U-…            # exits 0, attempt completes
 node -e 'const r=require(process.argv[1]); console.log(r.container)' "$FACTORY_HOME/attempts/U-…/A-…/launch.json"
 #   { image: 'factory-env:rc5', imageDigest: 'sha256:…', user: '10001:10001', network: 'none', … }
-docker ps -aq --filter name=factory-worker-        # empty when the attempt is over
+docker ps -aq --filter label=org.factory.attempt=<attemptId>   # empty when the attempt is over
 ```
+
+After a `kill -9` of the control plane the second command still says `container: {…}`, and the
+third is empty only once `factory recover` has run. That path is a spec, not a promise:
+
+```bash
+npx vitest run e2e/cli/docker/09-recover-sweep.test.ts
+```
+
+It starts a worker container, `SIGKILL`s the control plane mid-turn, asserts the orphaned
+container is **still listed**, then asserts `factory recover` exits `4`, records the attempt
+`ambiguous`, and leaves the label filter above empty; a second `recover` is idempotent. The same
+spec covers the negative case — an attempt whose record says `container: null` is not swept, and
+no docker client is spawned for it. With no `factory-env:rc5` image the suite skips with its build
+command rather than passing, so a green here means it ran.
 
 ## When it does not work
 
@@ -80,6 +105,9 @@ docker ps -aq --filter name=factory-worker-        # empty when the attempt is o
 - **`a killed container is not ambiguous`** — it is: `ATTEMPT_AMBIGUOUS` (exit 4), one attempt, no
   receipt, no redispatch. If `recover` appears to do nothing, the lease is probably still live — that
   is the intended "the lease still vouches for a worker" deferral, and it resolves when the lease
-  expires. See [ambiguous-attempt.md](ambiguous-attempt.md).
+  expires. Once it does reconcile, the container the dead process left behind is swept by label;
+  if that sweep cannot run, `recover` says `FAILED` with the reason and the exact `docker ps`
+  command that answers "is it still there?", and its exit code is still the ambiguity's. See
+  [ambiguous-attempt.md](ambiguous-attempt.md).
 - **Want the host back?** Unset `FACTORY_WORKER_ISOLATION`. That is a deliberate act; the factory will
   never do it for you on a failed probe.

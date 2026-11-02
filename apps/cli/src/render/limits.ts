@@ -108,9 +108,12 @@ const SPECIFIC: Readonly<Record<Verb, readonly string[]>> = {
     '  is the page, and a warning-severity alert does not change the exit code.',
   ],
   recover: [
-    '`recover` never re-dispatches, never retries and never deletes. It reconciles and reports.',
+    '`recover` never re-dispatches, never retries and never deletes evidence. It reconciles and reports.',
+    'It sweeps a leaked worker container — only for an attempt this invocation reconciled to',
+    '  ambiguous, only by that attempt’s org.factory.attempt=<attemptId> label, and never while the',
+    '  lease is live. A docker it cannot reach is reported as failed, never as a clean sweep.',
     'It is idempotent: running it twice prints the same facts and changes nothing the second time.',
-    'An ambiguous attempt stays ambiguous; only `--observe` can resolve it, and only with evidence.',
+    'An ambiguous attempt stays ambiguous: resolution needs evidence, and this build has no command for it.',
   ],
   abort: [
     '`abort` ends a unit; it does not roll anything back. The worktree is left for inspection.',

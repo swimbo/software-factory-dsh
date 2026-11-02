@@ -9,7 +9,12 @@
  * The one thing this file cannot prove is that docker accepts the argv. `e2e/cli/docker/
  * 08-worker-container.test.ts` proves that, and skips with a reason when there is no image.
  */
-import { describe, expect, it } from 'vitest';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, describe, expect, it } from 'vitest';
+
 import {
   ATTEMPT_LABEL,
   BUILD_RUNBOOK,
@@ -28,6 +33,7 @@ import {
   dockerBinOf,
   reapAttemptContainers,
   requestedIsolation,
+  sweepAttemptContainers,
   workerContainerArgv,
   workerImageOf,
   workerVersionArgv,
@@ -365,5 +371,110 @@ describe('the reap', () => {
     );
     expect(result.removed).toEqual([]);
     expect(result.remaining).toEqual([]);
+  });
+});
+
+/**
+ * The recover-side sweep, with a shell script standing in for the docker client.
+ *
+ * These are the branches that decide whether a recovery reports a fact or a comfort: a daemon
+ * that did not answer must never read as "0 removed", and a container that survived `rm -f` must
+ * never read as swept. The real daemon is exercised by
+ * `e2e/cli/docker/09-recover-sweep.test.ts`; everything here runs with no docker installed.
+ */
+describe('the recover-side sweep', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'factory-sweep-'));
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+  /** A stand-in docker client: a POSIX shell script, because that is what spawnSync executes. */
+  function fakeDocker(name: string, body: string): string {
+    const path = join(scratch, name);
+    writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    chmodSync(path, 0o755);
+    return path;
+  }
+
+  it('answers "swept, nothing there" only when the listing itself succeeded', () => {
+    const result = sweepAttemptContainers(fakeDocker('empty.sh', 'exit 0'), 'A-clean');
+    expect(result).toStrictEqual({
+      attemptId: 'A-clean',
+      status: 'swept',
+      removed: [],
+      remaining: [],
+      reason: null,
+    });
+  });
+
+  it('reports a missing docker client as failed with the reason, never as a clean sweep', () => {
+    // `spawnSync` sets `error` and gives no status; the old shape returned empty arrays here,
+    // which every caller read as "nothing to remove" — a cleaner machine than the one measured.
+    const missing = join(scratch, 'docker-that-does-not-exist');
+    const result = sweepAttemptContainers(missing, 'A-no-client');
+    expect(result.status).toBe('failed');
+    expect(result.reason).toMatch(/cannot run/u);
+    expect(result.reason).toContain(missing);
+    expect(result.removed).toEqual([]);
+  });
+
+  it('reports a daemon that refused the listing as failed, with docker’s own reason', () => {
+    const path = fakeDocker(
+      'no-daemon.sh',
+      [
+        "printf '%s\\n' 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?' >&2",
+        'exit 1',
+      ].join('\n'),
+    );
+    const result = sweepAttemptContainers(path, 'A-no-daemon');
+    expect(result.status).toBe('failed');
+    expect(result.reason).toMatch(/Cannot connect to the Docker daemon/u);
+    // "Failed" and "empty" have to be distinguishable values: empty arrays alone are what a
+    // false clean looks like.
+    expect(result.reason).not.toBeNull();
+    expect(result.remaining).toEqual([]);
+  });
+
+  it('removes every id the label listing returns, then proves the label is clear', () => {
+    const state = join(scratch, 'state-removes');
+    const path = fakeDocker(
+      'removes.sh',
+      [
+        `state=${JSON.stringify(state)}`,
+        'mkdir -p "$state"',
+        'case "$1" in',
+        '  ps)',
+        '    if [ -f "$state/removed" ]; then exit 0; fi',
+        "    printf '%s\\n' 'c0ffee000001'",
+        '    exit 0 ;;',
+        '  rm)',
+        '    printf \'%s\\n\' "$3" >> "$state/removed"',
+        '    exit 0 ;;',
+        'esac',
+        'exit 2',
+      ].join('\n'),
+    );
+    const result = sweepAttemptContainers(path, 'A-one-container');
+    expect(result.status).toBe('swept');
+    expect(result.removed).toEqual(['c0ffee000001']);
+    expect(result.remaining).toEqual([]);
+    expect(result.reason).toBeNull();
+  });
+
+  it('reports a container that survived rm -f as failed, naming what is left', () => {
+    const path = fakeDocker(
+      'rm-refuses.sh',
+      [
+        'case "$1" in',
+        "  ps) printf '%s\\n' 'c0ffee000002'; exit 0 ;;",
+        "  rm) printf '%s\\n' 'Error response from daemon: container is running' >&2; exit 1 ;;",
+        'esac',
+        'exit 2',
+      ].join('\n'),
+    );
+    const result = sweepAttemptContainers(path, 'A-stuck-container');
+    expect(result.status).toBe('failed');
+    expect(result.removed).toEqual([]);
+    expect(result.remaining).toEqual(['c0ffee000002']);
+    expect(result.reason).toMatch(/container is running/u);
+    expect(result.reason).toContain(ATTEMPT_LABEL);
   });
 });
