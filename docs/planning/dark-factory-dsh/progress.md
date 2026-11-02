@@ -249,3 +249,51 @@ live gate stage is opt-in (`FACTORY_VERIFY_LIVE=1`) because each run spends.
 **Measured, for the record:** the first genuine unit verified by this factory — `outcome: pass`,
 `reasons: []`, `replayed 5 of 8`, `0 mismatched`, holdout discriminating, CLI exit 0, ~8.5–12.7k tokens
 per run, `wall/0.1.0+local`, `fakeWall: false`.
+
+### Round 7 — the container's orphan, and the repo's own account of itself (2026-11-02)
+
+The previous session landed four commits after `v0.4.0` and then stopped: alerts (`59a18fc`), the ND3
+spend ceiling through the real executor (`3c8e063`), the worker's container (`36e2ddd`), and anchor
+read-failure exit codes (`f362900`). No release, no evidence file, and a runbook citing
+`evidence/phase-15-round.md` — a document that did not exist. This round finished it.
+
+**The gap the last commit named is closed.** `36e2ddd` ended by saying a `SIGKILL`ed control plane can
+orphan its worker container "because the sweep runs in the launcher that died", and that closing it
+needed a `recover`-side sweep. `recover` now sweeps exactly the attempts *it* reconciles to `ambiguous`:
+it reads that attempt's `launch.json`, confirms it names the same attempt, and removes containers
+labelled `org.factory.attempt=<attemptId>` — never by image, never by a bare label, never while the
+lease is live, never for a `container: null` record. `swept` with `removed: []` is only reachable when
+the daemon answered; everything else is `skipped`/`failed` with a reason and a `checkCommand`, in the
+text and as `sweeps[]` in `--json`, and the exit code stays the ambiguity's. `e2e/cli/docker/09-…`
+SIGKILLs a real control plane, asserts the orphan is **still listed** (positive control), then asserts
+it is gone after `recover` exits 4; deleting the sweep call leaves the container behind and reddens it.
+
+**A second honesty defect, found by reading rather than by running.** `E2E-46` was already the
+cgroup-limits spec; the new spec had been filed under that id too. A follow-up commit re-labels it
+E2E-45's **orphan-sweep clause**, which is where the plan's own acceptance column puts it ("orphan
+sweep recorded"), and records the one deliberate difference: a container's identity is the attempt
+label, not the plan's session id / process group.
+
+**Two documents had stopped describing the tree, in opposite directions.** `README.md` claimed
+`packages/proxy` does not exist and privileged work is merely refused — false since the broker landed,
+and contradicted by the same file's ADR-007 paragraph three paragraphs later; it also listed seven
+packages when there are eleven and carried counts two versions old. `docs/handover.md` described a
+v0.4.0-1 tree: panel "deliberately absent" from the gate (it is stage 7 and **fails** without a browser),
+`@docker` suites "always skipped" (they self-gate and run), no credential proxy, no anchor, no worker
+container. Both are now written against the tree, sentence by sentence, with the command that settles
+each. `docs/adr/006`'s stale statements are marked _superseded_ rather than rewritten — the 2026-11-01
+belief survives verbatim, and a 2026-11-02 amendment states what is true — and `docs/adr/008`'s link to
+an ADR that never existed is fixed.
+
+**The gate was red twice before it was green, and both runs are kept.** The previous session's last run
+(`2026-11-01T22-41-51Z`) was red in `test`, `build` and `panel`. This session's first run
+(`2026-11-02T16-16-14Z`) was red **only** in `panel`, because every Playwright browser had been removed
+from the host's cache; `npx playwright install chromium` restored `chromium-1248`. The released tree
+(`edf3b1a`) is `7 passed, 1 skipped, 0 failed` (`2026-11-02T16-44-03Z`), test stage **1395 passed, 7
+skipped (1402) across 99 files**, with the 11 `@docker` specs all running (0 skipped) once
+`factory-env:rc5` was rebuilt. The soak was re-run for the record: 50 units, 6 incidents, all runbook
+steps and invariants held, zero paid calls.
+
+**Not re-run here, and labelled as such:** the paid `@live` layer (no key in this shell) — the last
+recorded live gate is `8 passed, 0 skipped, 0 failed` at `6a398cc`. Full list of what is still not built
+is in `evidence/phase-15-round.md` §8.
