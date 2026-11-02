@@ -31,6 +31,13 @@ bash scripts/provision-topology.sh   # report which topology this host can honou
 factory ledger verify     # is the ledger head anchored off-host, and is the anchor fresh?
 ```
 
+`factory ledger verify` needs an anchor target in the environment — on this host the daily job sets
+`FACTORY_ANCHOR_SSH=hermes-control`, `FACTORY_ANCHOR_PATH` and `FACTORY_HOME` in
+`deploy/launchd/ai.factory.anchor.plist`, so in a bare shell it exits **8** ("no anchor target is
+configured") rather than **9**. That distinction is deliberate: 8 means the check could not look,
+9 means it looked and the evidence is stale or missing. `docs/runbooks/ledger-anchor.md` is the
+procedure.
+
 `verify.sh` writes `docs/verification/<run-id>/{verify.log,summary.json}`, and the summary names the
 commit it measured, so a green line is reproducible rather than remembered.
 
@@ -199,12 +206,19 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   process" and never "unknown". E2E-45 is real: `docker kill` the worker container mid-attempt ⇒
   `ATTEMPT_AMBIGUOUS` (exit 4), no receipt, exactly one attempt, no redispatch, `recover` records it
   `ambiguous` (it defers while the lease is still live — the same rule, not a retry) and no container
-  remains. What is **not** built: the mode is opt-in rather than the default; a request that cannot be
-  honoured refuses with exit 8 `CONTAINER_UNAVAILABLE` and the exact `docker build` line instead of
-  falling back to a host process; network isolation is pinned by the argv spec and not by a
-  container-side egress probe (the wall's E2E-43 covers egress, with a host control); and a control
-  plane that is `SIGKILL`ed can leave its container behind, because the sweep runs in the launcher
-  that died — that needs a `recover`-side sweep and is **not built**.
+  remains. E2E-45's **orphan-sweep clause** is measured too: a `SIGKILL`ed control plane executes none
+  of its exit paths, so its container outlives the attempt, and for the attempts _it_ reconciles to
+  `ambiguous`, `factory recover` reads that attempt's `launch.json` and removes every container
+  labelled `org.factory.attempt=<attemptId>` — by that id alone, never by image, never by a bare
+  label, never while the lease is live, never for a `container: null` record — reporting a sweep it
+  could not perform as `skipped`/`failed` with the reason, in the text and as `sweeps[]` in
+  `recover --json`, never as "swept 0", and without changing the exit code
+  (`e2e/cli/docker/09-recover-sweep.test.ts` asserts the orphan is still listed after the kill and
+  gone after `recover` exits 4). What is **not** built: the mode is opt-in rather than the default; a
+  request that cannot be honoured refuses with exit 8 `CONTAINER_UNAVAILABLE` and the exact
+  `docker build` line instead of falling back to a host process; and network isolation is pinned by
+  the argv spec and not by a container-side egress probe (the wall's E2E-43 covers egress, with a
+  host control).
 - **DSH's sandbox is not a security boundary**, and is not treated as one anywhere.
 - **No ACP worker.** The adapter drives `dsh --profile headless` one-shot turns and reads NDJSON;
   the agent-client-protocol path is not implemented, so "one-shot **or** ACP workers" is delivered as

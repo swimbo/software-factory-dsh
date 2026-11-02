@@ -6,8 +6,8 @@ For whoever takes this repository next. Written on 2026-11-02 against the tree a
 is the source of truth for what is real, and where a plan promised something this tree does not have,
 the audit says so and this document repeats it rather than smoothing it over. One caveat about the
 audit: its §10 addendum predates `36e2ddd`, so it still records the worker container and E2E-45 as
-`UNKNOWN`, while `e2e/cli/docker/08-worker-container.test.ts` now measures them (ran here: 3 specs
-passed). The audit's earlier sections are history and are deliberately not rewritten; where this
+`UNKNOWN`, while `e2e/cli/docker/08-worker-container.test.ts` and `09-recover-sweep.test.ts` now measure
+them (ran here: 3 + 2 specs passed). The audit's earlier sections are history and are deliberately not rewritten; where this
 document disagrees with §10, what follows was measured on this tree and the command is named.
 
 ## What to run before touching anything
@@ -112,7 +112,8 @@ and the reason each one has:
 | `packages/wall/src/container.test.ts` (`@docker`), 3 of 16 specs | `FACTORY_TEST_IMAGE` unset — the daemon alone is not enough                | the opt-in real-daemon round trip; the 13 specs that do not need a daemon always run (13 passed, 3 skipped here)                                       |
 | `packages/dsh-adapter/tests/egress.test.ts`, 1 of 6 specs        | a daemon **is** available (the "without a daemon" branch)                  | the skipped spec is the one that proves the suite skips rather than fails without docker; 5 egress specs ran against `node:22-alpine` here             |
 | `e2e/cli/docker/07-isolation.test.ts` (`@docker`)                | daemon unreachable, or `factory-env:e2e` absent and its build fails        | it is **not** always skipped: it builds `factory-env:e2e` when missing and skips with the build command if that fails; 6 specs ran here (E2E-43/44/46) |
-| `e2e/cli/docker/08-worker-container.test.ts` (`@docker`)         | `factory-env:rc5` absent (skip names the `docker build` line)              | the worker's container (E2E-45); 3 specs ran here against the image already on this host                                                               |
+| `e2e/cli/docker/08-worker-container.test.ts` (`@docker`)         | `factory-env:rc5` absent (skip names the `docker build` line)              | the worker's container (E2E-45); 3 specs ran here after `docker build --tag factory-env:rc5 docker/factory-env`                                        |
+| `e2e/cli/docker/09-recover-sweep.test.ts` (`@docker`)            | same base image, plus a daemon that can run `docker kill`                  | E2E-45's orphan-sweep clause; 2 specs ran here (SIGKILL the control plane, assert the orphan, `recover` removes it)                                    |
 | `packages/dsh-adapter/tests/profile.test.ts`                     | no `dsh` binary at the default app path                                    | the DSH-facing half is proven by adapter tests plus one recorded probe; it ran here (5 specs)                                                          |
 | `preflight` stage in `scripts/verify.sh`                         | no `dsh` binary                                                            | recorded as **SKIPPED with a reason** in the summary, never silently passed; it passed here                                                            |
 | `panel` stage in `scripts/verify.sh`                             | never — a missing chromium **fails** the stage                             | see above; not a skip                                                                                                                                  |
@@ -146,11 +147,6 @@ and the reason each one has:
   `intent --revision`.** `factory run --retry --reason …` refuses with `UNIT_ALREADY_TERMINAL`
   (exit 3) — the flag is declared and the capability behind it does not exist. `factory recover`
   has **no** `--observe` flag: observe with `factory status <unit> --attempt <id>`.
-- **No `recover`-side sweep of an orphaned worker container** at `36e2ddd`: `reapAttemptContainers`
-  runs on the launcher's own exit paths, so a `SIGKILL`ed control plane can leave
-  `factory-worker-<attempt>` behind. This one is being closed in this round (a `recover`-side sweep,
-  labelled by `org.factory.attempt`); the runbook
-  [`docs/runbooks/worker-container.md`](runbooks/worker-container.md) is the live text for it.
 - **No CI.** `.github/workflows/` is empty (`git ls-files .github` lists only the PR template), so a
   green `verify.sh` is a local artifact with a recorded commit, not a badge. The `@docker` and
   `@live` suites are therefore "measured on a machine that has docker / a key", never "measured in
@@ -201,7 +197,7 @@ Playwright revision — is environment you must supply, and the summaries say so
 | `docker/factory-env/`                                | the **worker's** image (`FACTORY_WORKER_ISOLATION=container`): node 26.12.1 pinned by digest, `dsh 0.2.1-rc.5`, uid 10001                                                                                                      |
 | `packages/wall/docker/`                              | the **wall's** isolation image (`factory-env:e2e`, `node:26.12.1-alpine` by digest) — built by `e2e/cli/docker/07-isolation.test.ts` when absent                                                                               |
 | `e2e/cli/default/`                                   | the operator suites, 20 files / 93 tests, numbered by the e2e plan                                                                                                                                                             |
-| `e2e/cli/docker/`                                    | the two self-gating container suites (9 specs: E2E-43/44/46 and E2E-45)                                                                                                                                                        |
+| `e2e/cli/docker/`                                    | the three self-gating container suites (11 specs: E2E-43/44/46, E2E-45, and E2E-45's orphan-sweep clause)                                                                                                                      |
 | `e2e/panel/`                                         | the browser suites for the read-only status page, 6 files / 41 specs                                                                                                                                                           |
 | `stapled-factory/`, `docs/planning/stapled-factory/` | **deleted 2026-11-01** — the previous system's code and plans. Nothing here depends on them; the surviving lessons are in `findings.md`. A `.local-ci/` directory survives as an empty shell (a `.DS_Store` and nothing else). |
 

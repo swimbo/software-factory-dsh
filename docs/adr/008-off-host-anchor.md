@@ -1,7 +1,7 @@
 # ADR-008 — Anchor the ledger head off-host, daily, and refuse an anchor older than 48 h
 
 **Status:** accepted 2026-11-01 (ND4, ratified by the operator)
-**Context:** [ADR-004](004-store-and-ledger.md) (the append-only ledger), [architecture.md](../planning/dark-factory-dsh/architecture.md) §9, constraint "DSH never the source of truth"
+**Context:** [architecture.md](../planning/dark-factory-dsh/architecture.md) §9 and [data-map.md](../planning/dark-factory-dsh/data-map.md) (the append-only ledger; there is no ledger ADR — this link used to point at `004-store-and-ledger.md`, which never existed), constraint "DSH never the source of truth"
 **Proven by:** `packages/anchor` (17 specs: chain recomputation, four verify outcomes, transports), `apps/cli/src/ledger.test.ts` (6 specs through the real CLI)
 
 ## Context
