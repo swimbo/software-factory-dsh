@@ -6,7 +6,7 @@ under a recorded human decision** or **refused**. This runbook is how an operato
 decision, what the factory prints at each step, and what to do when the answer is no.
 
 Every transcript below was captured on this tree (v0.5.0, node 26.12.1) with a throwaway
-`FACTORY_HOME=/tmp/gate-rb3`; the ids, hashes and timestamps are real output, not illustrations.
+`FACTORY_HOME=/tmp/doc-capture`; the ids, hashes and timestamps are real output, not illustrations.
 
 ## The two levers
 
@@ -41,13 +41,13 @@ factory gate request -- cp /etc/hosts /dev/null
 operation  cp /etc/hosts /dev/null
 operationSha sha256:872f7652c297b9fbe8e9afe910f42b40e590ca3982490e868d0e09809a5781e6
 taskId     gate:872f7652  (a label for reading; a standalone decision binds an operation, not a unit)
-operator key ed25519:d9b04656
+operator key ed25519:554ecfdf
 
 payload to sign (sha256 over the canonical content; the signature covers both timestamps):
-  sha256:42ea47c7b1e5b31221b83a76f025b9e5fe9ea330fd24df76591f9ea1a0dee048
+  sha256:21d1cac3e3750acdc4728967e6d5bcbaecb062c320a80c9cf9770bebe2ede51e
 
 no live decision covers this operation. Sign the payload above, then run:
-  factory gate decide --signature <file-with-your-signature> --expires-in 15m --issued-at 2026-11-02T22:51:23.568Z --confirm "decide 872f7652" -- cp /etc/hosts /dev/null
+  factory gate decide --signature <file-with-your-signature> --expires-in 15m --issued-at 2026-11-02T23:19:42.126Z --confirm "decide 872f7652" -- cp /etc/hosts /dev/null
 exit=5
 ```
 
@@ -78,7 +78,7 @@ import { signPayload } from "./packages/gates/src/index.ts";
 const [payload, out, key] = process.argv.slice(1);
 writeFileSync(out, signPayload(payload, readFileSync(key, "utf8")));
 console.log("signed", payload);
-' sha256:42ea47c7b1e5b31221b83a76f025b9e5fe9ea330fd24df76591f9ea1a0dee048 \
+' sha256:21d1cac3e3750acdc4728967e6d5bcbaecb062c320a80c9cf9770bebe2ede51e \
   "$KEYDIR/decision.sig" "$KEYDIR/operator.ed25519.pem"
 ```
 
@@ -97,22 +97,22 @@ that is no longer one of those files verifies nothing. See
 ```bash
 factory gate decide \
   --signature "$KEYDIR/decision.sig" \
-  --issued-at 2026-11-02T22:51:23.568Z \
+  --issued-at 2026-11-02T23:19:42.126Z \
   --confirm "decide 872f7652" \
   -- cp /etc/hosts /dev/null
 ```
 
 ```
-decision   gd_ab147a33285676efcfa3676e
+decision   gd_21d1cac3e3750acdc4728967
 operation  cp /etc/hosts /dev/null
 operationSha sha256:872f7652c297b9fbe8e9afe910f42b40e590ca3982490e868d0e09809a5781e6
-signed by  ed25519:d9b04656
-live until 2026-11-02T23:06:23.728Z (issued 2026-11-02T22:51:23.728Z)
-artifact   /tmp/gate-rb3/gates/gd_ab147a33285676efcfa3676e.json
+signed by  ed25519:554ecfdf
+live until 2026-11-02T23:34:42.126Z (issued 2026-11-02T23:19:42.126Z)
+artifact   /tmp/doc-capture/gates/gd_21d1cac3e3750acdc4728967.json
 ledger     privileged.decided seq 1
 
 Next, one of:
-  factory gate show gd_ab147a33285676efcfa3676e
+  factory gate show gd_21d1cac3e3750acdc4728967
   factory gate request -- cp /etc/hosts /dev/null   # now reports "already covered"
 exit=0
 ```
@@ -126,9 +126,9 @@ id is a function of the content, so a replay is the same decision, not a second 
 Two refusals worth recognising:
 
 ```
-$ factory gate decide --signature "$KEYDIR/decision.sig" --issued-at 2026-11-02T22:51:24.568Z \
+$ factory gate decide --signature "$KEYDIR/decision.sig" --issued-at 2026-11-02T23:19:43.126Z \
     --confirm "decide 872f7652" -- cp /etc/hosts /dev/null
-GATE_REQUIRED: the signature does not verify against ed25519:d9b04656 for payload sha256:1e27376….
+GATE_REQUIRED: the signature does not verify against ed25519:554ecfdf for payload sha256:643d235c….
 Either it was made with a different key, or it covers a different payload — check that --issued-at
 and --expires-in reproduce the timestamps `factory gate request` printed.
 exit=5
@@ -139,7 +139,7 @@ decision changes the signed content, so the signature no longer covers it. Re-ru
 sign _that_ payload.
 
 ```
-$ factory gate decide --issued-at 2026-11-02T22:51:23.568Z --confirm "decide 872f7652" -- cp /etc/hosts /dev/null
+$ factory gate decide --issued-at 2026-11-02T23:19:42.126Z --confirm "decide 872f7652" -- cp /etc/hosts /dev/null
 USAGE: missing --signature. This tool verifies an operator signature; it never holds a private key,
 so it cannot make one. Sign the payload `factory gate request` prints, then pass it here.
 exit=2
@@ -207,21 +207,21 @@ Two consequences an operator should expect:
 
 ```
 $ factory gate list
-gd_ab147a33285676efcfa3676e  live  ed25519:d9b04656  until 2026-11-02T23:06:23.728Z
+gd_21d1cac3e3750acdc4728967  live  ed25519:554ecfdf  until 2026-11-02T23:34:42.126Z
   sha256:872f7652c297b9fbe8e9afe910f42b40e590ca3982490e868d0e09809a5781e6
 exit=0
 
-$ factory gate show gd_ab147a33285676efcfa3676e
-decision   gd_ab147a33285676efcfa3676e
+$ factory gate show gd_21d1cac3e3750acdc4728967
+decision   gd_21d1cac3e3750acdc4728967
 taskId     gate:872f7652
-operator   ed25519:d9b04656 (active)
+operator   ed25519:554ecfdf (active)
 signature  verifies
 operationSha sha256:872f7652c297b9fbe8e9afe910f42b40e590ca3982490e868d0e09809a5781e6
-payload    sha256:1e27376249e53574fe9a6d88e87beb761d5e8ec8948e5783f7d574acc8770e44
-issued     2026-11-02T22:51:27.774Z
-live until 2026-11-02T23:06:27.774Z
+payload    sha256:21d1cac3e3750acdc4728967e6d5bcbaecb062c320a80c9cf9770bebe2ede51e
+issued     2026-11-02T23:19:42.126Z
+live until 2026-11-02T23:34:42.126Z
 consumed   no
-artifact   /tmp/gate-rb3/gates/gd_ab147a33285676efcfa3676e.json
+artifact   /tmp/doc-capture/gates/gd_21d1cac3e3750acdc4728967.json
 exit=0
 ```
 

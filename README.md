@@ -89,9 +89,12 @@ policy or model change; the audit tells you the certificate expired and a person
 class. **What checks it.** `factory alerts` runs both judgements in one read-only command — importing
 `verifyAnchor` and `certificateRecency`, not restating them — and exits `0` clean, `9` for an integrity
 alert, `8` when the anchor host is unreachable. A launchd job runs it daily at 04:00 into
-`~/.factory/alerts.log`. **Still true:** nothing pages a person. There is no email, webhook or channel —
-an alert is a line in a log and an exit code a timer ignores, so a host that stops running jobs goes
-quiet, not loud. Expiry is _detectable_; it is not _escalated_.
+`~/.factory/alerts.log`. **Still true:** nothing pages a phone or an inbox by itself, and there is no
+on-call rotation to escalate to. An operator who opts in can be told — `factory alerts --notify` (run
+by the daily job) raises one macOS notification on this machine, or, with
+`FACTORY_ALERTS_WEBHOOK_URL` set, makes exactly one bounded POST of the same `alerts.v1` JSON to an
+endpoint you configured. Nothing retries a lost notification, and a host asleep at 04:00 stays quiet
+until it wakes. Expiry is _detectable_; whether it is _escalated_ is now the operator's choice.
 
 ## Packages
 
@@ -146,15 +149,31 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   runs where the factory sees an argv: the wall's re-execution of a receipt's commands brokers
   unconditionally (`apps/cli/src/wall.ts`), so a receipt claiming `sudo` measures `unknown`
   (`privileged_unbrokered`), never `pass`, and the fake executor brokers its scripted steps only with
-  `FACTORY_PRIVILEGED_BROKERING=on` (default `off`, `packages/qualifier/src/policy.ts`). **Still not
-  built:** no verb mints a decision and neither call site passes a `DecisionSink`, so the allow path
-  is exercised only by a signed decision built in `packages/wall/src/local.test.ts` — there is no
-  end-to-end "a person signed, so it ran"; a real `dsh` turn's own tool calls are kept as an
+  `FACTORY_PRIVILEGED_BROKERING=on` (default `off`, `packages/qualifier/src/policy.ts`).
+
+  **The allow path exists now, and a decision is single-use across processes.** `factory gate
+request` is read-only and prints the normalised operation, the exact payload to sign and a
+  copy-pasteable `decide` line with both timestamps pinned (they are inside the signed content, so a
+  payload signed at T and minted later fails closed); `factory gate decide` **verifies** the
+  operator's signature against the same public keys `factory promote` uses and records the decision
+  as the `gates/<id>.json` artifact plus one `privileged.decided` event — the tool never holds,
+  derives or writes a private key, and `--signed-by` is an echo checked against the key id, never a
+  name hashed into evidence (L1). Consumption is one conditional `INSERT … ON CONFLICT DO NOTHING`
+  into `privileged_decisions`, so two processes cannot both read "unused"; the fake executor presents
+  the decision covering its step's classified operation and takes the phrase from that verified
+  record, never from argv or the receipt. `e2e/cli/default/19-gate-decisions.test.ts` proves the three
+  runs: refused with exit 5, authorised exactly once, refused again as a replay —
+  `docs/runbooks/brokered-operations.md` is the operator's transcript. **Still not built:** the wall
+  is not a consumer — it measures a candidate and must not act on what it measures, so an authorised
+  operation still ends in an `unknown` verdict with reason `privileged_unbrokered`, and a decision
+  authorises an operation, not a promotion; a real `dsh` turn's own tool calls are kept as an
   agent-reported artefact (`packages/dsh-adapter/src/executor.ts`) and never reach the broker
-  (ADR-006); and there is no rule for arbitrary destructive verbs — the wall's denylist over recorded
-  argv is a second, knowingly partial line (`packages/wall/src/evaluate.ts`). The worker **credential**
+  (ADR-006); there is no `gate revoke` and no key registry beyond the promote lookup order; and there
+  is no rule for arbitrary destructive verbs — the wall's denylist over recorded argv is a second,
+  knowingly partial line (`packages/wall/src/evaluate.ts`). The worker **credential**
   is a different package: `packages/credential-proxy` holds the gateway key and hands the attempt a
   scoped, revocable token — see the live-layer bullet below.
+
 - **ND1–ND4 are decided and implemented; these are the parts still missing.** The decisions themselves
   are in `findings.md` § DECIDED and the implementation record in
   `evidence/phase-13-nd-decisions.md`. The **daily anchor job is installed** on this host
@@ -163,9 +182,12 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   `~/.factory/alerts.log`) asks both expiry questions in one read-only command and answers in an exit
   code: `0` clean, `9` a stale/missing/rolled-back anchor, a quarantined store or an expired class
   certificate, `8` when the anchor host cannot be reached — a transport failure is never reported as
-  "fine". Still not built: **notification** (the log is the page; nothing reaches a phone or an inbox)
-  and **scheduled re-certification** (a monitor says a certificate expired; a person decides to
-  re-measure the class).
+  "fine". **Notification is opt-in and local:** `factory alerts --notify` reaches this machine's
+  notification centre, or an endpoint you configured with `FACTORY_ALERTS_WEBHOOK_URL` (exactly one
+  bounded POST of the same `alerts.v1` JSON). It does not reach a phone or an inbox by itself, nothing
+  retries a lost notification, and a host asleep at 04:00 stays quiet until it wakes. Still not built:
+  **scheduled re-certification** (a monitor says a certificate expired; a person decides to re-measure
+  the class).
   ND3's ceiling is proven **through the real executor** (a paid `@live` spec arms it and crosses it on
   one turn, ~1 cent, with the crossing recorded in `usage_records`), and ND2's two-uid path is proven
   in a `node:26-bookworm` container rather than on the Linux target itself.
@@ -214,11 +236,13 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   could not perform as `skipped`/`failed` with the reason, in the text and as `sweeps[]` in
   `recover --json`, never as "swept 0", and without changing the exit code
   (`e2e/cli/docker/09-recover-sweep.test.ts` asserts the orphan is still listed after the kill and
-  gone after `recover` exits 4). What is **not** built: the mode is opt-in rather than the default; a
-  request that cannot be honoured refuses with exit 8 `CONTAINER_UNAVAILABLE` and the exact
-  `docker build` line instead of falling back to a host process; and network isolation is pinned by
-  the argv spec and not by a container-side egress probe (the wall's E2E-43 covers egress, with a
-  host control).
+  gone after `recover` exits 4). What is **not** built: the mode is opt-in rather than the default, and it
+  cannot be combined with a live model — the worker has `--network none` and the credential proxy
+  binds `127.0.0.1` on this host, so the two levers are refused up front with exit 8
+  `CONFIGURATION_CONFLICT` (a missing daemon or image is a different exit 8,
+  `CONTAINER_UNAVAILABLE`, with the `docker build` line; neither falls back to a host process); and
+  network isolation is pinned by the argv spec and not by a container-side egress probe (the wall's
+  E2E-43 covers egress, with a host control).
 - **DSH's sandbox is not a security boundary**, and is not treated as one anywhere.
 - **No ACP worker.** The adapter drives `dsh --profile headless` one-shot turns and reads NDJSON;
   the agent-client-protocol path is not implemented, so "one-shot **or** ACP workers" is delivered as

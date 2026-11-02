@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.6.0 — 2026-11-02
+
+R5's dead end is closed, and two controls stop being write-only. The broker could refuse a
+privileged operation but nothing could approve one; `factory alerts` could answer "expired" but only
+to a log; and the container's isolation could not be combined with a live model, which failed a
+worker start later as an unexplained 401.
+
+- **`factory gate request|decide|list|show`: a person can approve one operation, verifiably.**
+  `request` is read-only and prints the normalised operation, its `sha256`, the exact payload to sign
+  and a copy-pasteable `decide` line with **both timestamps pinned** — they are inside the signed
+  content, so a payload signed at T and re-dated later fails closed (exit 5). `decide` verifies the
+  operator's ed25519 signature against the same public keys `factory promote` uses
+  (`FACTORY_OPERATOR_KEY`, then `$FACTORY_HOME/keys/{operator.pub.pem,operator.ed25519.pub}`) and
+  persists the decision as the `gates/<id>.json` artifact **and** one `privileged.decided` event. The
+  tool never holds, derives or writes a private key; `--signed-by` is an echo checked against the key
+  id, never a name hashed into evidence (L1); a malformed `--expires-in` is exit 2 rather than a guess.
+- **One decision, one operation — across processes.** Schema **v3 → v4** adds `privileged_decisions`
+  (additive, applied in place to an existing store). `DecisionRegistry.consume` is now one conditional
+  `INSERT … ON CONFLICT DO NOTHING` whose `changes === 1` is "this caller won", so two processes cannot
+  both read "unused" — the previous per-invocation memory registry allowed a replay across runs. The
+  fake executor's brokered `command` step presents the decision covering its **classified** operation
+  (`liveDecisionFor` matches on the operation hash, never on raw argv) and takes the phrase from that
+  verified record, never from argv, the step text or the receipt. The wall's replay site keeps
+  refusing unconditionally, with the reason in the code: it measures a candidate and must not act on
+  what it measures.
+- **End-to-end proof of the three runs.** `e2e/cli/default/19-gate-decisions.test.ts`: refused with
+  exit 5 `[broker.no-decision]` and no file written; authorised exactly once (one `attempt.receipted`,
+  one `privileged.decided`, the command's effect on disk, `isDecisionConsumed` true); the same
+  decision presented again → exit 5 `[broker.replayed]`, still one of each event. Runbook
+  `docs/runbooks/brokered-operations.md` is the operator's transcript, captured on this tree.
+- **Alerts can reach a person, opt-in.** `factory alerts --notify` raises one macOS notification
+  through `osascript` (argv, never interpolated into AppleScript) plus one `NOTIFY …` line, and with
+  `FACTORY_ALERTS_WEBHOOK_URL` set makes exactly one bounded POST of the same `alerts.v1` JSON, at
+  most one retry, redirects refused, and the URL logged as scheme+host only (a webhook URL is a
+  credential). Off by default; a delivery failure is visible and never changes the exit code — `0`/`8`/
+  `9` describe the evidence, not the transport. Non-darwin is a reported no-op. The 04:00 plist runs
+  `--notify`, and the runbook now says what that buys: this machine's notification centre or your own
+  endpoint, no retry of a lost notification, and a host asleep at 04:00 stays quiet until it wakes.
+- **A launch combination that cannot work now refuses instead of failing later.** Container isolation
+  gives the worker `--network none`; the credential proxy binds `127.0.0.1` on this host. So
+  `FACTORY_WORKER_ISOLATION=container` with `FACTORY_LIVE_MODEL=1` and a key is refused in the probe:
+  exit 8 **`CONFIGURATION_CONFLICT`** — a new code, distinct from `CONTAINER_UNAVAILABLE` — with
+  nothing reserved, no attempt directory and no usage row, naming both levers, both ways forward and
+  the runbook section. `factory --help` now says exit 8 has two next actions and the code names which;
+  the outbox treats the conflict as `retryable`.
+- **The docker specs stop killing each other's containers.** E2E-45 discovered its container with
+  `docker ps --filter name=factory-worker-` and took the first match, so under `maxWorkers: 4` it
+  killed the egress spec's container, timed out at 180 s, and left its own behind — poisoning later
+  runs until a human removed it. Discovery is now by `org.factory.attempt=<attemptId>` (the label the
+  launcher writes and the sweep already relies on) with an ownership assertion before `docker kill`;
+  the egress probe's hand-rolled container moved out of the launcher's namespace; `07-isolation`'s
+  leftover net is scoped to its own suite. Proven with a deterministic decoy: the old filter kills it
+  (`Exited (137)`), the new one leaves it `Running` and passes in 1.6 s.
+- **Documents that had drifted.** `README.md`'s R5 paragraph said the allow path did not exist and no
+  verb minted a decision — false since this commit; `docs/handover.md`'s "no way to allow a privileged
+  operation end to end" and "no `gate_decisions` rows" bullets are rewritten against the tree. The
+  wall's `privileged_unbrokered` reason is documented for what it is: it names what happened at
+  **replay** (the wall presented no decision), not what happened to the operation. New runbook
+  `docs/runbooks/brokered-operations.md`; new section in `worker-container.md` for the conflict.
+
+**Verified:** `bash scripts/verify.sh` on the release tree — `7 passed, 1 skipped, 0 failed`, test stage
+`1472 passed | 7 skipped (1479)` across 99 files with every `@docker` spec run. Run id, per-stage
+output and the two deliberate red runs are in `docs/planning/dark-factory-dsh/evidence/phase-16-round.md`.
+
 ## v0.5.0 — 2026-11-02
 
 The round the previous session started and did not finish: four mechanisms landed, then the work

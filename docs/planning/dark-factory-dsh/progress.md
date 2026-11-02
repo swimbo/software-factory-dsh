@@ -297,3 +297,53 @@ steps and invariants held, zero paid calls.
 **Not re-run here, and labelled as such:** the paid `@live` layer (no key in this shell) — the last
 recorded live gate is `8 passed, 0 skipped, 0 failed` at `6a398cc`. Full list of what is still not built
 is in `evidence/phase-15-round.md` §8.
+
+### Round 8 — the broker's dead end, and the two refusals that replaced a mystery (2026-11-02)
+
+**R5's allow path exists, and a decision is single-use.** `factory gate request` is read-only and prints
+the operation, its hash, the payload and a `decide` line with **both timestamps pinned** — they are
+inside the signed content, so a payload signed at T and re-dated fails closed (measured: exit 5,
+`…for payload sha256:643d235c…`). `factory gate decide` verifies the operator's signature against the
+promote key lookup order and writes the `gates/<id>.json` artifact plus one `privileged.decided` event;
+the tool never signs, and `--signed-by` is an echo checked against the key id because a name would be a
+string the worker could assert (L1). Schema **v4** adds `privileged_decisions`: consumption is one
+conditional `INSERT … ON CONFLICT DO NOTHING`, so two processes cannot both read "unused" — the
+per-invocation memory registry that shipped before this round allowed exactly that replay.
+`e2e/cli/default/19-gate-decisions.test.ts` proves the three runs (refused → authorised exactly once →
+replay refused) and `docs/runbooks/brokered-operations.md` is the operator's transcript.
+
+**What a decision does not buy is now written down.** The wall is not a consumer: it measures a
+candidate with no decision in hand, so it refuses a privileged argv at replay and the verdict carries
+`privileged_unbrokered`. That code names the replay, not the operation. It was not renamed:
+`WALL_REASON_CODES` is a closed enum, so a rename would make every stored verdict carrying the old
+string unparseable — breaking the evidence it describes. The doc comment, README and
+`evidence/phase-16-round.md` §1 say which claim the code makes; threading decisions into the wall is a
+design change with its own trust surface, listed as next round's item.
+
+**Container isolation by default was withdrawn, then replaced by something better.** The proxy binds
+`127.0.0.1` and the worker container runs `--network none`, so the two cannot be combined; defaulting
+the container would have made the live layer unusable by default, and until this round the combination
+failed *after* the worker started as an unexplained 401. The probe now refuses it before anything is
+reserved: exit 8 **`CONFIGURATION_CONFLICT`**, distinct from `CONTAINER_UNAVAILABLE`, naming both levers
+and both ways forward. Making the container the default now has a named precondition — a transport that
+survives `--network none`.
+
+**`factory alerts --notify` reaches a person, without changing an exit code.** One macOS notification
+via `osascript` (text passed as argv, never interpolated), or exactly one bounded POST of the same
+`alerts.v1` JSON when `FACTORY_ALERTS_WEBHOOK_URL` is set, redirects refused, the URL reported as
+scheme+host only. Off by default; a delivery failure is visible and cannot change `0`/`8`/`9`. Nine
+mutation checks in its suite each turned one named spec red.
+
+**Two specs were killing each other's containers.** The round's first gate run was red in `test` for a
+reason that had nothing to do with the product: E2E-45 found its container by
+`--filter name=factory-worker-` and killed the first match, which under `maxWorkers: 4` was the egress
+spec's. Discovery is now by the launcher's `org.factory.attempt` label with an ownership assertion
+before the kill, and the proof is a deterministic decoy (old filter kills it; new filter leaves it
+`Running`). Both red runs are kept: `2026-11-02T22-57-34Z` and the hand-cleaned green
+`2026-11-02T23-06-42Z`.
+
+**Released tree:** `7 passed, 1 skipped, 0 failed`, test stage **1472 passed | 7 skipped (1479)** across
+99 files, every `@docker` spec run (`docs/verification/2026-11-02T23-20-42Z/`), and the two disclosures
+that matter (the operator's store migrated v3 → v4 by opening the CLI; one runbook transcript
+re-spliced from a single capture because the first version quoted values from more than one run) are in
+`evidence/phase-16-round.md` §6.

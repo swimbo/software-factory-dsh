@@ -126,19 +126,28 @@ and the reason each one has:
   fairness, no priorities and no dispatch on a timer. GAP-004 stands.
 - **No no-progress detector.** The watchdog enforces wall-clock and output-byte ceilings and the kill
   switch; "the worker is doing nothing" needs step-level signals DSH owns.
-- **No way for a person to _allow_ a privileged operation end to end.** `packages/proxy` brokers and
-  refuses, but no CLI verb mints a `PrivilegedDecision` (`pnpm run factory --help` has no such verb)
-  and neither call site passes a `DecisionSink` (`apps/cli/src/wall.ts` and
-  `packages/dsh-adapter/src/fake-executor.ts` both pass `sink: null`), so the allow path is exercised
-  only by a decision built inside `packages/wall/src/local.test.ts`. A real `dsh` turn's tool calls
-  are recorded as an agent-reported artefact and never brokered (ADR-006); the wall's denylist over a
-  receipt's recorded argv is a second, knowingly partial line.
-- **No `gate_decisions` rows.** A `GateDecision` is a ledger event (`credential.issued`,
-  `privileged.decided`) plus a `FACTORY_HOME/gates/` artifact; `packages/store` has no table for it,
-  and `packages/gates/src/decision.ts` says so in its header.
-- **No notification and no escalation.** `factory alerts` is a read-only command that answers in an
-  exit code, and the launchd job writes `~/.factory/alerts.log`; nothing reaches a phone, an inbox or
-  a webhook. A host that stops running jobs goes quiet, not loud.
+- **The allow path exists only where the factory sees an argv.** `factory gate request|decide|list|show`
+  mints a `PrivilegedDecision` from a signature **verified** against the operator's public key (the
+  tool never holds a private key), and the fake executor's brokered `command` step presents the
+  decision covering its classified operation; consumption is one conditional insert into
+  `privileged_decisions`, so a decision is spent once across processes
+  (`e2e/cli/default/19-gate-decisions.test.ts`: refused → authorised once → replay refused;
+  runbook `docs/runbooks/brokered-operations.md`). What is still missing: the **wall** is not a
+  consumer — it measures a candidate and does not act on what it measures, so it replays with no
+  decision, refuses a privileged argv, and reports `privileged_unbrokered` even when the launch was
+  authorised (the code names what happened at replay; the verdict stays `unknown` because a decision
+  is not an oracle); a real `dsh` turn's own tool calls are an agent-reported artefact and never reach
+  the broker (ADR-006); and there is no `gate revoke`, no key registry beyond the promote lookup
+  order, and no rule for arbitrary destructive verbs beyond the wall's knowingly partial denylist.
+- **`privileged_decisions` holds consumption markers, not the decisions.** A `GateDecision` is the
+  `privileged.decided` ledger event written when it is minted plus the `FACTORY_HOME/gates/` artifact a
+  person reads; the store table records _which_ decisions have been spent, which is why "consumed"
+  survives restarts. Replay protection is the marker, never a re-read of the artifact.
+- **No on-call rotation and no out-of-band escalation.** `factory alerts --notify` (the daily job runs
+  it) raises one macOS notification on this machine, or, with `FACTORY_ALERTS_WEBHOOK_URL` set, makes
+  exactly one bounded POST of the same `alerts.v1` JSON to an endpoint you configured. It does not
+  reach a phone or an inbox by itself, nothing retries a lost notification, and a host asleep at 04:00
+  stays quiet until it wakes — there is no rotation to escalate to.
 - **No scheduled re-certification.** `factory audit --certifications` exits 9 on a stale or absent
   class certificate; a person decides to re-measure the class.
 - **No anchor rotation and no automatic reconciliation** of a diverged anchor/ledger pair

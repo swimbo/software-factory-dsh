@@ -7,8 +7,8 @@ stated rather than implied.
 
 The whole-tree gate at the time of writing: `bash scripts/verify.sh` → **7 passed, 1 skipped, 0 failed**
 (preflight, typecheck, lint, format:check, test, build, panel; `live-model` skipped without a key), test
-stage **1395 passed | 7 skipped (1402)** across 99 files, measured at `edf3b1a`
-(`docs/verification/2026-11-02T16-44-03Z/`). Every run writes
+stage **1472 passed | 7 skipped (1479)** across 99 passed files, measured at `57db9b5`
+(`docs/verification/2026-11-02T23-20-42Z/`), with all three `@docker` suites running. Every run writes
 `docs/verification/<run-id>/{verify.log,summary.json}`, and the summary names the commit it measured.
 
 | Phase | What it produced                                                                                           | Evidence                                                                                             | Re-run                                                            |
@@ -32,6 +32,7 @@ stage **1395 passed | 7 skipped (1402)** across 99 files, measured at `edf3b1a`
 | 13    | the audit itself                                                                                           | [`phase-13-audit.md`](../phase-13-audit.md) — 18 plans, 469 boxes reconciled                         | —                                                                 |
 | 14    | the fixes                                                                                                  | `git log` from `b92f5cc` onward; gap table in `findings.md > Phase 14`                               | `bash scripts/verify.sh`                                          |
 | 15    | alerts, the ND3 ceiling through the real executor, the worker's container, the recover-side orphan sweep, and the docs truth pass | [`phase-15-round.md`](phase-15-round.md) — gate id, the 11 docker specs, the mutation check, and what is still not built | `bash scripts/verify.sh`; `npx vitest run e2e/cli/docker`         |
+| 16    | `factory gate` (mint/verify a decision, one-use across processes, schema v4), `alerts --notify`, `CONFIGURATION_CONFLICT`, and the docker specs' container-ownership fix | [`phase-16-round.md`](phase-16-round.md) — the gate table incl. the two red runs, the three-run proof, nine mutation checks, and the disclosures (store migration v4, re-spliced transcript) | `bash scripts/verify.sh`; `npx vitest run e2e/cli/default/19-gate-decisions.test.ts apps/cli/src/alerts.test.ts` |
 
 ## The four never-regress controls, and where each is proven
 
