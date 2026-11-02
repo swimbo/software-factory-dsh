@@ -2425,6 +2425,37 @@ export function openStore(options: OpenStoreOptions): Store {
       };
     },
 
+    // --- privileged decisions (R5's one-use marker) ---------------------------
+    isDecisionConsumed(decisionId: string): boolean {
+      return (
+        stmt('SELECT 1 AS one FROM privileged_decisions WHERE decision_id = ?').get<{
+          one: number;
+        }>(decisionId) !== undefined
+      );
+    },
+
+    recordDecisionConsumed(decisionId: string, options: AppendOptions): boolean {
+      if (decisionId.trim() === '') {
+        throw new FactoryError(
+          'INTERNAL',
+          'store: recordDecisionConsumed needs the decision id it is consuming; a marker without an id ' +
+            'would consume nothing and would let the decision through twice',
+          { operation: 'recordDecisionConsumed' },
+        );
+      }
+      return mutate('recordDecisionConsumed', () => {
+        // Atomic by construction: the primary key is the decision id, so this statement is the whole
+        // check. A `SELECT` followed by an `INSERT` would let two processes both read "unused" and
+        // both run the operation — the exact replay the marker exists to prevent.
+        const inserted = stmt(
+          'INSERT INTO privileged_decisions (decision_id, consumed_at) VALUES (?, ?) ON CONFLICT (decision_id) DO NOTHING',
+        ).run(decisionId, options.occurredAt ?? now());
+        // `changes` is 1 only for the caller whose INSERT created the row: this is the whole
+        // "did I win the race" answer, returned inside the transaction that produced it.
+        return Number(inserted.changes) === 1;
+      });
+    },
+
     // --- envelopes -----------------------------------------------------------
     currentEnvelope(scope: 'per-unit' | 'daily'): { envelopeId: string; amountUsd: number } | null {
       const row = stmt(

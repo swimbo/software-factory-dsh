@@ -278,6 +278,26 @@ export interface Store {
     ceilingCrossed: boolean;
   };
 
+  // --- privileged decisions (R5: one decision, one operation, across processes)
+  /**
+   * Whether this decision has already been spent. Read-only, and *not* the enforcement: the
+   * enforcement is `recordDecisionConsumed`, whose primary-key insert is the atomic check. This
+   * exists for `gate list`/`gate show` and for rendering "already used", never as a pre-flight a
+   * caller may trust.
+   */
+  isDecisionConsumed(decisionId: string): boolean;
+  /**
+   * Consume one decision and say whether *this* caller won, as one conditional insert
+   * (`INSERT … ON CONFLICT DO NOTHING`, `changes === 1`) inside one transaction.
+   *
+   * `false` means another caller inserted the marker first — the decision is spent and the
+   * operation must be refused. The decision's own `privileged.decided` event is written when the
+   * decision is minted (`factory gate decide`); this method records the separate *consumption*
+   * fact. A read-then-write would let two processes both see "unused" and both run the operation,
+   * which is why the verdict here is the insert's own `changes` and nothing else.
+   */
+  recordDecisionConsumed(decisionId: string, options: AppendOptions): boolean;
+
   // --- envelopes
   currentEnvelope(scope: 'per-unit' | 'daily'): { envelopeId: string; amountUsd: number } | null;
   raiseEnvelope(row: {

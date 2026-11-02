@@ -21,6 +21,7 @@ export const VERBS = [
   'promote',
   'budget',
   'credential',
+  'gate',
   'ledger',
   'version',
 ] as const;
@@ -147,6 +148,18 @@ const SPECIFIC: Readonly<Record<Verb, readonly string[]>> = {
     '  limit is enforced by revocation, not by trusting the worker to stop.',
     '`budget reconcile` is the best-effort invoice check against the gateway export; with no export',
     '  it exits 6 USAGE_UNRECONCILED, because unknown is not a pass.',
+  ],
+  gate: [
+    '`gate` verifies an operator signature; it never holds or generates a private key, and no flag',
+    '  mints one. The signing step is yours, run wherever your private key already lives.',
+    '`request` and `list`/`show` are read-only: they never write the store and never move the ledger.',
+    '`request` exits 5 when the operation is privileged and no live decision covers it — that is why',
+    '  the caller is there — and 0 when the argv is unprivileged or already covered.',
+    'A decision binds exactly one normalised operation and expires: it is not a session, and a second',
+    '  use of the same decision is refused (exit 5). The signature covers both timestamps, so the',
+    '  payload must be signed with the exact --issued-at `request` printed; a re-run later fails closed.',
+    'A standalone decision carries taskId gate:<sha8> — a label for reading, never a claim that a unit',
+    '  with that id exists.',
   ],
   credential: [
     'The secret value is never printed, never logged and never in --json: only a token id and expiry.',

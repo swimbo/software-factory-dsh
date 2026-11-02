@@ -213,6 +213,40 @@ function moduleResolves(specifier: string): boolean {
   }
 }
 
+/**
+ * Why container isolation and a live model cannot be combined, or `null` when they are not.
+ *
+ * The two levers are named in the message because an operator who has to work out which pair of
+ * settings produced an exit 8 at 2am pays for our brevity. The two ways forward are named for the
+ * same reason: "it is impossible" without "here is what to do instead" is a wall, not a gate.
+ */
+const CONTAINER_LIVE_MODEL_REASON =
+  'container isolation and a live model cannot both be honoured: the worker has no network and ' +
+  'the credential proxy is on this host';
+
+const CONTAINER_LIVE_MODEL_RUNBOOK =
+  'runbook: this is a configuration conflict, not a missing tool — unset FACTORY_WORKER_ISOLATION ' +
+  '(drop the container, run this turn on the host) or unset FACTORY_LIVE_MODEL (keep the container, ' +
+  'run the model call on the host), then re-run: factory run <unitId>';
+
+function containerLiveModelRefusal(
+  env: Readonly<Record<string, string | undefined>>,
+): string | null {
+  // "with a key" is part of the condition, not decoration: a run that has no credential cannot
+  // spend, and refusing it for a network conflict would send the operator to fix the wrong thing.
+  if ((env.FACTORY_LIVE_MODEL ?? '').trim() !== '1') return null;
+  if ((env.BIFROST_API_KEY ?? '').trim() === '') return null;
+  return (
+    'FACTORY_WORKER_ISOLATION=container runs the worker with `--network none`, but a live model ' +
+    '(FACTORY_LIVE_MODEL=1) authenticates through the credential proxy, which binds 127.0.0.1 on ' +
+    "the host. A container with no network cannot reach this host's loopback, so the model call " +
+    'inside the worker could never be authenticated. Two ways forward: unset ' +
+    'FACTORY_WORKER_ISOLATION to drop the container and run this turn on the host (the default), ' +
+    'or unset FACTORY_LIVE_MODEL and run the model call on the host, outside the containerised ' +
+    'worker'
+  );
+}
+
 export function probeExecutor(
   env: Readonly<Record<string, string | undefined>>,
   options: { readonly moduleAvailable?: boolean; readonly scenarioPath?: string | null } = {},
@@ -275,6 +309,36 @@ export function probeExecutor(
   // Where the turn will run. Consulted even for a host request, because an unrecognised value is a
   // usage error and the operator has to learn about it before anything is reserved.
   const adapter = moduleAvailable ? requireAdapter() : null;
+
+  // (c) The one launch combination the factory cannot honour: a container worker with a live
+  // model. `worker-container.ts` launches the worker with `--network none`, and the credential
+  // proxy that fronts the gateway binds `127.0.0.1` on this host (ADR-007). A loopback address
+  // inside the container's own, empty network namespace is not this host's loopback, so the
+  // worker can never reach the token it would need — the failure surfaces after the worker
+  // starts, as an unexplained 401 that looks like a model fault rather than a configuration one.
+  //
+  // Checked *before* `decideWorkerIsolation` on purpose: whether a docker daemon happens to be
+  // running cannot change this answer, so shelling out to ask would only replace an accurate
+  // message with a less accurate one.
+  const conflict =
+    adapter !== null && adapter.requestedIsolation(env) === 'container'
+      ? containerLiveModelRefusal(env)
+      : null;
+  if (conflict !== null) {
+    return {
+      available: false,
+      kind: 'headless',
+      binPath,
+      moduleAvailable,
+      scenarioPath: null,
+      // `run` renders `detail` into the refusal message (`verbs/run.ts`), so the two levers and
+      // the two ways forward live here rather than in a runbook line keyed by the exit code.
+      detail: conflict,
+      runbook: CONTAINER_LIVE_MODEL_RUNBOOK,
+      isolation: { mode: 'refused', reason: CONTAINER_LIVE_MODEL_REASON, container: null },
+    };
+  }
+
   const choice =
     adapter === null ? null : adapter.decideWorkerIsolation({ env, platform: process.platform });
 

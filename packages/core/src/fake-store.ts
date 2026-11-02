@@ -1225,6 +1225,28 @@ export class FakeStore implements Store {
     return { tokensIn, tokensOut, costUsd, unpricedRows, rows: rows.length, ceilingCrossed };
   }
 
+  // ------------------------------------------------- privileged decisions (R5)
+
+  /**
+   * The one-use marker, with the same rule as the real store: the *insert* is the check, so a
+   * second caller loses. Kept here because the interface grew and a fake that silently lacks the
+   * refusal would let an engine test believe a decision can be spent twice.
+   */
+  private readonly consumedDecisions = new Set<string>();
+
+  isDecisionConsumed(decisionId: string): boolean {
+    this.tick('isDecisionConsumed');
+    return this.consumedDecisions.has(decisionId);
+  }
+
+  recordDecisionConsumed(decisionId: string, _options: AppendOptions): boolean {
+    this.tick('recordDecisionConsumed');
+    this.assertWritable('recordDecisionConsumed');
+    if (this.consumedDecisions.has(decisionId)) return false;
+    this.consumedDecisions.add(decisionId);
+    return true;
+  }
+
   // --------------------------------------------------------------- envelopes
 
   currentEnvelope(scope: 'per-unit' | 'daily'): { envelopeId: string; amountUsd: number } | null {

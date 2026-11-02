@@ -14,6 +14,7 @@ import { FactoryError, type ErrorCode } from '@factory/contracts';
 import type { PriceTable } from '@factory/credential-proxy';
 
 import { DEFAULT_PER_UNIT_USD } from './context.ts';
+import { activeOperatorKeys, loadDecisions, storeDecisionPorts } from './gate.ts';
 import { openAttemptCredential, type AttemptCredential } from './credential.ts';
 import type { VerbInput } from './verbs/types.ts';
 
@@ -250,12 +251,29 @@ export async function launchAttempt(
       };
     try {
       const pidFile = (ctx.env.FACTORY_SCENARIO_PID_FILE ?? '').trim();
+      // The decisions this factory holds, and the keys it still accepts. Both are read once per
+      // launch: a decision minted mid-run must not silently widen an operation already dispatched.
+      const recorded = loadDecisions(ctx.home);
+      for (const problem of recorded.problems) {
+        // An artifact that cannot be re-verified is not a decision the broker may accept. Saying so
+        // here is what keeps the step's later "no live decision covers this" from being the only
+        // clue: the operator gets the file, the reason, and the fact it was ignored.
+        ctx.ui.err(`WARN gate: ignoring ${problem.path}`);
+        ctx.ui.err(`WARN gate:   ${problem.detail}`);
+      }
+      // The registry is the store's, not a per-invocation Map: that is the whole point of R5. A
+      // decision consumed by one launch is spent for every later launch, including a later process.
+      const ports = storeDecisionPorts(ctx.store, { actor: 'control', traceId: ctx.traceId });
       const executor = adapter.createFakeExecutorFromFile(ctx.executor.scenarioPath, {
         factoryHome: ctx.home,
         baseRev,
         // A scenario stands in for the worker, so its `command` steps are worker output and
         // pass the broker when the policy says so (`FACTORY_PRIVILEGED_BROKERING=on`).
         privilegedBrokering: ctx.policy.privilegedBrokering,
+        decisions: recorded.decisions,
+        activeKeys: activeOperatorKeys(ctx.env, ctx.paths),
+        decisionRegistry: ports.registry,
+        decisionSink: ports.sink,
         ...(pidFile === '' ? {} : { pidFile }),
         log: {
           info: (fields: Record<string, unknown>, message?: string) =>

@@ -35,7 +35,9 @@ describe('every verb', () => {
   it('is registered (a verb named in the plan with no command is a verb that silently 404s)', () => {
     // The list is the plan's verb set plus the ones that became worth a command. `alerts` joined it
     // in the evidence-expiry task: the two controls that exit 9 on expired evidence had a log entry
-    // and nothing that wrote it, so the surface existed only in prose.
+    // and nothing that wrote it, so the surface existed only in prose. `gate` joined it in R5:
+    // the broker could refuse a privileged operation but there was no command that turned "I
+    // approve this" into a record it would accept, which made every refusal a dead end.
     expect(VERB_SPECS.map((spec) => spec.name).sort()).toEqual(
       [
         'abort',
@@ -43,6 +45,7 @@ describe('every verb', () => {
         'audit',
         'budget',
         'credential',
+        'gate',
         'intent',
         'ledger',
         'promote',

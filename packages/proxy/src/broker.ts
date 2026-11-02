@@ -47,15 +47,36 @@ export interface DecisionSink {
 /** One decision, one operation. A second use of the same id is a replay. */
 export interface DecisionRegistry {
   readonly isConsumed: (decisionId: string) => boolean;
-  readonly consume: (decisionId: string, at: string) => void;
+  /**
+   * Record one use, atomically, and say whether *this* caller won.
+   *
+   * `false` means another caller inserted the consumption marker first — the decision is spent.
+   * The implementation must be a single conditional write (`INSERT … ON CONFLICT DO NOTHING`,
+   * `changes === 1`), never a read followed by a write: two processes that both read "unused" in
+   * the window between the two would both run the operation, which is the replay this port exists
+   * to make impossible. It takes the whole decision rather than only its id so that a durable
+   * implementation has what it needs to record the consumption as its own fact.
+   */
+  readonly consume: (decision: PrivilegedDecision, at: string) => boolean;
 }
 
-/** An in-memory registry: the test double, and the documented default for a single call. */
+/**
+ * An in-memory registry: the test double, and the documented default for a single call.
+ *
+ * Per-invocation, therefore *not* replay protection across processes — the store-backed adapter
+ * (`apps/cli/src/gate.ts`) is what makes "one decision, one operation" true between runs. A test
+ * that wants to prove a replay must use a registry that lives longer than one `broker` call, which
+ * is what `createMemoryRegistry()` returned to its caller already does.
+ */
 export function createMemoryRegistry(): DecisionRegistry {
   const consumed = new Set<string>();
   return {
     isConsumed: (decisionId) => consumed.has(decisionId),
-    consume: (decisionId) => consumed.add(decisionId),
+    consume: (decision) => {
+      if (consumed.has(decision.decisionId)) return false;
+      consumed.add(decision.decisionId);
+      return true;
+    },
   };
 }
 
@@ -172,7 +193,12 @@ export function broker(argv: readonly string[], options: BrokerOptions): BrokerO
     return refuse(classification, fault.code, fault.exitCode, fault.matchedRule, fault.detail);
   }
 
-  if (options.registry.isConsumed(presented.decisionId)) {
+  // Consumed only on the allow path, so a refusal does not silently spend the approval. The
+  // registry's return value is the enforcement, not a pre-flight `isConsumed` read: the store-backed
+  // `consume` is one conditional insert, so a second process — or a second worker in the same
+  // millisecond — loses the race here and is refused, instead of both reading "unused" first.
+  const won = options.registry.consume(presented, options.nowIso);
+  if (!won) {
     return refuse(
       classification,
       'GATE_REQUIRED',
@@ -182,9 +208,10 @@ export function broker(argv: readonly string[], options: BrokerOptions): BrokerO
         'session. A second privileged operation needs a second decision.',
     );
   }
-
-  // Consumed only on the allow path, so a refusal does not silently spend the approval.
-  options.registry.consume(presented.decisionId, options.nowIso);
+  // The decision's `privileged.decided` event is written once, when the decision is minted
+  // (`factory gate decide`); the store-backed sink is therefore a documented no-op and this call is
+  // the event-only path the memory double and tests use. Appending it here *as well* would make one
+  // decision read as two in the ledger.
   options.sink?.append(toEvent(presented));
 
   return {

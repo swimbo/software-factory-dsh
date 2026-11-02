@@ -66,6 +66,9 @@ import { dirname, join } from 'node:path';
 
 import { FactoryError, sha256Hex, WorkerReceipt } from '@factory/contracts';
 import { broker, createMemoryRegistry, describeRefusal } from '../../proxy/src/broker.ts';
+import type { DecisionRegistry, DecisionSink } from '../../proxy/src/broker.ts';
+import { liveDecisionFor } from '../../proxy/src/decision.ts';
+import type { PrivilegedDecision } from '../../proxy/src/decision.ts';
 import type { z } from 'zod';
 
 import {
@@ -141,6 +144,28 @@ export interface FakeExecutorOptions {
   readonly privilegedBrokering?: 'off' | 'on';
   /** The operator's home, for `~` expansion in the broker's path rules. */
   readonly home?: string | null;
+  /**
+   * The privileged decisions this launch may honour. The CLI loads them from
+   * `FACTORY_HOME/gates/*.json` — the same artifacts a person reads — and a `command` step
+   * presents the one whose `operationSha` covers its argv. With none, the broker refuses
+   * (`GATE_REQUIRED`, exit 5), which is the refusal path a spec asserts first.
+   */
+  readonly decisions?: readonly PrivilegedDecision[];
+  /** The operator keys a presented decision's signature is verified against. */
+  readonly activeKeys?: ReadonlyMap<string, string>;
+  /**
+   * The one-use registry. Defaults to a per-call memory double, which is right for a single
+   * `broker` call and wrong for "one decision, one operation" across processes — the CLI passes
+   * the store-backed adapter so a second run that presents the same decision is refused.
+   */
+  readonly decisionRegistry?: DecisionRegistry;
+  /**
+   * Where the broker appends the decision's event. `null` is the documented "nothing is recorded".
+   * The CLI passes the store-backed sink, which is deliberately a no-op: `factory gate decide`
+   * already wrote `privileged.decided` when the decision was minted, and the consumption marker is
+   * a separate fact written by the registry.
+   */
+  readonly decisionSink?: DecisionSink | null;
   /** Parsed scenario. `createFakeExecutorFromFile` reads one from disk. */
   readonly scenario: FakeScenario;
   /** Factory root; the attempt record is written under it, never inside the clone. */
@@ -347,22 +372,42 @@ export function createFakeExecutor(options: FakeExecutorOptions): Executor {
           }
           case 'command': {
             if ((options.privilegedBrokering ?? 'off') === 'on') {
+              const nowIso = (options.now?.() ?? new Date()).toISOString();
+              const home = options.home ?? null;
+              const activeKeys = options.activeKeys ?? new Map<string, string>();
+              // The decision is chosen by the *classified* operation, and `liveDecisionFor` only
+              // returns one that already passed signature/outcome/coverage/expiry checks. That is
+              // why the phrase below is taken from the record: it is a field of the signed content,
+              // so a verified signature is what proves the operator committed to it. The phrase is
+              // never read from argv, the step text, or the receipt — doing that would turn the
+              // broker's phrase check into "the worker said so".
+              const presented = liveDecisionFor(step.argv, {
+                home,
+                nowIso,
+                activeKeys,
+                decisions: options.decisions ?? [],
+              });
               const brokered = broker(step.argv, {
-                nowIso: (options.now?.() ?? new Date()).toISOString(),
-                home: options.home ?? null,
-                operatorPhrase: null,
-                decision: null,
-                sink: null,
-                registry: createMemoryRegistry(),
-                activeKeys: new Map<string, string>(),
+                nowIso,
+                home,
+                operatorPhrase: presented?.phrase ?? null,
+                decision: presented,
+                sink: options.decisionSink ?? null,
+                registry: options.decisionRegistry ?? createMemoryRegistry(),
+                activeKeys,
               });
               if (brokered.kind === 'refuse') {
                 // Fail the attempt rather than the step: a refused operation is not a command
                 // that ran and exited 1, and the receipt must not claim it did.
-                throw new FactoryError('GATE_REQUIRED', describeRefusal(brokered), {
-                  argv: [...step.argv],
-                  matchedRule: brokered.matchedRule,
-                });
+                // `describeRefusal` leads with the code, and the CLI prints a `FactoryError`'s
+                // message verbatim, so passing it through unchanged reads
+                // "GATE_REQUIRED: GATE_REQUIRED: …". The outer error owns the code; the message
+                // keeps the reason.
+                throw new FactoryError(
+                  'GATE_REQUIRED',
+                  describeRefusal(brokered).replace(/^[A-Z][A-Z_]*: /u, ''),
+                  { argv: [...step.argv], matchedRule: brokered.matchedRule },
+                );
               }
             }
             const started = Date.now();

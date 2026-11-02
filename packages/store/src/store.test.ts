@@ -355,6 +355,7 @@ describe('durability pragmas', () => {
     const raw = openSqlite({ path: dbPath });
     raw.prepare('DROP TABLE class_certificates').run();
     raw.prepare('DROP TABLE usage_records').run();
+    raw.prepare('DROP TABLE privileged_decisions').run();
     for (const step of declared) {
       raw.prepare('DELETE FROM schema_migration WHERE version = ?').run(step.to);
     }
@@ -1520,6 +1521,56 @@ describe('atomic', () => {
     });
     expect(store.getUnit('U-7f3a9c')?.state).toBe('rejected');
     expect(store.eventsSince(0).map((e) => e.type)).toEqual(['unit.submitted', 'unit.rejected']);
+  });
+});
+
+describe('privileged decisions (R5: one decision, one operation)', () => {
+  const DECISION = 'gd_0c5e1436dfffe8fa57b0e9e2';
+
+  it('records the marker for the caller whose insert created it, and only for that caller', () => {
+    expect(store.isDecisionConsumed(DECISION)).toBe(false);
+    expect(store.recordDecisionConsumed(DECISION, options())).toBe(true);
+    expect(store.isDecisionConsumed(DECISION)).toBe(true);
+    // The same caller asking twice loses the second time. A replay is indistinguishable
+    // from a race here on purpose: both are "somebody already spent it".
+    expect(store.recordDecisionConsumed(DECISION, options())).toBe(false);
+    // The marker is a row, not an event: `decide` wrote the event when the decision was made,
+    // and consuming is a separate fact. Anything else would read as two decisions.
+    expect(store.eventCount()).toBe(0);
+  });
+
+  it('lets exactly one of two independent connections win, which is what two processes see', () => {
+    // Two independent handles over the same file, i.e. the state two processes share. This is the
+    // regression that R5 exists for: a per-invocation registry (the memory double, or a Map built
+    // inside `launchAttempt`) returns `true` to *both* callers here, because each handle has its
+    // own idea of "unused". The marker lives in the database, so the second caller loses.
+    const other = openStore({ dir, now: clock });
+    try {
+      expect(other.isDecisionConsumed(DECISION)).toBe(false);
+      expect(store.isDecisionConsumed(DECISION)).toBe(false);
+
+      const first = store.recordDecisionConsumed(DECISION, options('tr-a'));
+      const second = other.recordDecisionConsumed(DECISION, options('tr-b'));
+
+      expect([first, second].filter((won) => won)).toHaveLength(1);
+      expect(other.isDecisionConsumed(DECISION)).toBe(true);
+      expect(store.isDecisionConsumed(DECISION)).toBe(true);
+    } finally {
+      other.close();
+    }
+  });
+
+  it('stays consumed after a reopen: the marker is durable, not per-invocation', () => {
+    expect(store.recordDecisionConsumed(DECISION, options())).toBe(true);
+    store.close();
+    store = openStore({ dir, now: clock });
+    expect(store.isDecisionConsumed(DECISION)).toBe(true);
+    expect(store.recordDecisionConsumed(DECISION, options())).toBe(false);
+  });
+
+  it('refuses an empty decision id rather than writing a marker that consumes nothing', () => {
+    expect(() => store.recordDecisionConsumed('   ', options())).toThrow(FactoryError);
+    expect(store.eventCount()).toBe(0);
   });
 });
 

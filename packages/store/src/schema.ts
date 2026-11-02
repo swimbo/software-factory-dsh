@@ -8,7 +8,7 @@
  * enforced at this layer rather than in code.
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Declared migrations. A store one version behind is opened only when a migration here says how to
@@ -74,6 +74,30 @@ const CLASS_CERTIFICATES_DDL = `CREATE TABLE IF NOT EXISTS class_certificates (
 CREATE INDEX IF NOT EXISTS certificates_class ON class_certificates(task_class, recorded_at);
 CREATE INDEX IF NOT EXISTS certificates_verdict ON class_certificates(verdict_id);`;
 
+/**
+ * v3 → v4 (R5's allow path): `privileged_decisions`, the one-use marker behind "a decision is not a
+ * session". Additive: nothing existing changed.
+ *
+ * A row exists iff that decision has been used. The primary key is the decision id, so replay
+ * protection is the schema's job rather than a rule the caller has to remember: the whole check is
+ * `INSERT … ON CONFLICT (decision_id) DO NOTHING`, and `changes === 1` is "this caller won the race".
+ * A read followed by a write would let two processes both see "unused" and both run the operation.
+ *
+ * The decision's own `privileged.decided` event is written once, when the decision is minted
+ * (`factory gate decide`); this table is the *consumption* fact, a separate one, written atomically
+ * when the operation is allowed. Keeping the marker as one statement (not a read-then-write) is what
+ * makes a second process lose the race instead of running the same operation a second time.
+ *
+ * A DELETE trigger makes "un-consume a decision" an edit SQLite refuses. There is no update trigger
+ * because the only non-key column is the timestamp, and nothing rewrites it.
+ */
+const PRIVILEGED_DECISIONS_DDL = `CREATE TABLE IF NOT EXISTS privileged_decisions (
+  decision_id   TEXT PRIMARY KEY,
+  consumed_at   TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS privileged_decisions_no_delete BEFORE DELETE ON privileged_decisions
+BEGIN SELECT RAISE(ABORT, 'privileged_decisions is append-only'); END;`;
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     from: 1,
@@ -86,6 +110,12 @@ export const MIGRATIONS: readonly Migration[] = [
     to: 3,
     note: 'ND1 half two: append-only class_certificates, so a class judgement can be re-checked',
     statements: [CLASS_CERTIFICATES_DDL],
+  },
+  {
+    from: 3,
+    to: 4,
+    note: 'R5: privileged_decisions, the one-use marker that makes a decision single-operation across processes',
+    statements: [PRIVILEGED_DECISIONS_DDL],
   },
 ];
 
@@ -325,6 +355,13 @@ ${USAGE_RECORDS_DDL}
 -- per verdict that carried one; the digest lets a reader prove the row and the
 -- wall.class_certified event are the same fact.
 ${CLASS_CERTIFICATES_DDL}
+
+-- -------------------------------------------------------- privileged decisions
+-- R5: one row per decision that has been used. The primary key is the decision id, so the
+-- one-use rule is enforced by SQLite rather than by a caller remembering to check first.
+-- The decision's own privileged.decided event is written when it is minted; this table is
+-- the separate *consumption* fact, written atomically on the allow path.
+${PRIVILEGED_DECISIONS_DDL}
 
 CREATE TABLE IF NOT EXISTS envelopes (
   envelope_id     TEXT PRIMARY KEY,

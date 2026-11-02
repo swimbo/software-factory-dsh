@@ -211,6 +211,14 @@ export function createLocalRunner(options: LocalRunnerOptions): ScenarioRunner {
       // The same discipline for authority: this argv came from a receipt, i.e. from the
       // worker. A privileged operation with no recorded decision is refused *here*, before
       // a temp copy is made, so no part of it runs.
+      //
+      // This site stays *unconditional*: `sink: null`, a fresh `createMemoryRegistry()` per call,
+      // and whatever decision the caller handed in is only ever re-verified, never consumed for
+      // real. It is the replay path — it re-executes a candidate in order to measure it, and a
+      // measurement must not act on what it measures. Wiring the durable registry in here would
+      // mean a dry-run replay could spend the one decision the real run needs, and the operator
+      // would see "already used" for an operation that never ran. The brokered launch site is the
+      // one that consumes (`apps/cli/src/launch.ts` → `storeDecisionPorts`).
       if ((options.privilegedBrokering ?? 'off') === 'on') {
         // The clock is the caller's, never this package's: `evaluate.test.ts` proves that
         // `src/` contains no wall-clock read, and a default `new Date()` would break that
