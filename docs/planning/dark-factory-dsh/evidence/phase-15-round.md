@@ -13,9 +13,15 @@ number in this file came from a commit rather than a command I ran here, it says
 
 ## 0. The gate, on the released tree
 
-| tree        | command               | result                                                                        | artifact                              |
-| ----------- | --------------------- | ----------------------------------------------------------------------------- | ------------------------------------- |
-| `edf3b1a`   | `bash scripts/verify.sh` | **7 passed, 1 skipped, 0 failed** — `preflight`, `typecheck`, `lint`, `format:check`, `test`, `build`, `panel` PASS; `live-model` SKIPPED | `docs/verification/2026-11-02T16-44-03Z/` |
+| tree        | command                  | result                                                                                                                        | artifact                                  |
+| ----------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `dd518e8`   | `bash scripts/verify.sh` | **7 passed, 1 skipped, 0 failed** — `preflight`, `typecheck`, `lint`, `format:check`, `test`, `build`, `panel` PASS; `live-model` SKIPPED (no key) | `docs/verification/2026-11-02T16-46-33Z/` |
+| `edf3b1a`   | `bash scripts/verify.sh` | the same result one commit earlier, on the release commit itself                                                              | `docs/verification/2026-11-02T16-44-03Z/` |
+
+The tag `v0.5.0` points at the commit that carries these two artifacts and this file; the tree it
+tags differs from the tree `dd518e8`'s run measured only by the run's own output and by this
+paragraph. The summary records `dirtyPaths: 2` for that reason — both are the `docs/verification/`
+directories the run was writing while it measured itself. Every other file was committed.
 
 Test stage: **1395 passed, 7 skipped (1402) across 99 files**. The seven skips are all declared, none a
 fail-by-omission: 3 `@live` (no `BIFROST_API_KEY` in this shell — C5), 3 in
