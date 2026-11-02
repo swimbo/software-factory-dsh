@@ -1,6 +1,21 @@
 /**
- * The recover-side sweep (E2E-46): a `SIGKILL`ed control plane's container is swept by the next
+ * E2E-45's orphan-sweep clause: a `SIGKILL`ed control plane's container is swept by the next
  * process that knows the attempt id.
+ *
+ * The id is E2E-45, not a new number. `docs/planning/dark-factory-dsh/e2e-tests.md:188` defines
+ * E2E-45 as "Killing the worker container mid-attempt yields `ambiguous` + no redispatch", and its
+ * acceptance column ends with "orphan sweep recorded (session id, process group)"; E2E-51 is
+ * re-scoped as "process-group reap proven offline; container descendants → E2E-45". The id is
+ * shared the way E2E-43 and E2E-44 are: `08-worker-container.test.ts` measures the `docker kill`
+ * → `ambiguous`, one attempt, no redispatch half, and this spec measures the orphan sweep that
+ * E2E-45's acceptance column names. E2E-46 is the cgroup-limits spec in `07-isolation.test.ts` and
+ * is not this file.
+ *
+ * One deliberate difference from the plan's wording: the acceptance column says the sweep is
+ * recorded as "(session id, process group)", which is how a host child is identified. A
+ * container's identity here is `org.factory.attempt=<attemptId>` — the label the runner sets and
+ * the only thing the sweep filters on — so that is what this clause asserts. Sweeping by session
+ * id would mean listing containers by a label nothing writes.
  *
  * ## The defect this spec exists for
  *
@@ -23,7 +38,7 @@
  * the container case; the host case supplies its own stub through `DSH_BIN` and asserts the launch
  * record says `container: null`.
  *
- * ## E2E-46's shape
+ * ## This clause's shape
  *
  * 1. **Positive control.** `run` in the hang image → wait for the worker container → `SIGKILL`
  *    the control plane mid-turn → the container is *still listed*. That is the orphan; if this
@@ -340,7 +355,7 @@ suite(SUITE, () => {
     return { child, exited, streams: () => `stdout:\n${stdout}\nstderr:\n${stderr}` };
   }
 
-  it('[@docker] E2E-46: a SIGKILLed control plane orphans its container, and recover sweeps it by attempt label', async () => {
+  it('[@docker] E2E-45 (orphan sweep): a SIGKILLed control plane orphans its container, and recover sweeps it by attempt label', async () => {
     const home = newFactoryHome();
     const unitId = qualifiedUnit(home);
     const env = containerEnv(home, HANG_IMAGE);
