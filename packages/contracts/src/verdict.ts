@@ -27,12 +27,25 @@ export const WALL_REASON_CODES = [
   'faithfulness_partial',
   'receipt_unavailable',
   /**
-   * A recorded command needed a person's decision and had none. The factory will not
-   * re-run what it cannot broker, so the verdict stays `unknown` -- and the operator
-   * is told which command and which rule, instead of being handed the generic
-   * "could not be re-executed" that hides a gate refusal behind a transport failure.
+   * **Old verdicts only — kept so stored evidence stays readable.** A recorded command needed a
+   * person's decision and had none, so the factory would not re-run what it could not broker, and
+   * the verdict stays `unknown`. The claim is about what happened **at replay**: it never said the
+   * operation was unapproved — the launch may well have held a decision, and the wall is
+   * deliberately not its consumer. New verdicts emit `privileged_replay_refused` below. This string
+   * cannot be removed or renamed: `WALL_REASON_CODES` is a closed zod enum, so doing either would
+   * make every stored verdict that carries it fail to parse, breaking the evidence it describes.
    */
   'privileged_unbrokered',
+  /**
+   * **New verdicts.** The replay was refused because the operation was privileged and the replay
+   * had no decision. The wall re-executes a receipt's claim in order to measure it, and a
+   * measurement must not act on what it measures, so the refusal is about the replay, not about the
+   * operation: this code says "the replay was refused", never "the operation was never approved".
+   *
+   * Additive on purpose. `privileged_unbrokered` above remains the code on verdicts already on
+   * disk; a reader must accept both, and neither is a failure of the candidate.
+   */
+  'privileged_replay_refused',
   'delta_regression',
   'delta_unmeasured',
   'holdout_failed',

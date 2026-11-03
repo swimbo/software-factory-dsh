@@ -42,10 +42,12 @@ import {
   DISCORD_PAYLOAD_LIMIT,
   discordPayload,
   isDiscordWebhook,
+  postAlerts,
   postDiscord,
   resolveWebhookConfig,
   WEBHOOK_ENV,
   WEBHOOK_FILE_ENV,
+  WEBHOOK_RESPONSE_LIMIT,
   type DiscordPayload,
   type WebhookTarget,
 } from './notify.ts';
@@ -807,5 +809,124 @@ describe('the webhook secret file', () => {
       detail: expect.stringContaining('no local notification transport on linux'),
     });
     expect(lines[0]).toContain('NOTIFY  SKIPPED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The raw transport's response body: drained, but never unbounded
+// ---------------------------------------------------------------------------
+
+interface BoundedProbe {
+  readonly url: string;
+  /**
+   * How the listener's response ended. `finished` means it wrote every byte it had; `cancelled`
+   * means the client closed the connection first. This is an observation of the socket, which is
+   * what the bound is about — not a measurement of elapsed time.
+   */
+  readonly ended: Promise<'finished' | 'cancelled'>;
+  close(): Promise<void>;
+}
+
+/**
+ * A listener that answers with a body far larger than {@link WEBHOOK_RESPONSE_LIMIT}.
+ *
+ * It writes `WEBHOOK_RESPONSE_LIMIT * 128` bytes (8 MiB) in 64 KiB turns, yielding between writes,
+ * and then ends the response. A client that honours the bound reads a chunk or two, cancels and
+ * closes the connection: the listener observes `close` without `finish` and stops writing. A client
+ * that drains the body instead lets the listener reach `end()`, so `ended` resolves `finished`.
+ * That is how the spec tells "cancelled" from "read to the end".
+ */
+async function oversizeListener(): Promise<BoundedProbe> {
+  const total = WEBHOOK_RESPONSE_LIMIT * 128;
+  const chunk = Buffer.alloc(64 * 1024, 'x');
+  let sent = 0;
+  let stopped = false;
+  let resolveEnded: ((ended: 'finished' | 'cancelled') => void) | null = null;
+  const ended = new Promise<'finished' | 'cancelled'>((resolve) => {
+    resolveEnded = resolve;
+  });
+  const server: Server = createServer((_request, response) => {
+    // The client tearing the connection down is the expected end of this response, not a failure.
+    response.on('error', () => undefined);
+    response.on('finish', () => {
+      resolveEnded?.('finished');
+    });
+    response.on('close', () => {
+      stopped = true;
+      resolveEnded?.('cancelled');
+    });
+    response.writeHead(200, { 'content-type': 'application/octet-stream' });
+    const pump = (): void => {
+      if (stopped || response.destroyed || response.writableEnded) return;
+      if (sent >= total) {
+        response.end();
+        return;
+      }
+      sent += chunk.length;
+      response.write(chunk);
+      setImmediate(pump);
+    };
+    pump();
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('no loopback port');
+  return {
+    url: `http://127.0.0.1:${String(address.port)}/hook`,
+    ended,
+    async close() {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error === undefined ? resolve() : reject(error)));
+      });
+    },
+  };
+}
+
+describe('postAlerts bounds the response body it drains', () => {
+  it('[a body past the bound is cancelled, still delivered, and the detail names the truncation]', async () => {
+    const probe = await oversizeListener();
+    try {
+      const result = await postAlerts(probe.url, '{}', 5_000);
+      // (a) The outcome is unchanged in kind. The status arrived with the headers, so a 200 is a
+      // delivery; whether the rest of the body was read is not evidence about whether the alert was
+      // accepted, and a truncated body must not turn a delivered alert into a failure.
+      expect(result.ok).toBe(true);
+      expect(result.attempts).toBe(1);
+      expect(result.status).toBe(200);
+      // (b) The truncation is reported, with the bound, rather than silently swallowed.
+      expect(result.detail).toContain('truncated');
+      expect(result.detail).toContain(String(WEBHOOK_RESPONSE_LIMIT));
+      // (c) The socket was closed rather than read to the end: the listener says how its response
+      // ended, and `finished` would mean this client buffered all 8 MiB — the defect.
+      expect(await probe.ended).toBe('cancelled');
+    } finally {
+      await probe.close();
+    }
+  });
+
+  it('[the NOTIFY line for a truncated 200 is DELIVERED, and names the truncation]', async () => {
+    const probe = await oversizeListener();
+    try {
+      const lines: string[] = [];
+      const outcome = await deliverNotification(alertDocument([certNever()]), EXIT.integrity, {
+        home: tempHome('factory-raw-bound-home-'),
+        env: { [WEBHOOK_ENV]: probe.url },
+        platform: 'linux',
+        warn: (line) => lines.push(line),
+        timeoutMs: 5_000,
+      });
+      // The exit code still describes the evidence, and the one line a person reads says the body
+      // was not finished — not just "HTTP 200" as if nothing had happened.
+      expect(outcome.status).toBe('delivered');
+      expect(outcome.delivered).toBe(true);
+      expect(outcome.detail).toContain('truncated');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('NOTIFY  DELIVERED');
+      expect(lines[0]).toContain('truncated');
+      expect(await probe.ended).toBe('cancelled');
+    } finally {
+      await probe.close();
+    }
   });
 });

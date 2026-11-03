@@ -54,6 +54,18 @@ export const WEBHOOK_SECRET_PATH = 'secrets/alerts-webhook';
 export const WEBHOOK_TIMEOUT_MS = 5_000;
 
 /**
+ * How much of a webhook's response body this process will read: 64 KiB.
+ *
+ * The body is drained so the socket is released, but "drain" must not mean "buffer whatever the
+ * endpoint sends": this runs from an unattended 04:00 job, and one broken or hostile endpoint that
+ * answers with an endless body would otherwise have the job allocate until it is killed — a monitor
+ * that stops monitoring because its transport misbehaved. Past this limit the stream is cancelled,
+ * which closes the connection; the truncation is reported in the detail rather than swallowed,
+ * because a body this process did not read is a fact about the delivery.
+ */
+export const WEBHOOK_RESPONSE_LIMIT = 64 * 1024;
+
+/**
  * The two hosts that serve Discord webhooks. `discordapp.com` is the legacy name and is still the
  * host in plenty of copied URLs; the adapter treats both the same.
  */
@@ -661,7 +673,10 @@ async function deliverRawDocument(
       delivered: true,
       status: 'delivered',
       transport: 'webhook',
-      detail: `${target.origin} answered HTTP ${String(result.status)} (${attempts})`,
+      // `result.detail` is `HTTP <status>`, plus the truncation fact when the endpoint sent more
+      // than the bound. Rebuilding the status here instead would drop that fact from the one line
+      // the operator reads, which is exactly where a body nobody finished reading matters.
+      detail: `${target.origin} answered ${result.detail} (${attempts})`,
     };
   }
   return {
@@ -750,12 +765,13 @@ export async function postAlerts(
         signal: AbortSignal.timeout(timeoutMs),
       });
       // Drain the body before deciding: an unread response keeps the socket, and the process, alive.
-      await response.arrayBuffer().catch(() => undefined);
+      // Bounded, because the endpoint is not trusted to stop writing: see `drainBounded`.
+      const drained = await drainBounded(response);
       last = {
         ok: response.ok,
         attempts: attempt,
         status: response.status,
-        detail: `HTTP ${String(response.status)}`,
+        detail: statusDetail(response.status, drained.truncated),
       };
       if (response.ok) return last;
       if (response.status < 500) return last;
@@ -764,6 +780,48 @@ export async function postAlerts(
     }
   }
   return last;
+}
+
+/** `HTTP 200`, plus the fact when the body was larger than this process was willing to read. */
+function statusDetail(status: number, truncated: boolean): string {
+  const head = `HTTP ${String(status)}`;
+  return truncated
+    ? `${head} (response body truncated at ${String(WEBHOOK_RESPONSE_LIMIT)} bytes; the connection was cancelled)`
+    : head;
+}
+
+/**
+ * Read a response body up to {@link WEBHOOK_RESPONSE_LIMIT}, then cancel the stream.
+ *
+ * `arrayBuffer()` — what this used to call — has no bound: whatever the endpoint sends is buffered
+ * before the status is even looked at. The status arrives with the headers, so the body is read only
+ * to release the socket. This reads through the stream, stops past the limit and calls
+ * `reader.cancel()`; cancelling is what closes the connection, so an endpoint that never finishes
+ * its body cannot hold the job open, and the truncation is returned rather than hidden.
+ *
+ * A read that fails is swallowed exactly as `arrayBuffer().catch(() => undefined)` swallowed it: the
+ * status decides the delivery outcome, and a body that breaks mid-read must not turn a delivered
+ * alert into a failure.
+ */
+async function drainBounded(response: Response): Promise<{ readonly truncated: boolean }> {
+  const body = response.body;
+  if (body === null) return { truncated: false };
+  const reader = body.getReader();
+  let received = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return { truncated: false };
+      received += chunk.value.byteLength;
+      if (received > WEBHOOK_RESPONSE_LIMIT) {
+        await reader.cancel().catch(() => undefined);
+        return { truncated: true };
+      }
+    }
+  } catch {
+    // The status already arrived; a body that broke mid-read is not a different outcome.
+    return { truncated: false };
+  }
 }
 
 export interface DiscordPostOptions {

@@ -656,7 +656,11 @@ async function checkFaithfulness(input: EvaluateInput): Promise<CheckOutcome> {
           refused ? error.message : 'recorded command could not be re-executed',
         ),
       );
-      const reason = refused ? 'privileged_unbrokered' : 'receipt_unavailable';
+      // The code names the refusal, not the operation: the wall is not a consumer of decisions, so
+      // what it observed is "the replay was refused because it had no decision", never "this
+      // operation was never approved". `privileged_unbrokered` stays in the contract for verdicts
+      // already on disk; new rows carry the additive code.
+      const reason = refused ? 'privileged_replay_refused' : 'receipt_unavailable';
       if (!reasons.includes(reason)) reasons.push(reason);
       continue;
     }
