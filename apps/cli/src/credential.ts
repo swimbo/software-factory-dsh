@@ -13,6 +13,8 @@
  * revokes it, and `launch.ts` calls it in a `finally` **before** the verdict is written — the
  * verdict is the record that the attempt is over, so the credential must be dead by then.
  */
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import {
   startCredentialProxy,
   type CredentialProxy,
@@ -20,9 +22,16 @@ import {
   type UsageTotals,
 } from '@factory/credential-proxy';
 import type { ErrorCode } from '@factory/contracts';
+import { readSecretFile } from './secrets.ts';
 
 /** Fifteen minutes when no lease is readable: a clock-bounded ceiling for the fallback path. */
 export const DEFAULT_CREDENTIAL_TTL_MS = 15 * 60 * 1000;
+
+/** The variable an operator who does not want a file on disk still uses. */
+export const API_KEY_ENV = 'BIFROST_API_KEY';
+
+/** Where the key lives when it lives in a file: `<factory home>/secrets/bifrost-key`, mode 0600. */
+export const API_KEY_FILE = join('secrets', 'bifrost-key');
 
 export interface AttemptCredential {
   /** `http://127.0.0.1:<port><prefix>`: what the overlay's `baseURL` gets. */
@@ -85,6 +94,50 @@ export interface AttemptCredentialOptions {
   }) => void;
 }
 
+/** Where the key file is for this invocation: the factory home the rest of the CLI would use. */
+export function apiKeyPath(env: Readonly<Record<string, string | undefined>>): string {
+  const home = (env['FACTORY_HOME'] ?? '').trim();
+  return join(home.length > 0 ? home : join(homedir(), '.factory'), API_KEY_FILE);
+}
+
+export type ApiKeyResolution =
+  | { readonly ok: true; readonly key: string; readonly source: 'environment' | 'file' }
+  | { readonly ok: false; readonly detail: string };
+
+/**
+ * The gateway key: the environment first, then a 0600 file under the factory home.
+ *
+ * The environment stays first so nothing that works today stops working — a `launchctl`-style
+ * wrapper, a CI secret, a one-off `BIFROST_API_KEY=… factory run`. The file exists because the
+ * alternative operators actually reach for is putting the variable into a launch agent, which is
+ * a world-readable plist: the key is then in every backup of that directory, and this round's
+ * alert webhook moved for exactly that reason. A file this CLI refuses to read when it is not
+ * 0600 is a rule with one enforcement point (`secrets.ts`), not a second opinion about modes.
+ *
+ * The refusal text never contains the key, and it distinguishes "no key anywhere" from "there is
+ * a key file and I will not use it": those need different actions from the operator.
+ */
+export function resolveApiKey(env: Readonly<Record<string, string | undefined>>): ApiKeyResolution {
+  const fromEnv = (env[API_KEY_ENV] ?? '').trim();
+  if (fromEnv.length > 0) return { ok: true, key: fromEnv, source: 'environment' };
+  const path = apiKeyPath(env);
+  const file = readSecretFile(path);
+  switch (file.kind) {
+    case 'value':
+      return { ok: true, key: file.value, source: 'file' };
+    case 'refused':
+      return { ok: false, detail: `a live model run needs a usable key: ${file.detail}` };
+    case 'missing':
+      return {
+        ok: false,
+        detail:
+          `a live model run needs ${API_KEY_ENV} in the controller environment, or the key in ` +
+          `${path} with mode 0600; it is read here and injected by the proxy, never forwarded ` +
+          'to the worker',
+      };
+  }
+}
+
 /**
  * Start the proxy for one attempt.
  *
@@ -97,7 +150,7 @@ export async function openAttemptCredential(
   options: AttemptCredentialOptions,
 ): Promise<CredentialOpen> {
   const upstream = (options.env['FACTORY_PROXY_BASE_URL'] ?? '').trim();
-  const apiKey = (options.env['BIFROST_API_KEY'] ?? '').trim();
+  const resolved = resolveApiKey(options.env);
   if (upstream === '') {
     return {
       ok: false,
@@ -106,15 +159,10 @@ export async function openAttemptCredential(
         'a live model run needs FACTORY_PROXY_BASE_URL (the gateway the credential proxy fronts)',
     };
   }
-  if (apiKey === '') {
-    return {
-      ok: false,
-      code: 'EXECUTOR_UNAVAILABLE',
-      detail:
-        'a live model run needs BIFROST_API_KEY in the controller environment; it is read here ' +
-        'and injected by the proxy, never forwarded to the worker',
-    };
+  if (!resolved.ok) {
+    return { ok: false, code: 'EXECUTOR_UNAVAILABLE', detail: resolved.detail };
   }
+  const apiKey = resolved.key;
   let parsed: URL;
   try {
     parsed = new URL(upstream);
