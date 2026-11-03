@@ -537,6 +537,97 @@ describe('postDiscord (loopback only)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The Discord response body: parsed for `message`/`retry_after`, but bounded
+// ---------------------------------------------------------------------------
+
+/**
+ * Answer with a body twice the bound, so *any* chunking pushes the reader past
+ * `WEBHOOK_RESPONSE_LIMIT`, then end. The `error` listener is the client's cancel arriving on a
+ * response the listener was still writing: expected here, not a failure.
+ */
+function endOversize(response: ServerResponse, status: number): void {
+  response.on('error', () => undefined);
+  response.writeHead(status, { 'content-type': 'application/json' });
+  response.end(Buffer.alloc(WEBHOOK_RESPONSE_LIMIT * 2, 'x'));
+}
+
+describe('postDiscord bounds the response body it reads', () => {
+  it('[a 429 past the bound still retries from the status, and the detail says the body was cut]', async () => {
+    const recorder = await loopback((index, response) => {
+      if (index === 0) {
+        endOversize(response, 429);
+        return;
+      }
+      response.writeHead(204);
+      response.end();
+    });
+    const slept: number[] = [];
+    try {
+      const payload = payloadFor(alertDocument([certNever()]), EXIT.integrity);
+      const result = await postDiscord(recorder.url, payload, {
+        timeoutMs: 5_000,
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      });
+      // The retry decision came from the 429 status, not from a body that could not be parsed: the
+      // one retry happened, and the wait fell back to the default because `retry_after` was past the
+      // bound. The spec finishing at all is the "no hang" half.
+      expect(result.ok).toBe(true);
+      expect(result.attempts).toBe(2);
+      expect(recorder.requests).toHaveLength(2);
+      expect(slept).toEqual([1_000]);
+      expect(result.detail).toContain('after a 429');
+      // The operator can see *why* retry_after was missing instead of reading "carried no retry_after"
+      // as a fact about Discord's answer.
+      expect(result.detail).toContain('body truncated at');
+      expect(result.detail).toContain(String(WEBHOOK_RESPONSE_LIMIT));
+    } finally {
+      await recorder.close();
+    }
+  });
+
+  it('[a 400 past the bound is still a failure, not retried, and names the truncation]', async () => {
+    const recorder = await loopback((_index, response) => {
+      endOversize(response, 400);
+    });
+    try {
+      const payload = payloadFor(alertDocument([certNever()]), EXIT.integrity);
+      const result = await postDiscord(recorder.url, payload, { timeoutMs: 5_000 });
+      // A 4xx is not retried, whatever its body says — and a body that was cut cannot turn the
+      // refusal into a delivery or hide that the `message` was unreadable.
+      expect(result.ok).toBe(false);
+      expect(result.status).toBe(400);
+      expect(result.attempts).toBe(1);
+      expect(recorder.requests).toHaveLength(1);
+      expect(result.detail).toContain('HTTP 400');
+      expect(result.detail).toContain('body truncated at');
+      expect(result.detail).toContain(String(WEBHOOK_RESPONSE_LIMIT));
+    } finally {
+      await recorder.close();
+    }
+  });
+
+  it('[a 2xx past the bound is still a delivery: the success line does not mention the body]', async () => {
+    const recorder = await loopback((_index, response) => {
+      endOversize(response, 200);
+    });
+    try {
+      const payload = payloadFor(alertDocument([certNever()]), EXIT.integrity);
+      const result = await postDiscord(recorder.url, payload, { timeoutMs: 5_000 });
+      // Discord sends no body on 204/200, so a 2xx's body is irrelevant: the status is the delivery,
+      // and truncation must not change the outcome or leak into the success detail as noise.
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe(200);
+      expect(result.attempts).toBe(1);
+      expect(result.detail).toBe('HTTP 200');
+    } finally {
+      await recorder.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Delivery: the adapter is selected on the URL, and the log line still carries only scheme + host
 // ---------------------------------------------------------------------------
 

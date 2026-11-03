@@ -791,37 +791,66 @@ function statusDetail(status: number, truncated: boolean): string {
 }
 
 /**
- * Read a response body up to {@link WEBHOOK_RESPONSE_LIMIT}, then cancel the stream.
+ * Read a response body as text, but never more than `limit` bytes.
  *
- * `arrayBuffer()` — what this used to call — has no bound: whatever the endpoint sends is buffered
- * before the status is even looked at. The status arrives with the headers, so the body is read only
- * to release the socket. This reads through the stream, stops past the limit and calls
- * `reader.cancel()`; cancelling is what closes the connection, so an endpoint that never finishes
- * its body cannot hold the job open, and the truncation is returned rather than hidden.
+ * Two callers, one rule. The raw transport only needs the body drained so the socket is released;
+ * the Discord transport needs the body itself, because a 400's `message` and a 429's `retry_after`
+ * are the actionable part of a refusal. Neither is a licence to buffer whatever an endpoint sends:
+ * both transports run in the same unattended 04:00 job, and one broken or hostile endpoint must not
+ * make the job allocate until it is killed. Past `limit` the stream is cancelled — cancelling is
+ * what closes the connection — and the caller is told the text is a prefix, so a missing `message`
+ * or `retry_after` is explained rather than silently read as absent.
  *
  * A read that fails is swallowed exactly as `arrayBuffer().catch(() => undefined)` swallowed it: the
  * status decides the delivery outcome, and a body that breaks mid-read must not turn a delivered
  * alert into a failure.
  */
-async function drainBounded(response: Response): Promise<{ readonly truncated: boolean }> {
+async function readBoundedText(
+  response: Response,
+  limit: number,
+): Promise<{ readonly text: string; readonly truncated: boolean }> {
   const body = response.body;
-  if (body === null) return { truncated: false };
+  if (body === null) return { text: '', truncated: false };
   const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
   let received = 0;
   try {
     for (;;) {
       const chunk = await reader.read();
-      if (chunk.done) return { truncated: false };
+      if (chunk.done) break;
+      chunks.push(chunk.value);
       received += chunk.value.byteLength;
-      if (received > WEBHOOK_RESPONSE_LIMIT) {
+      if (received > limit) {
         await reader.cancel().catch(() => undefined);
-        return { truncated: true };
+        return { text: Buffer.concat(chunks).toString('utf8'), truncated: true };
       }
     }
   } catch {
     // The status already arrived; a body that broke mid-read is not a different outcome.
-    return { truncated: false };
   }
+  return { text: Buffer.concat(chunks).toString('utf8'), truncated: false };
+}
+
+/**
+ * Drain a response body up to {@link WEBHOOK_RESPONSE_LIMIT}, then cancel the stream.
+ *
+ * The bytes are read (and discarded here) by {@link readBoundedText}: one loop enforces the bound,
+ * so there is one place to audit when this rule changes. `arrayBuffer()`, what this used to call,
+ * had no bound at all.
+ */
+async function drainBounded(response: Response): Promise<{ readonly truncated: boolean }> {
+  const { truncated } = await readBoundedText(response, WEBHOOK_RESPONSE_LIMIT);
+  return { truncated };
+}
+
+/** `body truncated at N bytes`, or nothing, for an operator-facing detail line. */
+function truncationNote(truncated: boolean): string {
+  return truncated ? `body truncated at ${String(WEBHOOK_RESPONSE_LIMIT)} bytes` : '';
+}
+
+/** Add the truncation fact to a detail line, or leave the line exactly as it was. */
+function withTruncation(detail: string, truncated: boolean): string {
+  return truncated ? `${detail} (${truncationNote(true)})` : detail;
 }
 
 export interface DiscordPostOptions {
@@ -918,8 +947,13 @@ async function oneDiscordAttempt(
       signal: AbortSignal.timeout(timeoutMs),
     });
     // Read the body even on success: Discord's 204 has none, an unread response keeps the socket
-    // alive, and a 400's `message` is the only useful part of a refusal.
-    const text = await response.text().catch(() => '');
+    // alive, and a 400's `message` is the only useful part of a refusal. Bounded, because this
+    // transport runs in the same unattended job as the raw one: past `WEBHOOK_RESPONSE_LIMIT` the
+    // text is a prefix, and the truncation is named rather than silently read as "no message" or
+    // "no retry_after".
+    const { text, truncated } = await readBoundedText(response, WEBHOOK_RESPONSE_LIMIT);
+    // A truncated body on a 2xx is irrelevant: Discord sends no body on 204/200, and the status is
+    // the delivery. Truncation must never turn a delivery into a failure.
     if (response.ok) return { kind: 'delivered', status: response.status };
     const detail = withDiscordMessage(`HTTP ${String(response.status)}`, text);
     if (response.status === 429) {
@@ -934,12 +968,26 @@ async function oneDiscordAttempt(
           : retryAfter * 1_000 > RETRY_AFTER_CAP_MS
             ? `retry_after ${String(retryAfter)} s, capped at ${String(RETRY_AFTER_CAP_MS / 1_000)} s`
             : `retry_after ${String(retryAfter)} s`;
-      return { kind: 'rate-limited', status: 429, waitMs, note, detail: `${detail} (${note})` };
+      // The truncation rides in `note`, not only in this attempt's `detail`: `postDiscord` composes
+      // its final line from the note, and that line is where the operator reads why `retry_after`
+      // was missing. The wait itself still comes from the status, never from the body.
+      const noted = truncated ? `${note}; ${truncationNote(true)}` : note;
+      return {
+        kind: 'rate-limited',
+        status: 429,
+        waitMs,
+        note: noted,
+        detail: `${detail} (${noted})`,
+      };
     }
     if (response.status >= 500) {
-      return { kind: 'retryable', status: response.status, detail };
+      return {
+        kind: 'retryable',
+        status: response.status,
+        detail: withTruncation(detail, truncated),
+      };
     }
-    return { kind: 'refused', status: response.status, detail };
+    return { kind: 'refused', status: response.status, detail: withTruncation(detail, truncated) };
   } catch (error) {
     return { kind: 'retryable', status: null, detail: reasonOf(error) };
   }
