@@ -19,14 +19,14 @@ transaction as the verdict that produced it: `task class`, `m`, `k`, `p0`, α, `
 
 **What it does not mean.** Read this before quoting a certificate upward.
 
-| The certificate says      | What is actually true                                                                                                                                                                                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `certified` at α = 0.0755 | _If_ this class truly passes `p0 = 0.95`, about one honest class in thirteen fails certification. α is a property of the operating point, identical for every class; it is **not** a measurement of this class and says nothing about production.                                            |
-| `certified`               | Nothing about the probability of certifying a class that _regresses_. That is β, and **β is not measured**: there is no known-bad corpus to measure it against.                                                                                                                              |
-| The holdout agreed        | The holdout is five rules its author wrote. It can only measure what that author thought of. A green certificate is a floor on class quality, not a proof of correctness — and an operator who controls the holdout store can write a weak-but-discriminating corpus the wall cannot detect. |
-| Current                   | Current _under this policy version and this model id_. Change either and `certificateRecency` reports `stale` (`re-certify: …`); the old row is still true about the old world.                                                                                                              |
-| Certified once            | Certified until the policy or the model changes. A later failing unit does **not** revoke it: `passes` never decreases, so once `passes >= k` the class stays certified in that store. A regression after certification is caught by the unit walls, not by the certificate.                 |
-| `samples = 20`            | Twenty attempts were **accumulated**, not twenty consecutive units of the current tree. The row describes the measurement history, not today's code.                                                                                                                                         |
+| The certificate says      | What is actually true                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `certified` at α = 0.0755 | _If_ this class truly passes `p0 = 0.95`, about one honest class in thirteen fails certification. α is a property of the operating point, identical for every class; it is **not** a measurement of this class and says nothing about production.                                                                                                                                     |
+| `certified`               | Nothing about how often a class that _would regress_ is certified in general — that rate is still unmeasured. β(p), the chance that a class whose true pass rate is `p` is certified, **is** computable (`P(Binomial(m, p) ≥ k)`; table in §6), and the corpus's detection of planted regressions is counted there too: 5 of 5 single-rule, 3 of them invisible to the visible check. |
+| The holdout agreed        | The holdout is five rules its author wrote. It can only measure what that author thought of. A green certificate is a floor on class quality, not a proof of correctness — and an operator who controls the holdout store can write a weak-but-discriminating corpus the wall cannot detect.                                                                                          |
+| Current                   | Current _under this policy version and this model id_. Change either and `certificateRecency` reports `stale` (`re-certify: …`); the old row is still true about the old world.                                                                                                                                                                                                       |
+| Certified once            | Certified until the policy or the model changes. A later failing unit does **not** revoke it: `passes` never decreases, so once `passes >= k` the class stays certified in that store. A regression after certification is caught by the unit walls, not by the certificate.                                                                                                          |
+| `samples = 20`            | Twenty attempts were **accumulated**, not twenty consecutive units of the current tree. The row describes the measurement history, not today's code.                                                                                                                                                                                                                                  |
 
 The offline proof below was run with a **scripted executor**: no model call, no network, no spend.
 Nothing in this runbook was executed against a paid model in this tree's history, and the numbers
@@ -42,6 +42,7 @@ export FACTORY_HOLDOUT_TASK_CLASS="docs-typo-fix"
 export FACTORY_PRISTINE_REPO="/path/to/your-docs.git"            # a mirror git can clone from
 export FACTORY_REPO="your-docs"
 export FACTORY_MODEL_ID="<the model id the attempts run under>"
+export FACTORY_MODEL_API="openai-completions"                     # the proxy's wire shape; see below
 export FACTORY_LIVE_MODEL=1                                       # the consent switch: this run may spend
 export FACTORY_PROXY_BASE_URL="https://…/openai/v1"
 export DSH_BIN="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
@@ -63,6 +64,17 @@ SSH read:
 ```bash
 export CERTIFY_KEY_COMMAND="cat $FACTORY_HOME/secrets/bifrost-key"
 ```
+
+**`FACTORY_MODEL_API=openai-completions` is not optional.** The credential proxy fronts a gateway
+that speaks OpenAI-completions, and the worker's overlay defaults to `anthropic-messages` when the
+variable is absent or misspelt — so leaving it out does not pick a default that happens to work, it
+picks the wrong wire shape. The proxy refuses the request (`401 unknown-token`), the turn comes back
+failed, and the attempt is recorded `unknown`. That is a spent unit: the verdict is kept as evidence,
+but the unit stays `receipted`, `factory run` will not dispatch it again and the exit is
+`factory abort` (§5); `samples` moves by one and `passes` does not, and three such units
+(`m − k + 1`) end the loop. The first live certificate was earned with two units lost this way and
+reads `samples=20 passes=19` because of it. The full account, and the rest of a live run's
+environment, is in [live-model.md](live-model.md#what-a-live-run-also-needs).
 
 ## 2. Materialise the artefacts (free, once)
 
@@ -157,6 +169,14 @@ same task in the same words. The
 `acceptance` oracle is the _visible_ check — the wall re-runs it on the candidate. It is a subset of
 the class rules: see §4 for why that gap is the point.
 
+**`samples` counts distinct base revisions, not runs.** The class count keys every observation by the
+attempt's base commit (`revision: receipt.diff.baseRev`, `packages/wall/src/evaluate.ts`), so two
+units cut from the same commit are one sample however many times they run: reusing a base revision
+moves `samples` by zero. That is why §2 materialises one commit per revision — twenty attempts have to
+be twenty trees or the certificate never reaches `m`. The same key is why an `unknown` verdict is
+expensive: the revision was judged, so it occupies its sample as a non-pass, and resubmitting the
+same commit cannot turn it into a pass.
+
 ## 4. The corpus: five rules, outside the repo
 
 `FACTORY_HOLDOUT_ROOT/<task-class>/<revision>/` holds a `manifest.json` (with `revisionHash`) and
@@ -171,7 +191,7 @@ each an argv plus its expected exit code —
 | `relative-links-resolve` | a `./file.md` link whose target does not exist   |
 | `headings-unique`        | the same heading twice in one document           |
 | `code-fences-balanced`   | an unclosed ` ``` ` fence                        |
-| `no-todo`                | a leftover `TODO` marker                         |
+| `no-todo-markers`        | a leftover `TODO` marker                         |
 
 Each rule fails on **every** base revision and passes on the repair, which is what the wall's
 `maxNonDiscriminating = 0` requires: a scenario that passes the base revision proves nothing about
@@ -179,6 +199,12 @@ the change. The visible check in the repository (`tools/check-docs.mjs`) covers 
 candidate that satisfies it and leaves the link broken is a `holdout_failed` verdict with a green
 visible suite, and that is asserted in
 [`../../e2e/certification/pipeline.test.ts`](../../e2e/certification/pipeline.test.ts).
+
+The detection count — how many planted, visible-green regressions the corpus refuses — is measured in
+[`../../e2e/certification/regressions.test.ts`](../../e2e/certification/regressions.test.ts): five
+planted single-rule regressions, all refused, three of them with a green visible check; two rules
+broken at once, refused with two failing holdout scenarios; and a genuinely clean repair, passed.
+Deleting a rule from the corpus makes that rule's regression pass and the spec go red.
 
 The corpus is never in the prompt, the launch record or the attempt clone, and the verdict
 anonymises the scenario ids (`holdout:01` … `holdout:05`). That is asserted against a real clone in
@@ -200,6 +226,24 @@ The units file may only contain units that have **not** been run: a decided unit
 `factory run` refuses it (`UNIT_ALREADY_TERMINAL` — v1 has no retry path), which the driver treats as
 a terminal error and stops. If you validate one unit by hand first, drop it from the file and let the
 loop measure the remaining ones; the audit's `samples` counts revisions, so 1 + 19 still reaches 20.
+
+**A launch that fails leaves the unit `dispatched`, never `rejected`.** `dispatched` is committed
+before the executor is called, so nothing about a dead worker looks like a verdict. Two shapes, and
+the difference matters:
+
+- _The launch never happened_ — the controller died between commit and launch, or the executor
+  refused. The unit stays `dispatched` with a pending launch effect and an expired lease, and
+  `factory recover` performs the launch; that is what the outbox exists for.
+- _The worker started and died._ The attempt is `running`, and `factory recover` defers it to a person
+  (`a worker may already have run under it … nothing is relaunched`) because retrying could run it a
+  second time.
+
+`factory run` refuses the unit in both shapes (`UNIT_ALREADY_TERMINAL: … only a qualified unit can be
+dispatched`). The way out of the second is `factory abort <unitId> --reason "<what happened>"`: it
+releases the lease, marks the in-flight attempt `aborted`, and makes the unit terminal. An aborted
+unit wrote no verdict, so it is not a sample and `samples` does not move; the same base revision can
+be submitted again as a new unit. Do not delete the unit row to "re-clean" it — that deletes the
+record of a crash.
 
 **The stop condition is arithmetic.** `m - k = 2` failures can still be certified: 18 passes out of
 20 attempts. The **third** failure makes `passes >= k` impossible — at most 17 of 20 can pass — so the
@@ -234,6 +278,47 @@ projection through `certificatesRecency`; a certified row under the running poli
 the class current, and the alert disappears. That is the acceptance for this runbook, and it is
 asserted end-to-end (20 real runs, scripted executor) in
 [`../../e2e/certification/certification.test.ts`](../../e2e/certification/certification.test.ts).
+
+### The other side of the risk: β(p)
+
+α is the chance an honest class is refused. The other error is β(p): the chance that a class whose
+_true_ pass rate is `p` is certified. For `m = 20, k = 18` it is exactly `P(X ≥ 18)` for
+`X ~ Binomial(20, p)` — arithmetic, not a corpus, computed by `certificationRisk()` in
+[`../../packages/wall/src/operating-point.ts`](../../packages/wall/src/operating-point.ts):
+
+| true pass rate `p` | `certifiedAt(p)`       | `refusedAt(p)`         | reading                                                  |
+| ------------------ | ---------------------- | ---------------------- | -------------------------------------------------------- |
+| 0.80               | 0.20608471894847389696 | 0.79391528105152610304 | certified about once in five                             |
+| 0.85               | 0.40489627800743543384 | 0.59510372199256456615 | certified about two times in five                        |
+| 0.90               | 0.67692680518946603571 | 0.32307319481053396429 | certified about 68 times in 100 — the curve is not steep |
+| 0.93               | 0.83899711726135142049 | 0.16100288273864857950 | certified about 84 times in 100                          |
+| 0.95               | 0.92451632621150365702 | 0.07548367378849634297 | the calibrated truth; refused = α, digit for digit       |
+| 0.97               | 0.97899164362165711488 | 0.02100835637834288511 | certified about 98 times in 100                          |
+
+The two columns are each truncated to 20 places, so they can differ from 1 in the last printed digit;
+at `p = p0` the refused column is the published α exactly. Reproduce the table — do not retype it —
+with:
+
+```bash
+node --input-type=module <<'JS'
+import { certificationRisk } from './packages/wall/src/operating-point.ts';
+const risk = certificationRisk();
+for (const p of [0.8, 0.85, 0.9, 0.93, 0.95, 0.97]) {
+  console.log(p, risk.certifiedAt(p).exact, risk.refusedAt(p).exact);
+}
+JS
+```
+
+Every digit above is asserted in `packages/wall/src/operating-point.test.ts`, so the table cannot
+drift from the code. Two readings the arithmetic forces, and neither is what an operator expects:
+
+- **The operating point is a floor on class quality, not a filter against mediocre classes.** A class
+  that truly passes 9 attempts in 10 is still certified about two times in three. `m = 20, k = 18`
+  does not buy "certified means good"; it buys "certified means unlikely to be a 95 %-class fluke".
+- **`k = m` would not remove false refusals.** Requiring all twenty attempts to pass gives
+  α = `1 − 0.95²⁰` = 0.64151407759145776564, because a truly-95 % class fails at least one of twenty
+  attempts about 64 % of the time. α = 0 needs `p0 = 1`, not `k = m`; at `k = m` the gate is stricter,
+  not safer.
 
 If the loop stopped with `failure-budget-exhausted`, the honest reading is that the wall cannot
 distinguish this class at this operating point. The fix is a better holdout or a better task class,
@@ -291,7 +376,19 @@ not more attempts: re-running until it goes green is p-hacking the wall.
 - **Nothing checks that the certificate was earned on a _varied_ corpus.** The artefacts script
   refuses a revision whose planted defects stop discriminating, but a weaker corpus that still
   discriminates is undetectable from the outside — see the next bullet.
-- **β is not measured.** Certifying a class that would regress is possible and unquantified.
+- **β is half computed, half counted — and neither half is a rate for classes in general.** β(p), the
+  chance that a class whose _true_ pass rate is `p` is certified, is arithmetic — `P(Binomial(m, p) ≥ k)`,
+  the table under §6. It says a class that truly fails two attempts in twenty is still certified about
+  68 times in 100, so the operating point is a floor on class quality rather than a filter against
+  mediocre classes. The other half — given a patch that is _actually wrong_ (visible check green, one
+  holdout rule violated), does the wall refuse it? — is a property of the corpus with no closed form,
+  so it is reported as a **count** over planted regressions, never as a rate: 5 of 5 planted single-rule
+  regressions refused (3 of them with a green visible check, so only the holdout could have caught
+  them), 1 of 1 two-rule regression refused, 1 of 1 clean repair passed, in
+  [`../../e2e/certification/regressions.test.ts`](../../e2e/certification/regressions.test.ts).
+  Deleting a rule from the corpus makes its regression pass and that spec go red, which is what makes
+  the count mean something. What remains unmeasured and unmeasurable from one corpus is the detection
+  _rate_ for classes in general.
 - **α is a property of the point, not of the class.** 0.0755 says "an honest class is refused about
   one time in thirteen"; it says nothing about how often a bad class is accepted.
 - **The corpus is written by the same side that is being certified.** It can only measure what its
@@ -330,6 +427,7 @@ call. The driver treats `6` as a stop, not a retry.
 | ----------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | corpus loads, rules are class rules | `pnpm exec vitest run e2e/certification/substrate.test.ts`          | 4 passed — five rules fail every broken tree and pass every repaired tree; the corpus is outside the repo, absent from the prompt/launch record/clone                                                    |
 | pass, reject, and accumulation      | `pnpm exec vitest run e2e/certification/pipeline.test.ts`           | 3 passed — `samples` 1 → 2 → 3 across three revisions; the almost-fixed patch is `holdout_failed` with a green visible suite                                                                             |
+| the wall's detection, as a count    | `pnpm exec vitest run e2e/certification/regressions.test.ts`        | 8 passed — 5 of 5 planted single-rule regressions refused (3 with a green visible check), 1 of 1 two-rule refused, 1 of 1 clean repair passed; deleting a rule from the corpus reddens it                |
 | driver stop conditions              | `pnpm exec vitest run e2e/certification/driver.test.ts`             | 7 passed — including the mutation check: with the budget widened to `m - k + 1` the same plan runs past the third failure                                                                                |
 | the driver over real verdicts       | `pnpm exec vitest run e2e/certification/driver-integration.test.ts` | 1 passed — four dispatches, third failure, fifth unit has no attempt; the substituted credential's sentinel is in no stream and no file                                                                  |
 | the certificate flips               | `pnpm exec vitest run e2e/certification/certification.test.ts`      | 2 passed — 20 real runs: `samples=19 passes=17 insufficient` → `samples=20 passes=18 certified`; `audit --certifications` exits `0` with `uncertifiedUnits: []`; `alerts` no longer reports `CERT_NEVER` |

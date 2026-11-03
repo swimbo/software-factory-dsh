@@ -26,12 +26,30 @@ the worker and never appears in a launch record.
 
 ```bash
 export FACTORY_PROXY_BASE_URL="https://hermes-control.tail4296e6.ts.net/openai/v1"
+export FACTORY_MODEL_API="openai-completions"
 export DSH_BIN="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 ```
 
 `FACTORY_PROXY_BASE_URL` is the gateway the credential proxy fronts. `DSH_BIN` is the installed
 `dsh` the adapter drives. Both are configuration, not secrets; the base URL appears in receipts, the
 key never does.
+
+`FACTORY_MODEL_API` is the wire shape the proxy speaks, and this proxy speaks `openai-completions`.
+It looks optional — the overlay has a default — and its default is `anthropic-messages`, which is the
+wrong API. Leaving the variable out does not "use the default": the worker builds an Anthropic-shaped
+request, the proxy answers `401 unknown-token`, the turn comes back failed, and the attempt is
+recorded `unknown`. That is not a rejected unit you can retry: `unknown` is an honest verdict about an
+attempt the wall could not measure, so the unit stays `receipted`, `factory run` will not dispatch it
+again, and the exit is `factory abort <unit>` — while the revision sits in the class's `samples` as a
+non-pass that resubmitting the same commit cannot turn into one. Two units of the first live
+certification run were spent this way; the certificate that eventually came out reads `samples=20
+passes=19` for exactly that reason. At `m − k + 1 = 3` failures the certification loop stops, so this
+is a configuration mistake that spends from the class's failure budget. See
+[certify-class.md](certify-class.md) for the loop,
+[`../../packages/dsh-adapter/src/overlay.ts`](../../packages/dsh-adapter/src/overlay.ts) for the
+overlay this variable shapes, and
+[`../../packages/core/src/engine.ts`](../../packages/core/src/engine.ts) (`recordVerdict`) for why
+`unknown` leaves the unit where it was.
 
 ## What it costs
 
