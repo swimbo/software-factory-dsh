@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.7.0 — 2026-11-02
+
+An assertion became a measurement, a reason code stopped over-claiming without breaking the verdicts
+already on disk, two unattended HTTP reads got bounds, and the gateway key got a second, better place
+to live.
+
+- **The container + live-model refusal is now pinned by a spec, and the answer is "not on this
+  host".** `e2e/cli/docker/10-internal-bridge.test.ts` measures both directions of the transport that
+  was supposed to fix the conflict — docker `--internal` bridge, credential proxy bound to the
+  gateway: an internal network has no default route (`ENETUNREACH` towards the internet, asserted as an
+  error _kind_, not "refused"), the bridge gateway is not an address macOS can bind
+  (`EADDRNOTAVAIL`, and absent from `os.networkInterfaces()`), while a container-to-container
+  connection on the same network still succeeds and the loopback proxy still answers a real
+  scoped-token request from a normal bridge. The spec is a **platform pin**: green means docker still
+  behaves as the runbook says, not that the combination works. Its native-Linux half is `skipIf` with
+  the measured reason — UNPROVEN on this machine. `packages/credential-proxy` gained the `bindAddress`
+  seam (`boundAddress` reported from the kernel, `EADDRNOTAVAIL` refused by name) that any future
+  transport needs, with the loopback default byte-for-byte unchanged.
+- **`privileged_replay_refused` is additive, so stored evidence keeps parsing.** The old code read as
+  "the operation was never approved" when what the wall observed is "I refuse to replay it". Renaming
+  was never available (`WALL_REASON_CODES` is a closed zod enum; stored verdicts would fail to parse),
+  so the enum gained a member, the refusal site emits it, and `packages/wall/src/verdict-compat.test.ts`
+  pins the old string against a **literal** stored verdict rather than an object built from today's
+  types.
+- **Both webhook reads are bounded.** `postAlerts` and the Discord attempt drained responses with no
+  size bound in a job that runs at 04:00; both now stop at 64 KiB, cancel the stream, and name the
+  truncation in the detail line (`body truncated at 65536 bytes`) instead of hiding it. A truncated
+  `429`/`400` still decides from its status; a truncated `2xx` is still a delivery.
+- **The model key can live in a `0600` file.** `$FACTORY_HOME/secrets/bifrost-key`, read through the
+  same `apps/cli/src/secrets.ts` rule as the alert webhook (open, `fstat` the descriptor, refuse rather
+  than warn, name `chmod 600`). The environment still wins when set. New runbook
+  `docs/runbooks/live-model.md` covers the key, `FACTORY_PROXY_BASE_URL`, `DSH_BIN`, cost, and the
+  honest note that certifying a task class is a shell loop today because a batch driver is not built.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed; test stage **1524 passed | 8
+skipped**. Details in `docs/planning/dark-factory-dsh/evidence/phase-17-round.md`.
+
 ## v0.6.1 — 2026-11-02
 
 The alert channel is real: `factory alerts --notify` now delivers to a Discord channel, and the

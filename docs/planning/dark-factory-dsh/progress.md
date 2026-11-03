@@ -347,3 +347,44 @@ before the kill, and the proof is a deterministic decoy (old filter kills it; ne
 that matter (the operator's store migrated v3 → v4 by opening the CLI; one runbook transcript
 re-spliced from a single capture because the first version quoted values from more than one run) are in
 `evidence/phase-16-round.md` §6.
+
+### Round 9 — the bridge was measured, and it does not exist here (2026-11-02)
+
+**The container + live-model refusal stopped being an opinion.** `e2e/cli/docker/10-internal-bridge.test.ts`
+measures both directions of the transport that was supposed to fix the conflict — docker `--internal`
+bridge with the credential proxy bound to the gateway — and on this host the answer is no: the daemon
+runs in an OrbStack VM, so the gateway (`192.168.107.1`) is not an address macOS can bind
+(`EADDRNOTAVAIL`, absent from `os.networkInterfaces()`), and the internal network has no default route,
+so every host address is `ENETUNREACH` — asserted as an error *kind*, because "no route" and "the proxy
+refused" are different defects. The controls are there to stop the negative being vacuous: the same
+internet probe from the default bridge `CONNECTED`, container→container on the internal network
+`CONNECTED`, and the loopback proxy answering a real scoped-token request from a normal bridge (`401`
+without a token, `200` with one). The spec's header says plainly that green means docker still behaves
+as the runbook says, not that the combination works.
+
+**The seam shipped without the transport.** `packages/credential-proxy` can bind a chosen address
+(`boundAddress` reports what the kernel bound; an address the host does not own is refused with
+`EADDRNOTAVAIL` in the message), and nothing calls it with a non-default yet — because building the
+caller would have meant either code whose spec skips on the only machine this tree runs on
+(native-Linux bridge) or moving the gateway key into a sidecar container, which is a different
+credential boundary from ADR-007. Both are documented with their prices in
+`docs/runbooks/worker-container.md` instead of being half-built.
+
+**Three smaller things, each with a mutation check.** `privileged_replay_refused` is added to the closed
+reason enum (the old string stays forever so stored verdicts parse; a spec pins a *literal* stored
+verdict so the compatibility claim cannot drift). `postAlerts` and the Discord attempt both stop at
+64 KiB and cancel the stream, naming the truncation, in a job that runs unattended at 04:00. And the
+gateway key can live at `$FACTORY_HOME/secrets/bifrost-key`, read through the same open-then-`fstat`
+rule as the alert webhook.
+
+**A disclosure worth keeping.** While checking whether a key was available for the certification
+round I tested `launchctl getenv … && echo set` — which exits 0 with empty output when unset — believed
+it, wrote a 0-byte key file, and told the operator no key existed. It never was missing: it is on
+`hermes-control`, `0600`, 43 bytes, read per command over SSH, exactly as the phase-9b evidence says.
+Verified afterwards (`models` → 200), the empty file deleted, and the lesson recorded in
+`evidence/phase-17-round.md` §4 rather than smoothed over.
+
+**Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1522 passed | 8 skipped (1530)** across
+102 files, every `@docker` spec run (`docs/verification/2026-11-03T02-47-40Z/`), and the hazard from the
+previous round is now written into the index: the same command reports `0 failed` with the docker
+specs *skipped* when the daemon is not running, so read the skip count.

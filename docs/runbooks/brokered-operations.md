@@ -178,11 +178,17 @@ With the decision recorded, the same shape of run reaches a receipt and the comm
 exit=5
 ```
 
-Note what did **not** change: the verdict is still `unknown`, and `privileged_unbrokered` is still
-listed among the reasons. A decision authorises the _operation_, not the _promotion_ — the wall has
-no evidence that the operation was measured against an oracle, so it will not pass the unit on the
-strength of a signature. `needsPerson: true` is the honest end state; `factory status <unit>` is
-where a person decides next.
+Note what did **not** change: the verdict is still `unknown`, and a privileged replay is still refused
+and still listed among the reasons. A decision authorises the _operation_, not the _promotion_ — the
+wall has no evidence that the operation was measured against an oracle, so it will not pass the unit
+on the strength of a signature. `needsPerson: true` is the honest end state; `factory status <unit>`
+is where a person decides next.
+
+The transcript above was captured at `v0.6.0` and prints `privileged_unbrokered`. From `v0.7.0` the
+same run prints `privileged_replay_refused` instead: the old code read as "the operation was never
+approved", while what the wall observed is "I refuse to replay it". The old string is kept in the
+closed enum so that verdicts already on disk still parse, and it is not rewritten in a capture that
+did happen — a transcript edited to match today's code is no longer a transcript.
 
 A second run presenting the same decision is refused:
 

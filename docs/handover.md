@@ -7,8 +7,13 @@ is the source of truth for what is real, and where a plan promised something thi
 the audit says so and this document repeats it rather than smoothing it over. One caveat about the
 audit: its §10 addendum predates `36e2ddd`, so it still records the worker container and E2E-45 as
 `UNKNOWN`, while `e2e/cli/docker/08-worker-container.test.ts` and `09-recover-sweep.test.ts` now measure
-them (ran here: 3 + 2 specs passed). The audit's earlier sections are history and are deliberately not rewritten; where this
-document disagrees with §10, what follows was measured on this tree and the command is named.
+them (ran here: 3 + 2 specs passed). The audit's earlier sections are history and are deliberately
+not rewritten; where this document disagrees with §10, what follows was measured on this tree and the
+command is named. One assertion that used to sit in that category is now a measurement: the worker
+container cannot be combined with a live model here for a reason that is pinned by
+`e2e/cli/docker/10-internal-bridge.test.ts` (docker's `--internal` gateway is VM-internal and
+un-bindable from macOS; that network is `ENETUNREACH` towards every host address), not merely by a
+comment in `apps/cli/src/context.ts`.
 
 ## What to run before touching anything
 
@@ -134,9 +139,11 @@ and the reason each one has:
   (`e2e/cli/default/19-gate-decisions.test.ts`: refused → authorised once → replay refused;
   runbook `docs/runbooks/brokered-operations.md`). What is still missing: the **wall** is not a
   consumer — it measures a candidate and does not act on what it measures, so it replays with no
-  decision, refuses a privileged argv, and reports `privileged_unbrokered` even when the launch was
-  authorised (the code names what happened at replay; the verdict stays `unknown` because a decision
-  is not an oracle); a real `dsh` turn's own tool calls are an agent-reported artefact and never reach
+  decision, refuses a privileged argv, and reports `privileged_replay_refused` even when the launch
+  was authorised (the code names what happened at replay; the verdict stays `unknown` because a
+  decision is not an oracle — verdicts stored before v0.7.0 carry the older `privileged_unbrokered`,
+  which stays in the closed enum so that evidence still parses); a real `dsh` turn's own tool calls
+  are an agent-reported artefact and never reach
   the broker (ADR-006); and there is no `gate revoke`, no key registry beyond the promote lookup
   order, and no rule for arbitrary destructive verbs beyond the wall's knowingly partial denylist.
 - **`privileged_decisions` holds consumption markers, not the decisions.** A `GateDecision` is the

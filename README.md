@@ -168,7 +168,9 @@ request` is read-only and prints the normalised operation, the exact payload to 
   runs: refused with exit 5, authorised exactly once, refused again as a replay —
   `docs/runbooks/brokered-operations.md` is the operator's transcript. **Still not built:** the wall
   is not a consumer — it measures a candidate and must not act on what it measures, so an authorised
-  operation still ends in an `unknown` verdict with reason `privileged_unbrokered`, and a decision
+  operation still ends in an `unknown` verdict, with reason `privileged_replay_refused` (verdicts
+  stored before v0.7.0 carry `privileged_unbrokered`, which is kept forever so that evidence still
+  parses — both name the refusal, not the operation), and a decision
   authorises an operation, not a promotion; a real `dsh` turn's own tool calls are kept as an
   agent-reported artefact (`packages/dsh-adapter/src/executor.ts`) and never reach the broker
   (ADR-006); there is no `gate revoke` and no key registry beyond the promote lookup order; and there
@@ -246,7 +248,17 @@ request` is read-only and prints the normalised operation, the exact payload to 
   `CONFIGURATION_CONFLICT` (a missing daemon or image is a different exit 8,
   `CONTAINER_UNAVAILABLE`, with the `docker build` line; neither falls back to a host process); and
   network isolation is pinned by the argv spec and not by a container-side egress probe (the wall's
-  E2E-43 covers egress, with a host control).
+  E2E-43 covers egress, with a host control). The reason that pair cannot be combined is now
+  **measured, not asserted** (`e2e/cli/docker/10-internal-bridge.test.ts`): the transport that would
+  fix it — docker `--internal` bridge, proxy bound to the gateway — cannot exist on this host,
+  because the daemon runs in a VM whose bridge gateway is not an address macOS can bind
+  (`EADDRNOTAVAIL`) and an `--internal` network is `ENETUNREACH` towards every host address, while a
+  container-to-container connection on the same network still succeeds. The spec is a platform pin,
+  not a feature: green means docker still behaves as the runbook says. Two designs are documented and
+  unbuilt — the same bridge on native-Linux docker (viable there, needs a Linux host or CI plus
+  launcher wiring that does not exist; its spec half is `skipIf`/UNPROVEN here), and a proxy **sidecar
+  container** on an internal plus a NAT network (works here in principle, but moves the gateway key
+  into a container, a different credential boundary from ADR-007).
 - **DSH's sandbox is not a security boundary**, and is not treated as one anywhere.
 - **No ACP worker.** The adapter drives `dsh --profile headless` one-shot turns and reads NDJSON;
   the agent-client-protocol path is not implemented, so "one-shot **or** ACP workers" is delivered as

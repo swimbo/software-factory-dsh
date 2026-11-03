@@ -7,8 +7,8 @@ stated rather than implied.
 
 The whole-tree gate at the time of writing: `bash scripts/verify.sh` → **7 passed, 1 skipped, 0 failed**
 (preflight, typecheck, lint, format:check, test, build, panel; `live-model` skipped without a key), test
-stage **1501 passed | 7 skipped (1508)** across 100 passed files, measured at `5b9d6c3`
-(`docs/verification/2026-11-03T02-17-45Z/`), with all three `@docker` suites running — note that the
+stage **1522 passed | 8 skipped (1530)** across 102 passed files, measured at `8471435`
+(`docs/verification/2026-11-03T02-47-40Z/`), with all `@docker` suites running — note that the
 same command reports `0 failed` with those eleven specs *skipped* when the Docker daemon is stopped, so
 read the skip count, not only the failure count. Every run writes
 `docs/verification/<run-id>/{verify.log,summary.json}`, and the summary names the commit it measured.
@@ -35,6 +35,7 @@ read the skip count, not only the failure count. Every run writes
 | 14    | the fixes                                                                                                  | `git log` from `b92f5cc` onward; gap table in `findings.md > Phase 14`                               | `bash scripts/verify.sh`                                          |
 | 15    | alerts, the ND3 ceiling through the real executor, the worker's container, the recover-side orphan sweep, and the docs truth pass | [`phase-15-round.md`](phase-15-round.md) — gate id, the 11 docker specs, the mutation check, and what is still not built | `bash scripts/verify.sh`; `npx vitest run e2e/cli/docker`         |
 | 16    | `factory gate` (mint/verify a decision, one-use across processes, schema v4), `alerts --notify`, `CONFIGURATION_CONFLICT`, and the docker specs' container-ownership fix | [`phase-16-round.md`](phase-16-round.md) — the gate table incl. the two red runs, the three-run proof, nine mutation checks, and the disclosures (store migration v4, re-spliced transcript) | `bash scripts/verify.sh`; `npx vitest run e2e/cli/default/19-gate-decisions.test.ts apps/cli/src/alerts.test.ts` |
+| 17    | the `--internal` bridge measured (impossible on macOS/OrbStack, viable on native Linux), the additive `privileged_replay_refused`, bounded webhook bodies, and the key in a `0600` file | [`phase-17-round.md`](phase-17-round.md) — the both-directions measurement table, the three mutation checks, and the disclosure about the "no key" scare | `bash scripts/verify.sh`; `npx vitest run e2e/cli/docker packages/credential-proxy` |
 
 ## The four never-regress controls, and where each is proven
 
