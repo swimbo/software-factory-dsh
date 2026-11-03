@@ -442,6 +442,8 @@ spec that goes red when the fix is reverted.
 
 ## Related
 
+- [certify-class-test-repair.md](certify-class-test-repair.md) — the second class (`test-repair`):
+  a class whose cheap repair is _green_, and the corpus that refuses it.
 - [live-model.md](live-model.md) — the key, the gateway and the cost of a live turn.
 - [certificate-expired.md](certificate-expired.md) — a certificate that exists but is stale.
 - [budget-envelope-refusal.md](budget-envelope-refusal.md) — exit `6` from the loop.
