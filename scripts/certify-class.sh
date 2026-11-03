@@ -260,7 +260,10 @@ while IFS= read -r raw_unit || [ -n "$raw_unit" ]; do
     break
   fi
 
-  credential="$(read_credential 2>/dev/null)"
+  # `</dev/null` again, and for the same reason as the run below: `ssh` reads stdin, and the
+  # loop's stdin is the units file. Without this the key read eats the plan, which is exactly the
+  # failure the first two live attempts reported as `units-exhausted` after a single unit.
+  credential="$(read_credential 2>/dev/null </dev/null)"
   credential_status=$?
   if [ "$credential_status" -ne 0 ] || [ -z "$credential" ]; then
     stop_reason="credential-unavailable"
@@ -283,8 +286,12 @@ while IFS= read -r raw_unit || [ -n "$raw_unit" ]; do
   # never its argv, so `ps` cannot see it. Spelled out rather than routed through the `factory`
   # helper on purpose: a prefix assignment on a *function* call is a bash quirk that the next
   # reader would have to know about, and this line is the one that must be obviously correct.
+  # `</dev/null` is load-bearing, not hygiene: the loop's stdin *is* the units file, and a child
+  # that reads a byte of it silently swallows the rest of the plan. The first live run of this
+  # driver measured exactly one unit and reported `units-exhausted` with eighteen lines still in
+  # the file, because the worker's own `dsh` consumed the units-file descriptor it inherited.
   BIFROST_API_KEY="$credential" "$NODE_BIN" "$FACTORY_ENTRY" "${run_args[@]}" \
-    >"$stdout_file" 2>"$stderr_file"
+    >"$stdout_file" 2>"$stderr_file" </dev/null
   code=$?
   unset credential
 
