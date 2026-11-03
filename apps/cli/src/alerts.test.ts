@@ -711,6 +711,15 @@ async function loopback(
   };
 }
 
+/**
+ * Every direct `deliverNotification` spec gets a throwaway factory home. The transport reads the
+ * operator's webhook secret from `$FACTORY_HOME/secrets/alerts-webhook`; a spec that let that resolve to
+ * the real `~/.factory` could read — or page — a real channel.
+ */
+function notifyHome(): string {
+  return tempHome('factory-notify-home-');
+}
+
 describe('the webhook POST (loopback only)', () => {
   it('[a successful delivery is exactly one POST of the alerts.v1 document]', async () => {
     const recorder = await loopback();
@@ -811,6 +820,7 @@ describe('deliverNotification over the webhook', () => {
       const document = alertDocument([certNever()]);
       const lines: string[] = [];
       const outcome = await deliverNotification(document, EXIT.integrity, {
+        home: notifyHome(),
         env: { [WEBHOOK_ENV]: `${recorder.url}?token=super-secret&channel=factory` },
         platform: 'darwin',
         warn: (line) => lines.push(line),
@@ -837,6 +847,7 @@ describe('deliverNotification over the webhook', () => {
     try {
       const lines: string[] = [];
       const outcome = await deliverNotification(alertDocument([certNever()]), EXIT.integrity, {
+        home: notifyHome(),
         env: { [WEBHOOK_ENV]: recorder.url },
         platform: 'darwin',
         warn: (line) => lines.push(line),
@@ -858,6 +869,7 @@ describe('deliverNotification over the webhook', () => {
     const shim = osascriptShim();
     const lines: string[] = [];
     const outcome = await deliverNotification(alertDocument([certNever()]), EXIT.integrity, {
+      home: notifyHome(),
       env: { [WEBHOOK_ENV]: 'ftp://example.invalid/hook?token=super-secret', PATH: shim.path },
       platform: 'darwin',
       warn: (line) => lines.push(line),
@@ -878,6 +890,7 @@ describe('deliverNotification over the webhook', () => {
       },
     };
     const outcome = await deliverNotification(alertDocument([certNever()]), EXIT.integrity, {
+      home: notifyHome(),
       env: exploding,
       platform: 'darwin',
       warn: (line) => lines.push(line),
@@ -894,6 +907,7 @@ describe('deliverNotification over the webhook', () => {
     try {
       const lines: string[] = [];
       const outcome = await deliverNotification(alertDocument([]), EXIT.ok, {
+        home: notifyHome(),
         env: { [WEBHOOK_ENV]: recorder.url },
         platform: 'darwin',
         warn: (line) => lines.push(line),
@@ -963,6 +977,7 @@ describe('the local transport (a fake osascript on PATH)', () => {
     const document = alertDocument([certNever()]);
     const lines: string[] = [];
     const outcome = await deliverNotification(document, EXIT.integrity, {
+      home: notifyHome(),
       env: { PATH: shim.path, [WEBHOOK_ENV]: '' },
       platform: 'darwin',
       warn: (line) => lines.push(line),
@@ -988,6 +1003,7 @@ describe('the local transport (a fake osascript on PATH)', () => {
     const shim = osascriptShim({ exitCode: 1, stderr: 'osascript refused: not permitted' });
     const lines: string[] = [];
     const outcome = await deliverNotification(alertDocument([certNever()]), EXIT.integrity, {
+      home: notifyHome(),
       env: { PATH: shim.path, [WEBHOOK_ENV]: '' },
       platform: 'darwin',
       warn: (line) => lines.push(line),
@@ -1006,6 +1022,7 @@ describe('the local transport (a fake osascript on PATH)', () => {
     const emptyDir = mkdtempSync(join(tmpdir(), 'factory-no-osascript-'));
     const lines: string[] = [];
     const outcome = await deliverNotification(alertDocument([certNever()]), EXIT.integrity, {
+      home: notifyHome(),
       env: { PATH: emptyDir, [WEBHOOK_ENV]: '' },
       platform: 'darwin',
       warn: (line) => lines.push(line),
@@ -1023,6 +1040,7 @@ describe('the local transport (a fake osascript on PATH)', () => {
     chmodSync(bin, 0o755);
     const started = performance.now();
     const outcome = await deliverNotification(alertDocument([certNever()]), EXIT.integrity, {
+      home: notifyHome(),
       env: { PATH: `${dir}:/usr/bin:/bin`, [WEBHOOK_ENV]: '' },
       platform: 'darwin',
       warn: () => undefined,
@@ -1038,6 +1056,7 @@ describe('the local transport (a fake osascript on PATH)', () => {
     const shim = osascriptShim();
     const lines: string[] = [];
     const outcome = await deliverNotification(alertDocument([certNever()]), EXIT.integrity, {
+      home: notifyHome(),
       env: { PATH: shim.path, [WEBHOOK_ENV]: '' },
       platform: 'linux',
       warn: (line) => lines.push(line),

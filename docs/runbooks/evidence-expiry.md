@@ -56,33 +56,80 @@ log always holds the facts even when the channel fails:
 factory alerts --notify; echo $?
 ```
 
-| configuration                    | channel | what happens                                                                                                                              |
-| -------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| no `FACTORY_ALERTS_WEBHOOK_URL`  | local   | one macOS notification through `osascript`, plus one `NOTIFY  DELIVERED` line on stderr                                                   |
-| `FACTORY_ALERTS_WEBHOOK_URL` set | webhook | one POST of the same `alerts.v1` JSON `--json` prints (5 s timeout, one retry); the `NOTIFY` line reports the status and scheme+host only |
-| a host that is not macOS         | local   | a reported no-op (`NOTIFY  SKIPPED`, reason included), never an error that hides the alert                                                |
+| configuration                     | channel | what happens                                                                                                                              |
+| --------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| a Discord webhook URL (see below) | Discord | one POST of Discord's `content`/`embeds` body to the channel; `#dsh` is the operator's                                                    |
+| any other webhook URL             | webhook | one POST of the same `alerts.v1` JSON `--json` prints (5 s timeout, one retry); the `NOTIFY` line reports the status and scheme+host only |
+| no webhook configured             | local   | one macOS notification through `osascript`, plus one `NOTIFY  DELIVERED` line on stderr                                                   |
+| a host that is not macOS          | local   | a reported no-op (`NOTIFY  SKIPPED`, reason included), never an error that hides the alert                                                |
 
 What is delivered: one line per **integrity** alert code (deduplicated — a per-class code names up to
 five classes and says `+N more`), the anchor summarised, and the next command. Nothing is sent when
 there is nothing to report: exit `0` is silent, and a warning-severity alert is logged but never
 notified — paging for a spend ceiling is how exit-9 pages stop being read.
 
+### The operator's channel is Discord (`#dsh`)
+
+The daily alert set goes to the operator's Discord channel through its webhook. Discord does not accept
+the raw `alerts.v1` document, so a Discord URL gets a body Discord accepts:
+
+- `content` is one summary line — `factory alerts — 1 integrity, anchor fresh` — and every integrity
+  alert becomes an **embed**: the alert code is the title; the subject, the reason and the literal
+  `next:` command are the description. **Red** means expired or untrustworthy evidence (exit `9`); an
+  **unreachable anchor** gets its own **amber** card (exit `8`) that says nothing is known, because an
+  unreachable anchor is not a missing one.
+- **Nothing in the message can ping anyone.** Every body carries `allowed_mentions: { parse: [] }`, so
+  alert text that happens to contain `@here`, `@everyone` or a role mention is displayed as text and
+  never notifies a person. A spec asserts this on every payload, including a truncated one.
+- **Discord's limits are enforced here, honestly.** At most **10 embeds** and **6000 characters** per
+  message, content within 2000. When the alerts do not fit, the message says so — `…and 2 more, see
+~/.factory/alerts.log` — instead of dropping them silently. The full set is always in the log the
+  job appends to.
+- **Responses.** `204 No Content` (or `200`) is a delivery. A `400` is a failure, reported with
+  Discord's own `message` (never the webhook token). A `429` is retried exactly **once** after
+  `retry_after`, capped at **5 s** so the 04:00 job does not sleep for a minute; a second `429` is a
+  reported failure. A redirect is refused, not followed, and the HTTP timeout is bounded.
+
+### The webhook URL is a credential
+
+A Discord webhook URL is a secret: anyone who holds it can post to the channel. So it is read from a
+file, in this order:
+
+1. `FACTORY_ALERTS_WEBHOOK_URL` — a one-off or a test override.
+2. `FACTORY_ALERTS_WEBHOOK_URL_FILE` — a path to a file holding the same URL.
+3. `$FACTORY_HOME/secrets/alerts-webhook` — the operator's normal configuration. The 04:00 launchd job
+   sets `FACTORY_HOME=/Users/bo/.factory`, so this is `~/.factory/secrets/alerts-webhook`, and nothing
+   in the plist has to change when the channel does.
+
+The file must be **`chmod 600`**. A file that group or world can read is **refused, not used**: the
+`NOTIFY  FAILED` line names the mode and the fix (`chmod 600 <path>`), because reading a secret from a
+0644 file is how it ends up in a backup. A missing or empty file is reported too — never silently
+replaced by the local channel, which would leave the operator believing the webhook is wired. The URL
+itself is never printed: the log line keeps only the scheme and host.
+
+```bash
+mkdir -p ~/.factory/secrets
+printf '%s\n' 'https://discord.com/api/webhooks/…' > ~/.factory/secrets/alerts-webhook
+chmod 600 ~/.factory/secrets/alerts-webhook   # the same command the refusal names
+ls -l ~/.factory/secrets/alerts-webhook       # expect -rw-------, owned by you
+```
+
 What is not: the exit code. `0`, `8` and `9` still describe the evidence; a failed delivery prints
 `NOTIFY  FAILED — … (the exit code describes the evidence, not the transport)` and changes nothing else.
 The notification line never carries a webhook's path or query string — a webhook URL is usually a
-credential, so only the scheme and host are logged. The URL itself lives in the launchd plist or your
-shell, never in a unit spec or the ledger.
+credential, so only the scheme and host are logged. The URL itself lives in the 0600 file above, never
+in a unit spec, the ledger, or the plist.
 
 ### What a notification does and does not buy
 
 **It buys:** when `factory alerts` finds something, a person who opted in is told — on this machine's
-screen, or at an endpoint they configured. That is the whole claim. It is not an escalation path and it
-is not on-call: there is nobody to escalate to, and this file does not pretend otherwise.
+screen, or in the Discord channel the webhook points at. That is the whole claim. It is not an escalation
+path and it is not on-call: there is nobody to escalate to, and this file does not pretend otherwise.
 
 **It does not buy:**
 
-- **A lost notification is lost.** There is one attempt, at most one retry for the POST, and no queue
-  after the process exits. The next scheduled run is the retry.
+- **A lost notification is lost.** There is one attempt, at most one retry for the POST (and one for a
+  429), and no queue after the process exits. The next scheduled run is the retry.
 - **A host asleep at 04:00 is quiet until it wakes.** The job is a `StartCalendarInterval`; per
   `launchd.plist(5)`, launchd runs a calendar occurrence missed while the machine was asleep the next
   time it wakes, and coalesces several missed occurrences into one run (cron would skip them). The
@@ -93,13 +140,14 @@ is not on-call: there is nobody to escalate to, and this file does not pretend o
   Not Disturb, or a long body that gets truncated: the local path reports a non-zero `osascript` exit
   when it can, but a notification macOS drops after accepting cannot be detected from here. The screen
   is a hint; the log is the record, and the log carries every alert line in full.
-- **A 2xx is a delivery, not a receipt.** It means the endpoint accepted the POST; it says nothing about
-  whether a human read it. A 4xx is reported and not retried (the same request would be refused again);
-  a 5xx or a transport failure gets the one retry. What the endpoint does with the JSON — a chat message,
-  a phone push, a ticket — is the endpoint's business, not something this tool can claim.
-- **The plist is not a vault.** `FACTORY_ALERTS_WEBHOOK_URL` would sit in
-  `~/Library/LaunchAgents/ai.factory.alerts.plist` in plain text; use a URL you are willing to have on
-  this host. The log redaction protects the log, not the file.
+- **A 2xx is a delivery, not a receipt.** It means the endpoint accepted the POST — a Discord `204`
+  means the message is in the channel. It says nothing about whether a human read it. A Discord `400`
+  or `429` is reported and not retried beyond the single retry; what the channel does with the message
+  after accepting it is the channel's business, not something this tool can claim.
+- **The secret file is not a vault either.** `chmod 600` keeps other users of this host out; it does
+  not keep out root, a backup, or a screenshot. `FACTORY_ALERTS_WEBHOOK_URL` in
+  `~/Library/LaunchAgents/ai.factory.alerts.plist` would be readable by every user on the host — that is
+  why the URL belongs in the 0600 file instead. The log redaction protects the log, not the file.
 
 ## The scheduled run
 
@@ -117,12 +165,15 @@ launchctl kickstart -p gui/$(id -u)/ai.factory.alerts                    # run i
 tail -n 40 ~/.factory/alerts.log
 ```
 
-The job delivers to this machine's notification centre until you give it an endpoint. To use a webhook
-instead, uncomment the `FACTORY_ALERTS_WEBHOOK_URL` block in `EnvironmentVariables` (it is shipped as a
-comment, unset) and reload the agent; the local notification is not used as a fallback when a URL is
-configured, because a channel that silently substitutes itself hides the broken configuration it was
-supposed to report. To go back to log-only, delete ` --notify` from `ProgramArguments` and reload; a spec
-asserts that the same run without the flag prints and logs and delivers nothing.
+The job delivers to this machine's notification centre until you give it an endpoint, then to that
+endpoint. The endpoint is the 0600 secret file described above — put the URL in
+`$FACTORY_HOME/secrets/alerts-webhook` and the next run uses it, with no plist edit and no reload. The
+`FACTORY_ALERTS_WEBHOOK_URL` block in `EnvironmentVariables` (shipped as a comment, unset) still works
+as a one-off, but a URL in the plist is readable by every user of the host, which is why the file is the
+documented default. The local notification is not used as a fallback when a URL is configured, because
+a channel that silently substitutes itself hides the broken configuration it was supposed to report. To
+go back to log-only, delete ` --notify` from `ProgramArguments` and reload; a spec asserts that the same
+run without the flag prints and logs and delivers nothing.
 
 `launchctl print gui/$(id -u)/ai.factory.alerts | grep 'last exit code'` shows what the last run
 answered — `9` is a normal answer, not a broken job (`NOTIFY  FAILED` is not the exit code, and does not
