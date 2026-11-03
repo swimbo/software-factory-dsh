@@ -103,13 +103,22 @@ function certificateReport(ctx: VerbInput['ctx']): {
     policyVersion: ctx.policyVersion,
     modelId: (ctx.env['FACTORY_MODEL_ID'] ?? '').trim() || null,
   };
+  // The projection is the only place a certificate exists. `mapVerdict` deliberately strips
+  // `certification`/`modelId` from the verdict body (the promotion signature is computed over that
+  // object, so its shape must not grow), which means asking the *verdict* whether it carried a
+  // certificate answered "no" for every unit ever promoted — after an honest certification the
+  // report still said "STALE OR NEVER CERTIFIED 20 of 21 entries" and `audit --certifications`
+  // exited 9 forever. The question is asked of the projection instead: did this verdict leave a
+  // certificate row behind?
+  const certifiedVerdicts = new Set<string>();
+  for (const row of rows ?? []) certifiedVerdicts.add(row.verdictId);
   const uncertifiedUnits: string[] = [];
   for (const state of ['verified', 'promoted'] as const) {
     for (const unit of ctx.store.listUnits({ state })) {
       const verdict = ctx.store.latestVerdictForUnit(unit.unitId);
       // No verdict at all is the stronger version of the same fact: a verified unit whose
       // evidence the store cannot produce has no certificate either.
-      if (verdict === null || verdict.verdict.certification === undefined) {
+      if (verdict === null || !certifiedVerdicts.has(verdict.verdictId)) {
         uncertifiedUnits.push(unit.unitId);
       }
     }
