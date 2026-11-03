@@ -44,8 +44,14 @@ export const REPO_ID = 'docs-fixture';
 /** The corpus revision. Opaque to the wall; it exists so a verdict can say what it measured. */
 export const HOLDOUT_REVISION = 'h-docs-typo-2026-11-02';
 
-/** The visible check the worker may read and run. Deliberately a *subset* of the rulebook. */
-const VISIBLE_CHECK = `#!/usr/bin/env node
+/**
+ * The visible check the worker may read and run. Deliberately a *subset* of the rulebook.
+ *
+ * Exported because the persistent artefacts (`scripts/certification-artifacts.sh`) must ship the
+ * *same* visible oracle as this fixture: two different "visible subset"s would make the two
+ * substrates different task classes wearing one name.
+ */
+export const VISIBLE_CHECK = `#!/usr/bin/env node
 /**
  * The repository's own documentation check — the part of the rulebook the worker can see.
  *
@@ -89,8 +95,17 @@ console.log(\`FACTORY_SUMMARY \${JSON.stringify(summary)}\`);
 process.exit(summary.exitCode);
 `;
 
-/** The five rule scripts, as strings so each corpus revision carries its own copy. */
-const RULES: readonly { readonly id: string; readonly file: string; readonly source: string }[] = [
+/**
+ * The five rule scripts, as strings so each corpus revision carries its own copy.
+ *
+ * Exported for the same reason as `VISIBLE_CHECK`: the artefacts corpus and this fixture must be
+ * the same rulebook, or the certificate would be about two different classes.
+ */
+export const HOLDOUT_RULES: readonly {
+  readonly id: string;
+  readonly file: string;
+  readonly source: string;
+}[] = [
   {
     id: 'no-doubled-words',
     file: 'no-doubled-words.mjs',
@@ -437,7 +452,7 @@ The options for fixture ${index.toString()} are listed below.
 
 /** The holdout scenario list, in the frozen `HoldoutScenario` shape. */
 export function holdoutScenarios(revisionDir: string): readonly HoldoutScenario[] {
-  const scenarios: HoldoutScenario[] = RULES.map((rule) => ({
+  const scenarios: HoldoutScenario[] = HOLDOUT_RULES.map((rule) => ({
     id: rule.id,
     taskClass: TASK_CLASS,
     argv: ['node', join(revisionDir, 'rules', rule.file)],
@@ -446,11 +461,20 @@ export function holdoutScenarios(revisionDir: string): readonly HoldoutScenario[
   return [...scenarios].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-/** Write `<root>/<taskClass>/<revision>/manifest.json` and the rule scripts beside it. */
-export function writeHoldoutCorpus(holdoutRoot: string): string {
-  const revisionDir = join(holdoutRoot, TASK_CLASS, HOLDOUT_REVISION);
+/**
+ * Write `<root>/<taskClass>/<revision>/manifest.json` and the rule scripts beside it.
+ *
+ * `revision` is the corpus token recorded on every verdict. The artefacts corpus passes its own
+ * token so a store measured against the synthetic fixture and a store measured against the real
+ * documentation tree can never be mistaken for each other: same rules, different revision.
+ */
+export function writeHoldoutCorpus(
+  holdoutRoot: string,
+  revision: string = HOLDOUT_REVISION,
+): string {
+  const revisionDir = join(holdoutRoot, TASK_CLASS, revision);
   mkdirSync(join(revisionDir, 'rules'), { recursive: true });
-  for (const rule of RULES) {
+  for (const rule of HOLDOUT_RULES) {
     writeFileSync(join(revisionDir, 'rules', rule.file), rule.source);
   }
   const scenarios = holdoutScenarios(revisionDir);
@@ -458,7 +482,7 @@ export function writeHoldoutCorpus(holdoutRoot: string): string {
     join(revisionDir, 'manifest.json'),
     `${JSON.stringify(
       {
-        revision: HOLDOUT_REVISION,
+        revision,
         taskClass: TASK_CLASS,
         scenarios,
         revisionHash: contentHash(hashableScenarios(scenarios)),
