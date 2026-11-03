@@ -76,26 +76,24 @@ export interface QualifierPolicy {
    * is a privilege it cannot verify, and that is not a policy choice.
    */
   readonly privilegedBrokering: 'off' | 'on';
-  /**
-   * How many attempts may be in flight at once, across the whole factory.
-   *
-   * "In flight" means a worker may be running: an attempt in `launching`/`running`, or a
-   * unit holding a live lease for such an attempt. `ambiguous` is deliberately **not** in
-   * flight — it is the state a crashed attempt leaves, and a ceiling that counted it would
-   * stop the factory until a person reconciled, which is a much worse failure than the
-   * overlap the ceiling prevents.
-   *
-   * The ceiling refuses; it does not queue. A queue would be a promise about *when* work
-   * happens, and this build has no scheduler to keep that promise.
-   */
-  readonly maxConcurrentAttempts: number;
-  /**
-   * How many walls may measure at once. Wall runs are the expensive half — a clone, a
-   * base/candidate pair and a pinned suite per unit — so the operator can cap them below
-   * the attempt ceiling.
-   */
-  readonly maxConcurrentWalls: number;
 }
+
+/*
+ * The dispatch ceilings are **not** policy.
+ *
+ * They once lived on `QualifierPolicy` as `maxConcurrentAttempts`/`maxConcurrentWalls`, and
+ * because `currentPolicyVersion` hashes the whole object, an operator who raised a ceiling to
+ * run two attempts at once minted a certificate under a *different* `policyVersion` than the
+ * default environment would ever reproduce — so the perfectly-current certificate read as
+ * `CERT_STALE` every morning, forever. A concurrency ceiling changes how much work may run at
+ * once, not what a pass means, so it must not change the identity of the rules.
+ *
+ * The ceilings now live in the CLI's `OperatorLimits` (`apps/cli/src/context.ts`), read from
+ * the same environment variables but never hashed into `currentPolicyVersion`. The historical
+ * digests produced while they *were* part of the object are recognised by
+ * {@link legacyPolicyVersions}, so evidence recorded before the split stays comparable to the
+ * same rules recorded after it.
+ */
 
 /**
  * The shipped policy. Deliberately boring and deliberately public: an operator
@@ -115,8 +113,6 @@ export const DEFAULT_POLICY: QualifierPolicy = Object.freeze({
   maxFiles: 25,
   restateOverlapMin: 0.5,
   privilegedBrokering: 'off',
-  maxConcurrentAttempts: 1,
-  maxConcurrentWalls: 1,
   weights: Object.freeze({
     intent_derivability: 30,
     reversibility: 20,
@@ -156,12 +152,6 @@ function requireCount(name: string, value: number, minimum: number): void {
  */
 export function assertPolicy(policy: QualifierPolicy): void {
   const { weights } = policy;
-  for (const name of ['maxConcurrentAttempts', 'maxConcurrentWalls'] as const) {
-    const value = policy[name];
-    if (!Number.isInteger(value) || value < 1) {
-      fail(`${name} must be an integer >= 1, got ${String(value)}`);
-    }
-  }
   if (policy.privilegedBrokering !== 'off' && policy.privilegedBrokering !== 'on') {
     fail(
       `privilegedBrokering must be 'off' or 'on', got ${JSON.stringify(policy.privilegedBrokering)}`,
@@ -222,4 +212,53 @@ export function assertPolicy(policy: QualifierPolicy): void {
 export function currentPolicyVersion(policy: QualifierPolicy = DEFAULT_POLICY): string {
   assertPolicy(policy);
   return contentHash(policy);
+}
+
+/**
+ * The widest dispatch ceiling a legacy digest will be recognised for.
+ *
+ * The pre-split projection recorded `maxConcurrentAttempts`/`maxConcurrentWalls` on the policy
+ * object, so a certificate minted then carries a digest over the rules *plus* the ceilings it ran
+ * under. To recognise that evidence as "the same rules, different limits" we have to re-derive the
+ * digest, and that means guessing the ceilings. The guess is bounded here rather than unbounded: a
+ * factory asked to run more than this many attempts or walls at once is outside anything this build
+ * has ever been operated at, and a certificate recorded above the bound is reported `stale` —
+ * fail-closed, because "recognise" must never become "assume".
+ */
+export const LEGACY_LIMIT_BOUND = 64;
+
+/**
+ * Every `policyVersion` the *pre-split* projection could have produced for these rules.
+ *
+ * Before the dispatch ceilings were moved out of `QualifierPolicy`, `currentPolicyVersion` hashed
+ * the policy **with** `maxConcurrentAttempts`/`maxConcurrentWalls`. This returns the digest of
+ * `{ ...policy, maxConcurrentAttempts: a, maxConcurrentWalls: w }` for every `a` and `w` in
+ * `1..bound`, so a caller judging a stored certificate can tell "this digest means these rules under
+ * a different ceiling" apart from "these rules changed". It never accepts a digest that a *different*
+ * rule set would produce — the canonical JSON over the running rules is the only input.
+ *
+ * The set is empty for no policy (it is always at least `bound²` entries); it is computed on demand
+ * and is only consulted when a stored digest does not equal {@link currentPolicyVersion}.
+ *
+ * @param policy - the running rule set (without ceilings); defaults to {@link DEFAULT_POLICY}.
+ * @param bound - inclusive ceiling range to scan; defaults to {@link LEGACY_LIMIT_BOUND}.
+ */
+export function legacyPolicyVersions(
+  policy: QualifierPolicy = DEFAULT_POLICY,
+  bound: number = LEGACY_LIMIT_BOUND,
+): ReadonlySet<string> {
+  assertPolicy(policy);
+  const versions = new Set<string>();
+  for (let attempts = 1; attempts <= bound; attempts += 1) {
+    for (let walls = 1; walls <= bound; walls += 1) {
+      versions.add(
+        contentHash({
+          ...policy,
+          maxConcurrentAttempts: attempts,
+          maxConcurrentWalls: walls,
+        }),
+      );
+    }
+  }
+  return versions;
 }

@@ -13,7 +13,8 @@
  */
 import { contentHash, FactoryError } from '@factory/contracts';
 import type { LedgerEvent } from '@factory/contracts';
-import { certificatesRecency, type CertificateRecency } from '@factory/wall';
+import { legacyPolicyVersions } from '@factory/qualifier';
+import { certificatesRecency, judgedCertificate, type CertificateRecency } from '@factory/wall';
 
 import { EXIT, UsageError } from '../exit.ts';
 import { field } from '../render/format.ts';
@@ -102,6 +103,9 @@ function certificateReport(ctx: VerbInput['ctx']): {
   const running = {
     policyVersion: ctx.policyVersion,
     modelId: (ctx.env['FACTORY_MODEL_ID'] ?? '').trim() || null,
+    // A certificate recorded before the dispatch ceilings were moved out of the policy carries a
+    // digest over the same rules plus those ceilings; recognise it as the same rules, not a change.
+    acceptedPolicyVersions: legacyPolicyVersions(ctx.policy),
   };
   // The projection is the only place a certificate exists. `mapVerdict` deliberately strips
   // `certification`/`modelId` from the verdict body (the promotion signature is computed over that
@@ -149,7 +153,13 @@ export function runAudit(input: VerbInput): number {
       modelId: report.basis.modelId,
       projectionPresent: report.projectionPresent,
       classes: report.judgements.map((judgement) => {
-        const certificate = report.certificatesByClass.get(judgement.taskClass)?.[0] ?? null;
+        // The counts must describe the row the *state* came from. A class can hold an older
+        // `certified` row and a newer `insufficient` one (the attempt after the criteria log
+        // gained its identity starts its count at 1), and printing the newer row's `samples: 1`
+        // beside `state: 'current'` would read as a contradiction the operator cannot resolve.
+        // `judgedCertificate` is the same rule the judgement used, so the two cannot drift.
+        const certificate =
+          judgedCertificate(report.certificatesByClass.get(judgement.taskClass) ?? []) ?? null;
         return {
           taskClass: judgement.taskClass,
           state: judgement.state,

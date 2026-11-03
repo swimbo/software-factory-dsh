@@ -16,7 +16,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { currentPolicyVersion } from '@factory/qualifier';
+import { contentHash } from '@factory/contracts';
+import { DEFAULT_POLICY, currentPolicyVersion } from '@factory/qualifier';
 import { openStore } from '@factory/store';
 
 import { EXIT } from './exit.ts';
@@ -29,6 +30,12 @@ interface CertificateSeed {
   readonly samples: number;
   readonly policyVersion?: string;
   readonly modelId?: string | null;
+  /**
+   * Two rows for one class need two *units* — a unit may hold only one live lease, and a second
+   * submission of the same slug is the same unit. A different slug is a different unit in the
+   * same class, which is what the loop produces and what the projection groups on.
+   */
+  readonly slug?: string;
 }
 
 /**
@@ -40,7 +47,7 @@ interface CertificateSeed {
  */
 function seedCertificate(home: string, seed: CertificateSeed, index: number): string {
   const store = openStore({ dir: join(home, 'state') });
-  const { unitId } = seedUnit(home, {});
+  const { unitId } = seedUnit(home, seed.slug === undefined ? {} : { spec: { slug: seed.slug } });
   const attemptId = `A-${index.toString()}`;
   const options = { actor: 'wall', traceId: `T-seed-${index.toString()}`, occurredAt: FIXED_NOW };
   store.acquireLease({
@@ -213,5 +220,141 @@ describe('factory audit --certifications', () => {
     const result = runCli(['audit', '--certifications', 'U-7f3a9c'], { home });
     expect(result.status).toBe(EXIT.usage);
     expect(result.stderr).toContain('audits classes');
+  });
+
+  /**
+   * Defect A: a dispatch ceiling is not part of what a pass means.
+   *
+   * `maxConcurrentAttempts`/`maxConcurrentWalls` used to be fields of `QualifierPolicy`, so they
+   * were folded into `currentPolicyVersion`. A loop that had to raise the attempt ceiling minted
+   * its certificate under a digest the default environment could never reproduce, and every
+   * morning's `audit --certifications` called a perfectly-current certificate stale.
+   */
+  it('reports the same policy version whether or not the dispatch ceiling is raised', () => {
+    const home = tempHome();
+    const shipped = jsonOf(audit(home, { FACTORY_MODEL_ID: 'auto' }));
+    const raised = jsonOf(
+      audit(home, {
+        FACTORY_MODEL_ID: 'auto',
+        FACTORY_MAX_CONCURRENT_ATTEMPTS: '4',
+        FACTORY_MAX_CONCURRENT_WALLS: '2',
+      }),
+    );
+    expect(raised['policyVersion']).toBe(shipped['policyVersion']);
+    expect(String(shipped['policyVersion'])).toMatch(/^sha256:/);
+  });
+
+  it('treats a certificate recorded under a different dispatch ceiling as current, not stale', () => {
+    // The certificate the live loop earned: 20 attempts, 19 passes, recorded while the attempt
+    // ceiling was 4 (two abandoned attempts held live leases). Its digest is the *pre-split*
+    // projection — rules + ceilings — so it can only be recognised, never recomputed.
+    const home = tempHome();
+    const legacyPolicyVersion = contentHash({
+      ...DEFAULT_POLICY,
+      maxConcurrentAttempts: 4,
+      maxConcurrentWalls: 1,
+    });
+    expect(legacyPolicyVersion).not.toBe(currentPolicyVersion());
+    seedCertificate(
+      home,
+      {
+        taskClass: 'docs-typo-fix',
+        outcome: 'certified',
+        passes: 19,
+        samples: 20,
+        policyVersion: legacyPolicyVersion,
+      },
+      1,
+    );
+
+    const defaultCeiling = audit(home, { FACTORY_MODEL_ID: 'auto' });
+    expect(defaultCeiling.status).toBe(EXIT.ok);
+    expect(jsonOf(defaultCeiling)['classes']).toEqual([
+      expect.objectContaining({ taskClass: 'docs-typo-fix', state: 'current' }),
+    ]);
+    expect(defaultCeiling.stderr).toContain('1 of 1 classes current');
+    expect(defaultCeiling.stderr).not.toContain('re-certify');
+
+    // …and it stays current if the operator runs the audit under the ceiling they certified at.
+    const raised = audit(home, {
+      FACTORY_MODEL_ID: 'auto',
+      FACTORY_MAX_CONCURRENT_ATTEMPTS: '4',
+    });
+    expect(raised.status).toBe(EXIT.ok);
+  });
+
+  it('still calls a certificate stale when the rules themselves changed', () => {
+    // The recognition is "same rules, different limits", not "any old digest is fine": a digest
+    // produced by the pre-split projection of a *different* rule set must stay stale.
+    const home = tempHome();
+    const differentRules = contentHash({
+      ...DEFAULT_POLICY,
+      darkThreshold: 95,
+      maxConcurrentAttempts: 4,
+      maxConcurrentWalls: 1,
+    });
+    seedCertificate(
+      home,
+      {
+        taskClass: 'docs-typo-fix',
+        outcome: 'certified',
+        passes: 19,
+        samples: 20,
+        policyVersion: differentRules,
+      },
+      1,
+    );
+    const result = audit(home, { FACTORY_MODEL_ID: 'auto' });
+    expect(result.status).toBe(EXIT.integrity);
+    const classes = jsonOf(result)['classes'] as Array<Record<string, unknown>>;
+    expect(classes[0]?.['state']).toBe('stale');
+  });
+
+  it('prints the counts of the certificate the state came from, not a newer insufficient attempt', () => {
+    // The sequence the live store is about to see: the pre-change certificate is `certified` at
+    // 20/20, and the first attempt after the criteria log gained its identity starts its own
+    // count at 1, so it writes an `insufficient` row. The class is still `current` — the certified
+    // row is found by the judgement — and the numbers printed beside it must be *its* numbers:
+    // `state: current` next to `samples: 1, outcome: insufficient` reads as a contradiction.
+    const home = tempHome();
+    const legacyPolicyVersion = contentHash({
+      ...DEFAULT_POLICY,
+      maxConcurrentAttempts: 4,
+      maxConcurrentWalls: 1,
+    });
+    seedCertificate(
+      home,
+      {
+        taskClass: 'docs-typo-fix',
+        outcome: 'certified',
+        passes: 19,
+        samples: 20,
+        policyVersion: legacyPolicyVersion,
+      },
+      1,
+    );
+    seedCertificate(
+      home,
+      {
+        taskClass: 'docs-typo-fix',
+        outcome: 'insufficient',
+        passes: 1,
+        samples: 1,
+        slug: 'slug-check-next-attempt',
+      },
+      2,
+    );
+
+    const result = audit(home, { FACTORY_MODEL_ID: 'auto' });
+    expect(result.status).toBe(EXIT.ok);
+    expect(jsonOf(result)['classes']).toEqual([
+      expect.objectContaining({
+        taskClass: 'docs-typo-fix',
+        state: 'current',
+        outcome: 'certified',
+        samples: 20,
+        m: 20,
+      }),
+    ]);
   });
 });

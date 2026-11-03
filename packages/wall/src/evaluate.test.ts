@@ -1209,7 +1209,7 @@ describe('holdout discrimination', () => {
     // The live measurement alone would be damning anyway; the point is that a log a
     // candidate can damage must never read as "no history, therefore nothing wrong".
     const port: CriteriaLogPort = {
-      read: (): CriteriaLogReadResult => ({ entries: [], corruptLines: 1 }),
+      read: (): CriteriaLogReadResult => ({ entries: [], corruptLines: 1, legacyLines: 0 }),
       record: () => undefined,
     };
 
@@ -1241,7 +1241,9 @@ describe('holdout discrimination', () => {
     runner.base.set(keyOf(['node', '.holdout/run.js', 'holdout-alpha']), PASS);
 
     // History: the scenario has failed on the base before, so it *can* distinguish —
-    // one live base pass is not enough to condemn it.
+    // one live base pass is not enough to condemn it. It carries no policy identity (it
+    // predates the field), so it is legacy: usable for discrimination, never counted
+    // toward the class certificate.
     const history: CriteriaLogEntry[] = [
       {
         taskClass: 'core',
@@ -1255,7 +1257,7 @@ describe('holdout discrimination', () => {
     ];
     const recorded: CriteriaLogEntry[][] = [];
     const port: CriteriaLogPort = {
-      read: () => ({ entries: history, corruptLines: 0 }),
+      read: () => ({ entries: history, corruptLines: 0, legacyLines: history.length }),
       record: (entries) => {
         recorded.push([...entries]);
       },
@@ -1280,7 +1282,7 @@ describe('holdout discrimination', () => {
     const { runner, spec, receipt, holdout } = oracleVerdictRunner();
     const recorded: CriteriaLogEntry[][] = [];
     const port: CriteriaLogPort = {
-      read: () => ({ entries: [], corruptLines: 0 }),
+      read: () => ({ entries: [], corruptLines: 0, legacyLines: 0 }),
       record: (entries) => {
         recorded.push([...entries]);
       },

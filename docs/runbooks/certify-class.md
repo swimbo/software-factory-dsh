@@ -257,6 +257,37 @@ not more attempts: re-running until it goes green is p-hacking the wall.
   red by the class-level `never-certified` line instead. Covering both readings would mean asking
   the projection for a row with `outcome: 'certified'` under the running basis, per unit's class;
   that is a change to the audit, not to this loop.
+- **A dispatch ceiling no longer changes the policy identity (fixed, pinned).**
+  `maxConcurrentAttempts`/`maxConcurrentWalls` used to be fields of `QualifierPolicy`, and
+  `currentPolicyVersion` hashes the whole object — so a loop that raised the attempt ceiling to run
+  more than one attempt at a time minted its certificate under a digest the default environment could
+  never reproduce, and `audit --certifications` called a perfectly-current certificate `stale` every
+  morning. The ceilings now live in `OperatorLimits` (`apps/cli/src/context.ts`, `resolveLimits`), read
+  from the same variables and hashed into nothing; the rules alone hash to `sha256:a368cc6f…` where
+  they used to hash to `sha256:6ce54b93…`. The digests the old projection produced are _recognised_,
+  not recomputed: `legacyPolicyVersions()` re-derives `contentHash({...rules, ceilings})` over
+  `1..64 × 1..64` (4096 hashes, ~11 ms, on `audit`/`alerts` only) and a stored digest in that set is
+  "these rules, different limits". The live certificate (`sha256:1f052e46…`, recorded at ceiling 4)
+  therefore reads `current`, exit 0, with no re-run. Residuals: the recognition is bounded — above 64
+  concurrent attempts or walls a certificate stays `stale` (fail-closed, re-certify); it accepts any
+  ceiling but only these rules; and it is a bridge for evidence written before the split, to be
+  deleted once no stored certificate carries a pre-split digest.
+- **A certificate cannot borrow another policy's or model's measurement history (fixed, pinned).**
+  `CriteriaLogEntry` recorded no policy identity, and `countClassAttempts` filtered on class +
+  holdout revision only, so one attempt under a new `policyVersion` counted twenty logged revisions
+  measured under the old one and could mint a `certified` row for a policy that had measured one
+  attempt. Every entry now records `policyVersion` and `modelId`, and both the class count and the Δ
+  sample count read only entries measured under the running identity. Lines written before the field
+  existed are reported as `legacyLines` and **skipped** — never counted, and _not_ corrupt: the live
+  log holds 240 of them, and treating them as corruption would degrade the discrimination control to
+  `unknown`, and therefore every future verdict, forever. Consequence, deliberate: the count restarts
+  at 1 on the first attempt after the change, so a class certified before it needs twenty fresh
+  attempts to be re-certified — the pre-change attempts cannot be attributed to a policy, and
+  `unknown` is the honest reading.
+- **`audit --certifications` prints the counts of the row its state came from (fixed, pinned).**
+  A class keeps every certificate row it ever wrote, and a newer `insufficient` attempt does not
+  un-certify it; the verb now reports the judged row's `outcome`/`samples` (`judgedCertificate`), so
+  `state: current` can never be printed beside `samples: 1`.
 - **Nothing checks that the certificate was earned on a _varied_ corpus.** The artefacts script
   refuses a revision whose planted defects stop discriminating, but a weaker corpus that still
   discriminates is undetectable from the outside — see the next bullet.

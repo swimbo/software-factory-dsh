@@ -293,7 +293,7 @@ export async function runRun(input: VerbInput): Promise<number> {
   // an attempt that never ran. No attempt, no lease, no reservation — the spec asserts it.
   assertAttemptCapacity({
     read: readOccupancy(ctx.store, { excludeUnitId: unitId }),
-    limit: ctx.policy.maxConcurrentAttempts,
+    limit: ctx.limits.maxConcurrentAttempts,
     limitIsDefault: ceilingIsDefault(ctx.env, 'FACTORY_MAX_CONCURRENT_ATTEMPTS'),
     unitId,
   });
@@ -632,7 +632,7 @@ async function evaluateRealWall(
   // so the refusal leaves an attempt with no verdict rather than a verdict nobody measured.
   assertWallCapacity({
     read: readOccupancy(ctx.store, { excludeUnitId: unit.unitId }),
-    limit: ctx.policy.maxConcurrentWalls,
+    limit: ctx.limits.maxConcurrentWalls,
     limitIsDefault: ceilingIsDefault(ctx.env, 'FACTORY_MAX_CONCURRENT_WALLS'),
     unitId: unit.unitId,
   });

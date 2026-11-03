@@ -1,0 +1,45 @@
+
+ RUN  v5.0.5 /Users/bo/code/software-factory-dsh
+
+ ✓ e2e/cli/default/07-seams.test.ts (11 tests) 13319ms
+   ✓ fake executor (3)
+     ✓ [@default] runs a scripted worker to a stored receipt with no dsh and no docker 1472ms
+     ✓ [@default] refuses to activate under NODE_ENV=production 811ms
+     ✓ [@default] records what the worker left untracked rather than calling it a clean patch 1243ms
+   ✓ a worker that stops without finishing a turn (1)
+     ✓ [@default] is ambiguous, never failed, and recover reconciles it 1321ms
+   ✓ kill -9 mid-attempt (1)
+     ✓ [@default] leaves an ambiguous attempt that recover reconciles without re-dispatching 1343ms
+   ✓ a stale mandate (1)
+     ✓ [@default] refuses to dispatch when the mandate under which the unit qualified has expired 876ms
+   ✓ duplicate evidence (1)
+     ✓ [@default] replaying another attempt's receipt is a RECEIPT_CONFLICT 2439ms
+   ✓ the fake wall (3)
+     ✓ [@fake-wall] turns a receipt into a labelled verdict, and the label survives into the ledger 956ms
+     ✓ [@fake-wall] refuses to re-qualify a unit that already has a verdict, in one JSON object 1016ms
+     ✓ [@fake-wall] refuses to activate under NODE_ENV=production 592ms
+   ✓ promotion against a fake verdict (1)
+     ✓ [@fake-wall] refuses a fake pass unsigned, and refuses it signed too 1250ms
+certify-class: stopped: failure-budget-exhausted
+certify-class:   diff              pass  3 changed path(s) in the diff
+certify-class:   tests-weakened    pass  no test or holdout-dependency file removed, emptied or stripped
+certify-class:   scope             pass  3 changed path(s), all inside the declared touch paths
+certify-class:   irreversible      pass  no irreversible operation class declared and no destructive command recorded
+certify-class:   class-certification pass  4 delta samples for this task class (min 0); 4 of 20 attempts for this task class: insufficient evidence to certify at m=20 k=18 alpha=0.07548367378849634297 — unknown is not "probably fine", so promotion requires a human signature
+certify-class:   Next:        factory abort U-137572e0706a --reason "<why>"   (a failed attempt is not retried in v1)
+ ✓ e2e/certification/driver-integration.test.ts (1 test) 16459ms
+   ✓ scripts/certify-class.sh over real verdicts (1)
+     ✓ dispatches, reads the key per run, and stops at the third failure without running the fifth unit 14309ms
+ ✓ packages/dsh-adapter/tests/egress.test.ts (6 tests | 1 skipped) 20235ms
+   ✓ @docker the worker egress boundary (5)
+     ✓ closes every enumerated destination, and still reaches the proxy 18163ms
+     ✓ gives each attempt its own DSH_HOME, with no carry-over 459ms
+ ✓ e2e/cli/default/11-evidence-chain.test.ts (5 tests) 11127ms
+   ✓ receipts (E2E-13) (2)
+     ✓ [@default] prints hash, diff size and command count, and never the diff 2024ms
+     ✓ [@default] every replayable command is re-executed, and the verdict says what it skipped 1943ms
+   ✓ audit (E2E-22) (2)
+     ✓ [@default] traces the unit to an ordered ledger timeline, then the verdict 2183ms
+     ✓ [@default] every id the trace prints resolves to a row in the store 2925ms
+   ✓ a failed attempt still yields evidence (E2E-53) (1)
+     ✓ [@default] keeps a receipt with its diff and records the failure as a fail 2051ms

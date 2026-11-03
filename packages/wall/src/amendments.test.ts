@@ -19,12 +19,14 @@ import {
 } from '@factory/contracts';
 import {
   NO_PATCH,
+  countClassAttempts,
   evaluate,
   type DiffInspector,
   type ScenarioRunner,
   type ScenarioRunInput,
   type ScenarioRunResult,
 } from './evaluate.ts';
+import type { CriteriaLogEntry, CriteriaLogPort } from './criteria-log.ts';
 import type { HoldoutStore } from './holdout.ts';
 import { oneLineReason, workerFacingReason } from './reasons.ts';
 import { SENSITIVE_PATH_PATTERNS, assessSecurityPaths } from './security-path.ts';
@@ -171,6 +173,7 @@ function policy(
     readonly pinned?: boolean;
     readonly minDeltaSamples?: number;
     readonly imageDigest?: string;
+    readonly policyVersion?: string;
     readonly certification?: { readonly m?: number; readonly k?: number; readonly p0?: number };
   } = {},
 ) {
@@ -183,6 +186,7 @@ function policy(
     ...(over.pinned === false ? {} : { pinnedSuite: { argv: ['pnpm', 'test'] } }),
     ...(over.minDeltaSamples === undefined ? {} : { minDeltaSamples: over.minDeltaSamples }),
     ...(over.imageDigest === undefined ? {} : { imageDigest: over.imageDigest }),
+    ...(over.policyVersion === undefined ? {} : { policyVersion: over.policyVersion }),
     ...(over.certification === undefined ? {} : { certification: over.certification }),
   };
 }
@@ -538,5 +542,117 @@ describe('A10 — Δ provenance and class certifiability', () => {
     });
 
     expect(verdict.wallVersion).toContain(digest);
+  });
+
+  /**
+   * Defect B: a certificate must not borrow another policy's measurement history.
+   *
+   * `countClassAttempts` filtered the log on task class + holdout revision only, so one attempt
+   * under a new policy version counted twenty logged revisions measured under the old one and
+   * minted a `certified` row for a policy that had measured exactly one attempt — L3 broken in the
+   * one place nobody was looking. The log now records the identity each observation was measured
+   * under, and the count only adds observations measured under the running identity.
+   */
+  function loggedHistory(
+    identity: { readonly policyVersion: string; readonly modelId: string } | null,
+  ): CriteriaLogEntry[] {
+    const entries: CriteriaLogEntry[] = [];
+    for (let index = 0; index < 20; index += 1) {
+      for (const side of ['candidate', 'base'] as const) {
+        entries.push({
+          taskClass: 'core',
+          holdoutRevision: 'r0001',
+          scenarioId: 'alpha',
+          revision: `rev-${String(index)}`,
+          side,
+          outcome: side === 'candidate' ? 'pass' : 'fail',
+          ...(identity === null ? {} : identity),
+          at: '2026-11-01T00:00:00.000Z',
+        });
+      }
+    }
+    return entries;
+  }
+
+  function logPort(history: readonly CriteriaLogEntry[], legacyLines = 0): CriteriaLogPort {
+    return {
+      read: () => ({ entries: history, corruptLines: 0, legacyLines }),
+      record: () => undefined,
+    };
+  }
+
+  it('counts one attempt, not twenty, when the logged history was measured under another policy', async () => {
+    const logged = { policyVersion: 'sha256:policy-a', modelId: 'model-a' };
+    const history = loggedHistory(logged);
+
+    const verdict = await evaluate({
+      spec: makeSpec(),
+      receipt: makeReceipt(),
+      holdout: makeHoldout(),
+      runner: runner(),
+      policy: policy({ policyVersion: 'sha256:policy-b' }),
+      modelId: logged.modelId,
+      diff: cleanDiff(),
+      criteriaLog: logPort(history),
+      nowIso: NOW,
+    });
+
+    expect(verdict.outcome).toBe('pass');
+    expect(verdict.certification?.samples).toBe(1);
+    expect(verdict.certification?.outcome).toBe('insufficient');
+    // The fixture is not vacuous: counted under the *logged* identity, the same history is
+    // twenty attempts, which is what the old code would have handed to the new policy.
+    expect(countClassAttempts(makeHoldout(), [], history, logged)).toEqual({
+      samples: 20,
+      passes: 20,
+    });
+  });
+
+  it('counts one attempt, not twenty, when the model changed under the same policy', async () => {
+    // The model is part of the recency claim, so it is part of the count's identity too: a
+    // certificate earned by the old model must not be handed to the new one.
+    const logged = { policyVersion: 'sha256:policy-a', modelId: 'model-a' };
+    const history = loggedHistory(logged);
+
+    const verdict = await evaluate({
+      spec: makeSpec(),
+      receipt: makeReceipt(),
+      holdout: makeHoldout(),
+      runner: runner(),
+      policy: policy({ policyVersion: logged.policyVersion }),
+      modelId: 'model-b',
+      diff: cleanDiff(),
+      criteriaLog: logPort(history),
+      nowIso: NOW,
+    });
+
+    expect(verdict.outcome).toBe('pass');
+    expect(verdict.certification?.samples).toBe(1);
+    expect(verdict.certification?.outcome).toBe('insufficient');
+  });
+
+  it('does not count pre-identity log lines, and says that it did not', async () => {
+    // A line written before the identity was recorded cannot name its policy, so it is skipped
+    // (never corrupt, never counted) and the class-certification line reports the skip.
+    const legacy = loggedHistory(null);
+
+    const verdict = await evaluate({
+      spec: makeSpec(),
+      receipt: makeReceipt(),
+      holdout: makeHoldout(),
+      runner: runner(),
+      policy: policy({ policyVersion: 'sha256:policy-a' }),
+      modelId: 'model-a',
+      diff: cleanDiff(),
+      criteriaLog: logPort(legacy, legacy.length),
+      nowIso: NOW,
+    });
+
+    expect(verdict.certification?.samples).toBe(1);
+    const certification = verdict.scenarios.find(
+      (scenario) => scenario.id === 'class-certification',
+    );
+    expect(certification?.observed ?? '').toContain('predate policy/model identity');
+    expect(certification?.observed ?? '').toContain('40 log line(s)');
   });
 });

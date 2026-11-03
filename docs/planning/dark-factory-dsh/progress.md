@@ -388,3 +388,49 @@ Verified afterwards (`models` → 200), the empty file deleted, and the lesson r
 102 files, every `@docker` spec run (`docs/verification/2026-11-03T02-47-40Z/`), and the hazard from the
 previous round is now written into the index: the same command reports `0 failed` with the docker
 specs *skipped* when the daemon is not running, so read the skip count.
+
+### Round 10 — the first class certificate, and the four defects it exposed (2026-11-03)
+
+**The class was certified, live.** `docs-typo-fix` reached `samples=20 passes=19 outcome=certified`
+in the operator's store (`cert:V-c81459fcb68a`, policy `sha256:1f052e46…`, model `auto`). Twenty
+attempts ran against a real git repository generated from this project's own markdown — 20 revisions,
+each carrying the class's five defects — with a hidden five-rule holdout corpus the worker never sees.
+Seventeen consecutive passes in one driver invocation, then two more units on base revisions the log
+had not yet judged. The one non-pass is an `unknown` verdict from my own configuration error, kept as
+a non-pass instead of rounded away. Details and the full progression table:
+`evidence/phase-18-certification.md`.
+
+**Three of the four defects made a certificate impossible, and the fourth made one untrustworthy.**
+
+- The CLI built the wall without a `criteriaLog` port, so every verdict counted as the class's *first*
+  sample: twenty paid passes would have produced twenty `samples=1 … insufficient` rows. The package
+  tests passed because they construct the port directly — the seam the CLI never used was the only
+  thing untested.
+- `audit --certifications` asked each verdict's `certification` field whether it had been judged, a
+  field `mapVerdict` strips on purpose, so every verified unit was listed forever and the verb exited
+  9 after an honest certification. It now asks the projection that holds the answer.
+- A dispatch ceiling was a field of `QualifierPolicy` and hashed into the policy identity, so a loop
+  that raised the attempt ceiling minted its certificate under a digest the default environment could
+  never reproduce — `CERT_STALE` every morning for a perfectly current certificate. Ceilings now live
+  in `OperatorLimits` and are hashed into nothing; a bounded recognition bridge keeps the pre-split
+  row `current` without recomputing it.
+- The criteria log recorded no policy or model identity, so one attempt under a new policy could count
+  twenty revisions measured under the old one and mint a `certified` row for a policy that had measured
+  one attempt. Entries now carry both, both counters filter on them, and the 240 pre-identity lines in
+  the live log are `legacyLines` — never counted, and not corrupt.
+
+**The driver measured one unit out of twenty, twice, before it worked.** The loop's stdin is the units
+file, and two children inherited it: the per-run `ssh` key read and the worker itself. Both live
+invocations reported `units-exhausted` with eighteen lines still in the file — a stop reason that reads
+like an exhausted plan and was an eaten one. Fixed with `</dev/null` and the reason in a comment; the
+offline proof could not have caught it, because its stub key command and scripted executor read
+nothing.
+
+**Cost is a token count, not a price.** 23 attempts, 6,419,027 input and 155,692 output tokens; per
+attempt 120k–453k input. `cost_usd` is `null` on every usage row — there is no billing-grade telemetry,
+so "under the $10 cap I set" is not something this store can prove, and the round records the numbers
+it has instead. The old ~12.7k-token-per-unit estimate came from a single short probe and is wrong by
+more than an order of magnitude for real documentation work.
+
+**Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1559 passed | 8 skipped (1567)** across
+110 files (`docs/verification/2026-11-03T04-40-19Z/`).

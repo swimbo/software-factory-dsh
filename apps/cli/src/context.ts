@@ -540,6 +540,8 @@ export interface FactoryContext {
   readonly policy: QualifierPolicy;
   /** `contentHash(policy)` — changes when the policy does, which forces a re-score. */
   readonly policyVersion: string;
+  /** The dispatch ceilings, read separately: they are operator limits, not policy. */
+  readonly limits: OperatorLimits;
   readonly allowColdStart: boolean;
   readonly executor: ExecutorProbe;
   readonly wall: WallProbe;
@@ -554,6 +556,11 @@ export interface FactoryContext {
  * because the flag is part of the policy object it changes `currentPolicyVersion`.
  * A decision made under cold start therefore carries a different version from one
  * made under the shipped policy, and can never be mistaken for a measured pass.
+ *
+ * The dispatch ceilings are **not** policy: they are resolved by {@link resolveLimits}
+ * into a separate `OperatorLimits` object, because "how much may run at once" changes
+ * nothing about what a pass means and must not change `currentPolicyVersion` (see
+ * `packages/qualifier/src/policy.ts`).
  */
 export function resolvePolicy(
   env: Readonly<Record<string, string | undefined>>,
@@ -563,9 +570,33 @@ export function resolvePolicy(
   // Read here, at the composition root, and nowhere else: the worker's process environment
   // must not be able to switch brokering off for the factory that brokers it.
   const brokering = env['FACTORY_PRIVILEGED_BROKERING'] === 'on' ? 'on' : 'off';
-  // The ceilings are the operator's, read here and nowhere else. A value that is not a
-  // positive integer is ignored rather than coerced: "MAX=0" must not become a silent
-  // "no dispatch ever", and "" must not become NaN.
+  return {
+    ...DEFAULT_POLICY,
+    allowColdStart: enabled,
+    privilegedBrokering: brokering,
+  };
+}
+
+/** The dispatch ceilings, kept out of the policy so they cannot move `currentPolicyVersion`. */
+export interface OperatorLimits {
+  readonly maxConcurrentAttempts: number;
+  readonly maxConcurrentWalls: number;
+}
+
+/** The shipped ceilings; an operator who does not raise them runs at these. */
+export const DEFAULT_LIMITS: OperatorLimits = Object.freeze({
+  maxConcurrentAttempts: 1,
+  maxConcurrentWalls: 1,
+});
+
+/**
+ * Read the operator's dispatch ceilings, here and nowhere else.
+ *
+ * A value that is not a positive integer is ignored rather than coerced: "MAX=0" must not
+ * become a silent "no dispatch ever", and "" must not become NaN. The ceilings are read
+ * separately from the policy so changing them re-schedules work without re-scoring it.
+ */
+export function resolveLimits(env: Readonly<Record<string, string | undefined>>): OperatorLimits {
   const ceiling = (raw: string | undefined, fallback: number): number => {
     const text = (raw ?? '').trim();
     if (text === '') return fallback;
@@ -573,16 +604,13 @@ export function resolvePolicy(
     return Number.isInteger(value) && value >= 1 ? value : fallback;
   };
   return {
-    ...DEFAULT_POLICY,
-    allowColdStart: enabled,
-    privilegedBrokering: brokering,
     maxConcurrentAttempts: ceiling(
       env['FACTORY_MAX_CONCURRENT_ATTEMPTS'],
-      DEFAULT_POLICY.maxConcurrentAttempts,
+      DEFAULT_LIMITS.maxConcurrentAttempts,
     ),
     maxConcurrentWalls: ceiling(
       env['FACTORY_MAX_CONCURRENT_WALLS'],
-      DEFAULT_POLICY.maxConcurrentWalls,
+      DEFAULT_LIMITS.maxConcurrentWalls,
     ),
   };
 }
@@ -609,6 +637,7 @@ export function createContext(ui: CliUi, overrides: ContextOverrides = {}): Fact
 
   const policy = resolvePolicy(env, overrides.allowColdStart);
   const policyVersion = currentPolicyVersion(policy);
+  const limits = resolveLimits(env);
   const store = openStore({ dir: paths.state, now: clock });
   const envelopeUsd =
     overrides.envelopeUsd ??
@@ -656,6 +685,7 @@ export function createContext(ui: CliUi, overrides: ContextOverrides = {}): Fact
     envelopeUsd,
     policy,
     policyVersion,
+    limits,
     allowColdStart: policy.allowColdStart,
     executor:
       overrides.executor ?? probeExecutor(env, { scenarioPath: overrides.scenarioPath ?? null }),

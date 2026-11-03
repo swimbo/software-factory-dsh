@@ -876,7 +876,11 @@ function requirementOf(scenario: HoldoutScenario): ScenarioRequirements {
   };
 }
 
-async function assessHoldout(input: EvaluateInput, runs: number): Promise<HoldoutAssessment> {
+async function assessHoldout(
+  input: EvaluateInput,
+  runs: number,
+  identity: MeasurementIdentity,
+): Promise<HoldoutAssessment> {
   const { holdout, policy, runner, receipt } = input;
   const threshold = policy.deltaThreshold;
 
@@ -920,7 +924,9 @@ async function assessHoldout(input: EvaluateInput, runs: number): Promise<Holdou
       exitSetJudge(scenario.expectExit),
     );
 
-    observations.push(observation(holdout, receipt, scenario.id, 'candidate', verdict.outcome));
+    observations.push(
+      observation(holdout, receipt, scenario.id, 'candidate', verdict.outcome, identity),
+    );
 
     if (verdict.outcome === 'fail') {
       scenarios.push(result(id, 'holdout', 'fail', `scenario failed (${verdict.observed})`));
@@ -954,7 +960,9 @@ async function assessHoldout(input: EvaluateInput, runs: number): Promise<Holdou
       exitSetJudge(scenario.expectExit),
     );
 
-    observations.push(observation(holdout, receipt, scenario.id, 'base', verdict.outcome));
+    observations.push(
+      observation(holdout, receipt, scenario.id, 'base', verdict.outcome, identity),
+    );
     basePassed.push(verdict.outcome === 'unknown' ? null : verdict.outcome === 'pass');
   }
 
@@ -1026,6 +1034,7 @@ function observation(
   scenarioId: string,
   side: 'base' | 'candidate',
   outcome: 'pass' | 'fail' | 'unknown',
+  identity: MeasurementIdentity,
 ): CriteriaLogEntry {
   return {
     taskClass: holdout.taskClass,
@@ -1034,8 +1043,16 @@ function observation(
     revision: receipt.diff.baseRev,
     side,
     outcome,
+    policyVersion: identity.policyVersion,
+    modelId: identity.modelId,
     at: '',
   };
+}
+
+/** The policy + model an observation was measured under: the identity a class count may not borrow. */
+interface MeasurementIdentity {
+  readonly policyVersion: string;
+  readonly modelId: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1660,9 +1677,14 @@ function countDeltaSamples(
   holdout: HoldoutStore,
   live: readonly CriteriaLogEntry[],
   log: readonly CriteriaLogEntry[],
+  identity: MeasurementIdentity,
 ): number {
   const relevant = [...log, ...live].filter(
-    (entry) => entry.taskClass === holdout.taskClass && entry.holdoutRevision === holdout.revision,
+    (entry) =>
+      entry.taskClass === holdout.taskClass &&
+      entry.holdoutRevision === holdout.revision &&
+      entry.policyVersion === identity.policyVersion &&
+      (entry.modelId ?? null) === identity.modelId,
   );
 
   const byRevision = new Map<string, { base: boolean; candidate: boolean }>();
@@ -1689,9 +1711,14 @@ export function countClassAttempts(
   holdout: HoldoutStore,
   live: readonly CriteriaLogEntry[],
   log: readonly CriteriaLogEntry[],
+  identity: MeasurementIdentity,
 ): { readonly samples: number; readonly passes: number } {
   const relevant = [...log, ...live].filter(
-    (entry) => entry.taskClass === holdout.taskClass && entry.holdoutRevision === holdout.revision,
+    (entry) =>
+      entry.taskClass === holdout.taskClass &&
+      entry.holdoutRevision === holdout.revision &&
+      entry.policyVersion === identity.policyVersion &&
+      (entry.modelId ?? null) === identity.modelId,
   );
   const byRevision = new Map<string, { base: boolean; candidate: number; clean: boolean }>();
   for (const entry of relevant) {
@@ -1725,6 +1752,8 @@ function checkClassCertification(
   log: readonly CriteriaLogEntry[],
   minSamples: number,
   operatingPoint: { readonly m?: number; readonly k?: number; readonly p0?: number } | undefined,
+  identity: MeasurementIdentity,
+  legacyLines: number,
 ): {
   readonly outcome: CheckOutcome;
   readonly requiresHuman: boolean;
@@ -1734,9 +1763,9 @@ function checkClassCertification(
     return { outcome: { scenarios: [], reasons: [] }, requiresHuman: false, certificate: null };
   }
 
-  const samples = countDeltaSamples(holdout, live, log);
+  const samples = countDeltaSamples(holdout, live, log, identity);
   const deltaCertifiable = samples >= minSamples;
-  const counted = countClassAttempts(holdout, live, log);
+  const counted = countClassAttempts(holdout, live, log, identity);
   const certification: ClassCertification = certificationForClass({
     samples: counted.samples,
     passes: counted.passes,
@@ -1750,17 +1779,21 @@ function checkClassCertification(
   const point =
     `m=${certification.m.toString()} k=${certification.k.toString()} ` +
     `alpha=${certification.alphaExact}`;
+  const legacyNote =
+    legacyLines > 0
+      ? `; ${legacyLines.toString()} log line(s) predate policy/model identity and were not counted`
+      : '';
   const detail =
     certification.outcome === 'certified'
       ? `${counted.passes.toString()} of ${counted.samples.toString()} attempts passed for this ` +
         `task class: certified at ${point} (alpha is P(a class that truly passes ` +
-        `${certification.p0.toString()} fails certification))`
+        `${certification.p0.toString()} fails certification))${legacyNote}`
       : certification.outcome === 'not-certified'
         ? `${counted.passes.toString()} of ${counted.samples.toString()} attempts passed for this ` +
-          `task class: not certified at ${point}; promotion requires a human signature`
+          `task class: not certified at ${point}; promotion requires a human signature${legacyNote}`
         : `${counted.samples.toString()} of ${certification.m.toString()} attempts for this task ` +
           `class: insufficient evidence to certify at ${point} — unknown is not "probably fine", ` +
-          `so promotion requires a human signature`;
+          `so promotion requires a human signature${legacyNote}`;
 
   // Two different facts, both kept: `minDeltaSamples` is Δ evidence, certification is the
   // binomial operating point. Either one unsatisfied means a person decides.
@@ -1797,12 +1830,13 @@ function checkClassCertification(
 function readLogPort(port: CriteriaLogPort | undefined): {
   readonly entries: readonly CriteriaLogEntry[];
   readonly corruptLines: number;
+  readonly legacyLines: number;
 } {
-  if (port === undefined) return { entries: [], corruptLines: 0 };
+  if (port === undefined) return { entries: [], corruptLines: 0, legacyLines: 0 };
   try {
     return port.read();
   } catch {
-    return { entries: [], corruptLines: 1 };
+    return { entries: [], corruptLines: 1, legacyLines: 0 };
   }
 }
 
@@ -1833,13 +1867,19 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
   // loudly instead of silently falling back to a single execution.
   const runs = runsPerScenario(input.policy);
   const maxNonDiscriminating = input.policy.maxNonDiscriminating ?? 0;
+  // The identity a class count may not borrow: the policy version this verdict will carry, plus
+  // the model that produced the attempt (`null` when the caller could not name one). Every
+  // observation this run records is stamped with it, and history is only counted under the same
+  // identity, so a new policy or model cannot mint a certificate from another one's measurements.
+  const policyVersion = derivePolicyVersion(input.policy);
+  const identity: MeasurementIdentity = { policyVersion, modelId: input.modelId ?? null };
 
   const files = await inspectChangedFiles(input.diff);
   const log = readLogPort(input.criteriaLog);
 
   const faithfulness = await checkFaithfulness(input);
   const acceptance = await checkAcceptance(input, runs);
-  const holdout = await assessHoldout(input, runs);
+  const holdout = await assessHoldout(input, runs, identity);
   const quality = assessHoldoutQuality(
     input.holdout,
     holdout.observations,
@@ -1859,6 +1899,8 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
     log.entries,
     input.policy.minDeltaSamples ?? 0,
     input.policy.certification,
+    identity,
+    log.legacyLines,
   );
 
   // History is written after the decision is computed, and a failed append does not
@@ -1920,7 +1962,7 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
     attemptId: input.receipt.attemptId,
     receiptSha: contentHash(input.receipt),
     holdoutRevision: holdout.delta.holdoutRevision,
-    policyVersion: derivePolicyVersion(input.policy),
+    policyVersion,
     wallVersion,
     outcome,
     scenarios: [...merged.scenarios],

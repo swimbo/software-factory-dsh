@@ -557,9 +557,9 @@ export function buildStatus(
 function concurrencyHealth(ctx: FactoryContext): StatusModel['concurrency'] {
   // No unit is excluded here: `status` reports the factory, not one unit's measurement.
   const read = readOccupancy(ctx.store);
-  const { policy, env } = ctx;
-  const attemptsLimit = policy.maxConcurrentAttempts;
-  const wallsLimit = policy.maxConcurrentWalls;
+  const { limits, env } = ctx;
+  const attemptsLimit = limits.maxConcurrentAttempts;
+  const wallsLimit = limits.maxConcurrentWalls;
   const attemptsIsDefault = (env['FACTORY_MAX_CONCURRENT_ATTEMPTS'] ?? '').trim() === '';
   const wallsIsDefault = (env['FACTORY_MAX_CONCURRENT_WALLS'] ?? '').trim() === '';
   return {
@@ -659,7 +659,7 @@ function taskClassHealth(ctx: FactoryContext): StatusModel['health']['taskClasse
   });
 }
 
-export const FACTORY_VERSION = '0.7.0';
+export const FACTORY_VERSION = '0.8.0';
 export const PINNED_DSH_VERSION = '0.2.1-rc.5';
 export const WALL_VERSION_FALLBACK = 'wall-2026.11.1';
 

@@ -1,0 +1,13 @@
+
+> dark-factory-dsh@0.7.0 lint /Users/bo/code/software-factory-dsh
+> bash scripts/discipline-lint.sh
+
+ok    no unjustified @ts-expect-error
+ok    no `as any` outside tests
+ok    no .only / .skip in tests
+ok    no eslint-disable comments
+ok    no Date.now() outside allowlisted clock sites
+ok    process.env read only at composition roots
+ok    no DSH package imports outside the adapter
+
+discipline-lint: 7 checks passed

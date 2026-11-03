@@ -30,6 +30,14 @@ export interface RunningCertificationBasis {
   readonly policyVersion: string;
   /** `null` when the running factory is offline: there is then no model to compare against. */
   readonly modelId: string | null;
+  /**
+   * Additional digests that also mean "these rules", produced by earlier projections of the
+   * policy that are no longer current. A stored certificate whose `policyVersion` is one of
+   * these was measured under the *same rules* and a different (now-irrelevant) input — the
+   * dispatch ceilings that used to live on the policy object — so it is current, not stale.
+   * Built by `@factory/qualifier`'s `legacyPolicyVersions`.
+   */
+  readonly acceptedPolicyVersions?: ReadonlySet<string>;
 }
 
 export type CertificateRecency =
@@ -57,6 +65,24 @@ export type CertificateRecency =
     };
 
 /**
+ * The stored row a judgement is made from.
+ *
+ * A class keeps every certificate it ever wrote. Once it has been certified, a *newer* attempt that
+ * measured less evidence (a fresh count after a policy change, or a run that failed) writes an
+ * `insufficient` or `not-certified` row — and that row does not un-certify the class, so the row the
+ * judgement names is the newest `certified` one. Before any certification exists, the newest row is
+ * the best record there is.
+ *
+ * Exported because a caller that prints counts beside a state must print the counts of *this* row;
+ * re-deriving the rule at the call site is how the display and the state drift apart.
+ */
+export function judgedCertificate<T extends StoredCertificate>(
+  certificates: readonly T[],
+): T | undefined {
+  return certificates.find((certificate) => certificate.outcome === 'certified') ?? certificates[0];
+}
+
+/**
  * Judge one class's stored certificates against the running basis.
  *
  * Only a `certified` certificate can ever be `current`; a `not-certified` or `insufficient` record
@@ -71,16 +97,21 @@ export function certificateRecency(input: {
 }): CertificateRecency {
   const [latest] = input.certificates;
   const certified = input.certificates.find((certificate) => certificate.outcome === 'certified');
-  if (latest === undefined || certified === undefined) {
+  const judged = judgedCertificate(input.certificates);
+  if (latest === undefined || certified === undefined || judged === undefined) {
     return {
       taskClass: input.taskClass,
       state: 'never-certified',
-      certificate: latest ?? null,
+      certificate: judged ?? null,
     };
   }
 
   const reasons: string[] = [];
-  if (certified.policyVersion !== input.running.policyVersion) {
+  const accepted = input.running.acceptedPolicyVersions;
+  const sameRules =
+    certified.policyVersion === input.running.policyVersion ||
+    (accepted !== undefined && accepted.has(certified.policyVersion));
+  if (!sameRules) {
     reasons.push(
       `re-certify: policy changed (certified under ${certified.policyVersion}, running ${input.running.policyVersion})`,
     );
@@ -102,11 +133,11 @@ export function certificateRecency(input: {
     return {
       taskClass: input.taskClass,
       state: 'stale',
-      certificate: certified,
+      certificate: judged,
       reasons,
     };
   }
-  return { taskClass: input.taskClass, state: 'current', certificate: certified };
+  return { taskClass: input.taskClass, state: 'current', certificate: judged };
 }
 
 /** Judge every class the store knows a certificate for. Order is the store's, so it is stable. */

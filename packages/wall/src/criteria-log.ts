@@ -54,6 +54,16 @@ export interface CriteriaLogEntry {
   readonly side: 'base' | 'candidate';
   /** `unknown` means the run produced no measurement (timeout, crash, unstartable). */
   readonly outcome: 'pass' | 'fail' | 'unknown';
+  /**
+   * The policy identity this observation was measured under (the verdict's `policyVersion`).
+   *
+   * Optional in the type, required on write: a line written before the identity was recorded
+   * (a "legacy" line) has none, and `readCriteriaLog` reports it in `legacyLines` so a class
+   * count can *skip* it rather than borrow a measurement it cannot attribute to a policy.
+   */
+  readonly policyVersion?: string;
+  /** The model id the attempt ran under; `null` when the caller could not name one. */
+  readonly modelId?: string | null;
   readonly at: string;
 }
 
@@ -122,6 +132,16 @@ export interface CriteriaLogReadResult {
    * append-only, so repairing it means inspecting the tail rather than rewriting.
    */
   readonly corruptLines: number;
+  /**
+   * Lines that parse as entries but carry no policy identity — written before the log recorded
+   * `policyVersion`/`modelId`.
+   *
+   * They are kept in `entries` (a base pass is a base pass, so the discrimination control may
+   * still read them) but a class count must **skip** them: a certificate that cannot say which
+   * policy produced a measurement is a certificate a different policy could borrow, and a count
+   * that silently includes unattributable history is exactly the borrowing ND1 exists to forbid.
+   */
+  readonly legacyLines: number;
 }
 
 /**
@@ -129,17 +149,19 @@ export interface CriteriaLogReadResult {
  *
  * A missing file is an empty log (a fresh install), not corruption. Any line that
  * fails to parse — JSON error, or JSON that is not an entry — is counted as
- * `corruptLines`.
+ * `corruptLines`. A line that parses but predates the policy identity is counted as
+ * `legacyLines` and is never counted toward a certificate.
  */
 export function readCriteriaLog(logPath: string): CriteriaLogReadResult {
   let raw: string;
   try {
     raw = readFileSync(logPath, 'utf8');
   } catch {
-    return { entries: [], corruptLines: 0 };
+    return { entries: [], corruptLines: 0, legacyLines: 0 };
   }
   const entries: CriteriaLogEntry[] = [];
   let corruptLines = 0;
+  let legacyLines = 0;
   for (const line of raw.split('\n')) {
     if (line.trim() === '') continue;
     let parsed: unknown;
@@ -149,10 +171,14 @@ export function readCriteriaLog(logPath: string): CriteriaLogReadResult {
       corruptLines += 1;
       continue;
     }
-    if (isEntry(parsed)) entries.push(parsed);
-    else corruptLines += 1;
+    if (!isEntry(parsed)) {
+      corruptLines += 1;
+      continue;
+    }
+    entries.push(parsed);
+    if (parsed.policyVersion === undefined) legacyLines += 1;
   }
-  return { entries, corruptLines };
+  return { entries, corruptLines, legacyLines };
 }
 
 function assertEntryShape(entry: CriteriaLogEntry): void {
@@ -167,6 +193,12 @@ function assertEntryShape(entry: CriteriaLogEntry): void {
     entry.revision === '' ||
     (entry.side !== 'base' && entry.side !== 'candidate') ||
     (entry.outcome !== 'pass' && entry.outcome !== 'fail' && entry.outcome !== 'unknown') ||
+    // The identity is required on write even though it is optional in the type: a new line
+    // that cannot name the policy and model it was measured under is exactly the line that
+    // lets one certificate borrow another's measurement history.
+    typeof entry.policyVersion !== 'string' ||
+    entry.policyVersion === '' ||
+    (entry.modelId !== null && typeof entry.modelId !== 'string') ||
     typeof entry.at !== 'string' ||
     entry.at === ''
   ) {
@@ -177,6 +209,12 @@ function assertEntryShape(entry: CriteriaLogEntry): void {
 function isEntry(value: unknown): value is CriteriaLogEntry {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Record<string, unknown>;
+  // `policyVersion`/`modelId` are the identity of the observation. Absent is *legacy* (a line
+  // written before the identity existed), which is readable but uncountable; present but
+  // malformed is corruption. The distinction matters: treating a legacy line as corrupt would
+  // degrade the discrimination control to `unknown` on every store written before the change.
+  const policyVersion = candidate['policyVersion'];
+  const modelId = candidate['modelId'];
   return (
     typeof candidate['taskClass'] === 'string' &&
     typeof candidate['holdoutRevision'] === 'string' &&
@@ -186,6 +224,8 @@ function isEntry(value: unknown): value is CriteriaLogEntry {
     (candidate['outcome'] === 'pass' ||
       candidate['outcome'] === 'fail' ||
       candidate['outcome'] === 'unknown') &&
+    (policyVersion === undefined || (typeof policyVersion === 'string' && policyVersion !== '')) &&
+    (modelId === undefined || modelId === null || typeof modelId === 'string') &&
     typeof candidate['at'] === 'string'
   );
 }

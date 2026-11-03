@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.8.0 — 2026-11-03
+
+A task class was certified live for the first time — and earning it exposed, and then fixed, four
+places where a certificate could not be earned or could not be believed.
+
+- **`docs-typo-fix` is certified: `samples=20 passes=19 outcome=certified`** in the operator's store,
+  `m=20 k=18 α=0.0755`, measured against a real git repository built from this project's own markdown
+  (20 revisions, each carrying the class's five defects) under a hidden five-rule holdout corpus. The
+  wall judged every attempt, the criteria log accumulated them, and the certificate flipped at the
+  twentieth revision. One non-pass is an `unknown` verdict from an operator configuration error, kept
+  as a non-pass rather than rounded. Evidence: `docs/planning/dark-factory-dsh/evidence/phase-18-certification.md`.
+- **The wall now passes its criteria log to `evaluate`.** The CLI built the wall without a
+  `criteriaLog` port, so every verdict counted as the class's first sample; twenty measured passes
+  would have produced twenty `samples=1 … insufficient` rows and no certificate. The package tests were
+  green because they construct the port directly. Fixed in `apps/cli/src/wall.ts`, pinned by the
+  20-run certification spec.
+- **`audit --certifications` reads the projection, not the stripped verdict.** `certificateReport`
+  asked each verdict's `certification` field, which `mapVerdict` removes on purpose, so every verified
+  unit was listed as uncertified forever (exit 9 after an honest certification). It now asks whether
+  the verdict left a `class_certificates` row, and the certification suite asserts exit 0,
+  `uncertifiedUnits: []`, and no `STALE OR NEVER CERTIFIED` line.
+- **A dispatch ceiling is no longer part of the policy identity.** `maxConcurrentAttempts` /
+  `maxConcurrentWalls` were fields of `QualifierPolicy` and hashed into `currentPolicyVersion`, so
+  raising the ceiling to run the loop invalidated the certificate it produced (`CERT_STALE` every
+  morning). They now live in a separate `OperatorLimits`; the rules alone hash, and a bounded
+  `legacyPolicyVersions()` recognition bridge keeps the pre-split certificate `current` without
+  recomputing it.
+- **A certificate can no longer borrow another policy's history.** `CriteriaLogEntry` carried no
+  policy or model identity and `countClassAttempts` filtered on class + holdout revision only, so one
+  attempt under a new policy could count twenty revisions measured under the old one. Entries now
+  record `policyVersion` and `modelId`, both the class count and the Δ-sample count filter on them, and
+  pre-identity lines are reported as `legacyLines` — never counted, and not corrupt.
+- **The certification driver no longer measures one unit out of twenty.** The loop's stdin is the
+  units file, and both `ssh` (the per-run key read) and the worker consumed it; both now get
+  `</dev/null`. The whole substrate — artefacts generator, hidden corpus, driver, offline 20-run proof —
+  lives under `e2e/certification/` and is part of the offline gate.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed; test stage **1559 passed | 8
+skipped**.
+
 ## v0.7.0 — 2026-11-02
 
 An assertion became a measurement, a reason code stopped over-claiming without breaking the verdicts

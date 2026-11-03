@@ -40,6 +40,7 @@ import {
   type CertificateRecency,
   type StoredCertificate,
 } from '@factory/wall';
+import { legacyPolicyVersions } from '@factory/qualifier';
 
 import { EXIT, UsageError } from '../exit.ts';
 import { deliverNotification } from '../notify.ts';
@@ -312,6 +313,7 @@ function certificatesFrom(ctx: VerbInput['ctx']): readonly CertificateRecency[] 
     running: {
       policyVersion: ctx.policyVersion,
       modelId: (ctx.env['FACTORY_MODEL_ID'] ?? '').trim() || null,
+      acceptedPolicyVersions: legacyPolicyVersions(ctx.policy),
     },
   });
 }
