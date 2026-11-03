@@ -42,7 +42,10 @@ import {
   type Verdict,
 } from '@factory/contracts';
 import {
+  createCriteriaLog,
+  criteriaLogPath,
   createLocalRunner,
+  defaultHoldoutRoot,
   evaluate,
   loadHoldout,
   NO_PATCH,
@@ -336,6 +339,15 @@ export async function evaluateReceipt(input: WallInputs): Promise<WallOutcome> {
       policyVersion: input.policyVersion,
       minDeltaSamples: 0,
     },
+    // The criteria log is how a *class* certificate accumulates across attempts: the wall
+    // records which holdout scenarios discriminated on this run, and reads the history back
+    // when deciding whether the class has reached its operating point. Leaving this port
+    // unwired made every verdict count as the class's first sample, so twenty measured passes
+    // produced twenty `samples=1 … insufficient` rows and a class that could never be certified
+    // — a defect the package tests could not catch, because they pass this port directly.
+    criteriaLog: createCriteriaLog(
+      criteriaLogPath(input.policy.holdoutRoot ?? defaultHoldoutRoot()),
+    ),
     diff: patchDiffInspector(input.patchFile, input.policy.testRoot),
     nowIso: input.nowIso,
     ...(input.modelId === undefined ? {} : { modelId: input.modelId }),

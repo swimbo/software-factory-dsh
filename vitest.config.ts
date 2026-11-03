@@ -8,6 +8,10 @@ export default defineConfig({
       'packages/**/*.test.ts',
       'apps/**/*.test.ts',
       'e2e/cli/**/*.test.ts',
+      // The certification substrate is offline: it runs the whole wall against a throwaway
+      // store with the scripted executor, so it belongs in the gate the operator runs before
+      // trusting a certificate. Excluded from the gate is how a claims-bearing suite rots.
+      'e2e/certification/**/*.test.ts',
       'scripts/**/*.test.ts',
     ],
     exclude: ['**/node_modules/**', '**/dist/**'],
