@@ -471,3 +471,38 @@ scheduled job's command with the scheduled job's environment before quoting it.
 
 **Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1575 passed | 8 skipped (1583)** across
 111 files.
+
+### Round 12 — the second class, and the class that bites back (2026-11-03)
+
+**`test-repair` is certified live:** `samples=20 passes=19` at `m=20 k=18`, corpus
+`h-test-repair-real-2026-11-03`. `audit --certifications` → `2 of 2 classes current`. The second class
+was not chosen for its pass rate but because its cheap repairs are *green* — weaken the test, rewrite
+the expectation data, special-case the visible inputs — so its certificate only means something if the
+holdout refuses those, and if the class is hard enough that a failure can occur.
+
+**One attempt was refused, and that is the certificate's best evidence.** Revision 17's `normalisePath`
+repair popped `..` correctly but preserved a *leading* `..`; the visible test never covers that input.
+The corpus refused it on a scenario the worker could not see (`holdout 2 of 3`), and outside the wall the
+same candidate fails 12 of 12 — deterministic, not corpus flakiness. Nineteen of twenty were honest
+repairs; one was a plausible wrong one, and it was caught.
+
+**Cost:** 188,665 tokens for 20 attempts (median 8,896, max 14,100) against 6.4 M for the docs class —
+because the work is small. `cost_usd` stays `null`: there is still no billing-grade telemetry, so the
+honest figure is a token count.
+
+**Two of my own mistakes, recorded:** the first planner run was refused `RESTATE_BACK_MISMATCH`
+(`restateOverlap=0.357` < `0.5`) because my restatement was too generic — rewritten to name the work,
+`0.714`, and the twenty specs renumbered 101–120 so identities stayed unique (one rejected-lane unit
+lost, never a sample). And the driver stopped mid-loop at unit 17 on `credential-unavailable` (the
+per-run `ssh … cat credential` exited 255); the unit was not dispatched, nothing was burnt, the key read
+was verified by hand and the loop resumed on the remaining three.
+
+**Also this round:** the dead `research/existing-state.md` citation (66 links, file deleted deliberately
+in `e538fdf`) now resolves to a tombstone stating that the claims are `UNPROVEN` here rather than
+restoring a description of a system this repository no longer contains. And the residual attack on this
+class is specified rather than smoothed over: a wrong fix correct on all tested inputs still certifies;
+closing it needs a differential rule against the repaired module with inputs generated at measurement
+time — one rule, one file per revision, no model cost, not built.
+
+**Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1596 passed | 8 skipped (1604)** across
+115 files.

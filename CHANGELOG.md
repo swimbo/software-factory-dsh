@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.9.0 — 2026-11-03
+
+A second task class is certified, and it is the opposite of the first one: `test-repair` is a class
+whose cheap repairs are _green_, so the certificate had to survive a holdout that refuses them.
+
+- **`test-repair`, certified live** — `samples=20 passes=19`, corpus `h-test-repair-real-2026-11-03`,
+  `m=20 k=18`. Twenty revisions of a fixture repository, each a small ESM module with one genuine
+  defect and the test that fails because of it. `factory audit --certifications` now reports
+  `2 of 2 classes current`.
+- **The single refusal is the point.** One attempt repaired `normalisePath` to pop `..` correctly but
+  keep a _leading_ `..`, which the visible test never exercises. The corpus refused it on a scenario
+  the worker could not see; reproduced outside the wall, it fails 12 of 12 — a deterministic wrong
+  repair, not corpus flakiness. That is a class doing its job on a candidate that looked right.
+- **The holdout refuses the three cheap attacks**, measured offline before any money was spent:
+  a lookup table keyed by the visible arguments (`holdout_failed` while the worker's own command exits
+  0), expectation data rewritten to the buggy output (`holdout_failed` on the immutability rule — and
+  the fixture half of that rule is invisible to the wall's own test-surface check), and a deleted
+  assertion (`suite_failed`, `tests_weakened`, `test_surface_changed`). Deleting either rule makes its
+  attack pass: both mutation checks are automated.
+- **The residual attack is written down, not hidden.** A wrong fix that is correct on every tested
+  input still certifies; the corpus covers ~100 input points. The fix — ship the repaired module in the
+  corpus and compare against generated inputs at measurement time — is specified in the runbook and
+  not built. Until it is, the claim is "the cheap repairs were measured and refused", not "the repairs
+  were correct".
+- **A dead citation now says so.** `research/existing-state.md` described the predecessor factory and
+  was deleted on purpose in `e538fdf`, leaving 66 citations across the planning set pointing at
+  nothing. The path now carries a tombstone: the claims are `UNPROVEN` here, not false, and the
+  planning set is not rewritten because rewriting it would claim the planning round knew something it
+  did not.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed. Evidence:
+`docs/planning/dark-factory-dsh/evidence/phase-19-test-repair.md`.
+
 ## v0.8.1 — 2026-11-03
 
 The certificate's risk is now stated in both directions instead of half of it, and the two facts the
