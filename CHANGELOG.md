@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.8.1 — 2026-11-03
+
+The certificate's risk is now stated in both directions instead of half of it, and the two facts the
+live run cost us are written where an operator reads them.
+
+- **β(p) is computed, not assumed.** With `m` and `k` fixed, a class whose true pass rate is `p` is
+  certified iff at least `k` of its `m` attempts pass, so β(p) = P(Bin(m,p) ≥ k) — exactly, in rational
+  arithmetic, next to the α it already published (`certificationRisk` in
+  `packages/wall/src/operating-point.ts`). The refused tail at `p0 = 0.95` reproduces the ratified α
+  digit for digit (`0.07548367378849634297`), and the runbook's table is the function's output with a
+  heredoc to regenerate it. What it says is uncomfortable and now unavoidable: a class that truly
+  passes 90% of the time is still certified 0.677 of the time. The operating point is a floor on class
+  quality, not a filter against mediocre classes.
+- **`k = m` does not mean α = 0** — it means `1 − 0.95²⁰ = 0.6415…`, because a truly-95% class fails
+  at least one of twenty attempts about two times in three. A stricter gate refuses more, it is not a
+  safer one. Also fixed a silent zero in the exact printer: a probability below 1e-20 printed as
+  `0.000…` and now prints `<1e-20`, so it can never read as impossible.
+- **The wall's detection is counted, and decomposed.** Five planted single-rule regressions are all
+  refused, and the spec states which layer refused each: three of them pass the visible check and the
+  wall's suite and are caught only by the hidden holdout — those are the detections the class corpus
+  can claim — while two are also caught by the visible check, so counting them as holdout evidence
+  would overstate it. A two-rule regression is refused with two failing rows, and a clean repair still
+  passes. Deleting a rule from the corpus makes that rule's regression _pass_: the count means
+  something.
+- **`FACTORY_MODEL_API=openai-completions` is documented**, in `docs/runbooks/live-model.md` and in the
+  certification runbook's env block, with its failure mode: the overlay's default wire shape is wrong
+  for the factory's proxy, so the worker gets `401 unknown-token`, the verdict is `unknown`, and that
+  revision stays in `samples` as a permanent non-pass. It cost two units to learn.
+- **Two paid-path facts recorded:** `samples` counts distinct base revisions judged (reusing one moves
+  the count by zero), and a launch that fails leaves the unit `dispatched` — `factory recover` finishes
+  a launch that never started, a person `abort`s one whose worker died, and neither writes a verdict.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed; test stage **1575 passed | 8
+skipped** across 111 files.
+
 ## v0.8.0 — 2026-11-03
 
 A task class was certified live for the first time — and earning it exposed, and then fixed, four

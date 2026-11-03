@@ -434,3 +434,40 @@ more than an order of magnitude for real documentation work.
 
 **Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1559 passed | 8 skipped (1567)** across
 110 files (`docs/verification/2026-11-03T04-40-19Z/`).
+
+### Round 11 — the certificate's other side (2026-11-03)
+
+**β stopped being a shrug.** With `m=20, k=18` a class whose true pass rate is `p` is certified iff
+≥ 18 of 20 attempts pass, so β(p) = P(Bin(20,p) ≥ 18) — arithmetic, not a corpus.
+`certificationRisk()` computes it exactly in rational arithmetic beside the α it already published;
+the refused tail at `p0 = 0.95` reproduces the ratified α digit for digit (`0.07548367378849634297`),
+and the runbook's six-row table is the function's own output. It says something uncomfortable: a class
+that truly passes 90% of the time is still certified **0.677** of the time. The operating point is a
+floor on class quality, not a filter against mediocre classes.
+
+**The arithmetic corrected me twice.** I expected `k = m` to give α = 0; it gives
+`1 − 0.95²⁰ = 0.6415…`, because a truly-95% class fails at least one of twenty attempts about two
+times in three — a stricter gate refuses more, it is not a safer one. And the exact printer silently
+rendered a probability below `1e-20` as `0.000…`; it now prints `<1e-20`, so a vanishing risk can never
+read as an impossible one.
+
+**Detection is a count, decomposed by layer.** Five planted single-rule regressions are all refused;
+three of them keep a green visible check *and* a green wall suite and are caught only by the hidden
+holdout — those are the detections the corpus can claim — while two are also caught by the visible
+check, so counting them as holdout evidence would overstate the claim. A two-rule regression is refused
+with two failing rows, and a clean repair still passes. Deleting a rule from the corpus makes that
+rule's regression pass, measured: the count is not vacuous.
+
+**Both doc gaps from the paid run closed.** `FACTORY_MODEL_API=openai-completions` now appears where a
+live run is set up, with its failure mode (wrong wire shape → our own proxy answers `401
+unknown-token` → `unknown` verdict → that revision is a permanent non-pass in `samples`; it cost two
+units). Plus: `samples` counts distinct base revisions judged, and a failed launch leaves the unit
+`dispatched` — `recover` finishes a launch that never started, a person aborts one whose worker died.
+
+**Also corrected in the record:** running `alerts` from a shell without the plist's anchor variables
+reported `ANCHOR_MISSING`, and I read that as the daily job's state. It was not — with the agent's own
+environment the run is `{"anchor":{"state":"fresh","scope":"off-host",…},"alerts":[],…}`, exit 0. Run a
+scheduled job's command with the scheduled job's environment before quoting it.
+
+**Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1575 passed | 8 skipped (1583)** across
+111 files.

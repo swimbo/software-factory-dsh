@@ -132,8 +132,21 @@ certificate carries a pre-split digest.
 
 - **α = 0.0755 is not a measurement of this class.** It is the operating point's false-refusal
   risk for a class that truly passes `p0 = 0.95`: about one honest class in thirteen fails.
-- **β is unmeasured.** There is no known-bad corpus, so the probability of certifying a class that
-  regresses is unknown.
+- **β has two halves, and they are now both stated.** The *power* half is arithmetic: with
+  `m = 20, k = 18`, β(p) = P(Bin(20,p) ≥ 18), so a class that truly passes 90% of the time is still
+  certified **0.67693** of the time — the operating point is a floor on class quality, not a filter
+  against mediocre classes (`certificationRisk()` in `packages/wall/src/operating-point.ts`, table in
+  the runbook §6, every digit pinned by a spec). The *detection* half is a count, not a rate: of five
+  planted single-rule regressions, **5 of 5 were refused**, three of them with a green visible check
+  and a green wall suite — those three are detections only the hidden holdout can make — one
+  two-rule regression was refused with two failing rows, and one genuinely clean repair still passed,
+  so the count cannot be inflated by a wall that refuses everything
+  (`e2e/certification/regressions.test.ts`; deleting a rule from the corpus makes that rule's
+  regression *pass*, measured).
+- **The arithmetic corrected an assumption of mine.** I expected `k = m` to make α zero. It does not:
+  α = `1 − 0.95²⁰ = 0.641514…`, because a class that truly passes 95% fails at least one of twenty
+  attempts about two times in three. α = 0 needs `p0 = 1`; a stricter gate is a *more* refusing one,
+  not a safer one, and the runbook now says so.
 - **The holdout is five rules I asked for and a teammate wrote.** It can only measure what its
   author thought of, and it is not in the repository, not in the prompt, not in the launch record
   and not in the attempt clone (asserted against a real clone in
@@ -142,6 +155,24 @@ certificate carries a pre-split digest.
   row is `stale`; nothing re-certifies automatically, and a later failing unit does not revoke it.
 - **The work was documentation repair on a copy of this repository's markdown**, not this
   repository's live docs. The class claim is about the kind of task, not about this tree.
+
+## 5b. The daily job, measured with its own environment
+
+The installed `ai.factory.alerts` agent sets `FACTORY_HOME`, `FACTORY_ANCHOR_SSH=hermes-control` and
+`FACTORY_ANCHOR_PATH`. Running `alerts` with **exactly** that environment:
+
+```json
+{"ok":true,"schema":"alerts.v1","anchor":{"state":"fresh","scope":"off-host","ageHours":2.34,
+ "transport":"command ssh hermes-control:$HOME/.factory/anchors/software-factory-dsh.jsonl",
+ "reason":"anchored 2.3 h ago, off-host"},"alerts":[],"counts":{"total":0,...}}
+```
+
+No alerts, exit 0 — the certificate is current *and* the ledger's off-host anchor is fresh, so the
+04:00 job is green end to end for the first time. Worth recording because it corrects a mistake made
+in the same session: running `alerts` from an interactive shell that lacked the plist's anchor
+variables reported `ANCHOR_MISSING` and I read that as the daily job's state. It was not — the job
+carries its own environment, and an operator's shell is not the job. **Run a scheduled job's command
+with the scheduled job's environment before quoting its output.**
 
 ## 6. What remains open, after the fixes
 
@@ -153,6 +184,10 @@ certificate carries a pre-split digest.
    attempt on this class counts `samples=1`, so re-certifying after this change needs twenty fresh
    attempts. The class stays `current` meanwhile because the judgement still finds the older
    `certified` row.
-2. **β remains unmeasured** — there is still no known-bad corpus.
+2. **β is stated, not closed.** The power curve is exact and the detection count is measured, but a
+   detection *rate* — how often an arbitrary real regression slips past the five rules — would need a
+   corpus of realistic regressions written by someone other than the class's author. Five planted
+   single-rule breakages are evidence that the wall discriminates; they are not a measurement of the
+   wall's sensitivity in the wild.
 3. `docs/runbooks/certify-class.md` §7 now carries the three fixes; `live-model.md` still needs the
    `FACTORY_MODEL_API=openai-completions` requirement stated where an operator reads it.
