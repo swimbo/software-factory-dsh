@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.6.1 — 2026-11-02
+
+The alert channel is real: `factory alerts --notify` now delivers to a Discord channel, and the
+webhook secret lives in a file rather than in a launch agent.
+
+- **Discord is a first-class transport.** A `discord.com`/`discordapp.com` `/api/webhooks/` URL gets a
+  Discord-shaped body — one-line `content`, one embed per alert (title = the code, description = the
+  meaning and the literal `next:` command), red for integrity, amber for "the anchor host could not be
+  reached" — instead of the raw `alerts.v1` document that Discord would reject. Any other URL keeps
+  the raw POST, byte for byte. `allowed_mentions: {parse: []}` is unconditional: a message cannot ping
+  a role or `@here` whatever it contains. Limits are enforced as data, not hope — 2,000-char content,
+  10 embeds, 6,000-char body — and a truncated page says `…and N more, see ~/.factory/alerts.log`
+  rather than dropping alerts.
+- **204 and 429 are handled as Discord means them.** `204 No Content` is a success (there is no body
+  to parse); `429` is retried once after `retry_after`, fractional seconds honoured and the wait capped
+  at 5 s because this runs in a timer job; `400` quotes Discord's own `message` and is not retried;
+  redirects stay refused; a failed delivery still cannot change the exit code.
+- **The webhook is a credential, so it is a `0600` file.** Resolution:
+  `FACTORY_ALERTS_WEBHOOK_URL` (one-offs and tests) → `FACTORY_ALERTS_WEBHOOK_URL_FILE` →
+  `$FACTORY_HOME/secrets/alerts-webhook`. The file is `fstat`ed on its open descriptor before a byte is
+  read, and a group- or world-readable file is refused with the `chmod 600` line instead of being used
+  — a token in a backed-up plist is a token in a backup. The launch agent's own comment now says this
+  rather than recommending the env var, and the repo's plists are well-formed XML again (a comment
+  containing `--notify` is legal to `plutil` and illegal to a strict parser).
+- **Installed and proven on this host.** The 04:00 agent was reinstalled with `--notify` and
+  kickstarted: `NOTIFY  DELIVERED — https://discord.com accepted the Discord message (HTTP 204, 1
+attempt)`, exit 9 for the honest reason (`CERT_NEVER`). The previous plist is backed up beside
+  `~/.factory/`.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed, test stage **1501 passed |
+7 skipped (1508)** across 100 files with every `@docker` spec run; `apps/cli/src` alone is 263 passed
+across 16 files, 29 of them new. Details, the one live delivery, and a hazard worth knowing — the gate
+goes green with the eleven `@docker` specs skipped when the Docker daemon happens to be stopped, so
+"0 failed" is not "the container layer ran" — are in
+`docs/planning/dark-factory-dsh/evidence/phase-16-round.md` §8.
+
 ## v0.6.0 — 2026-11-02
 
 R5's dead end is closed, and two controls stop being write-only. The broker could refuse a

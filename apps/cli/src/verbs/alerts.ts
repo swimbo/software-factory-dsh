@@ -372,6 +372,11 @@ export async function runAlerts(input: VerbInput): Promise<number> {
     await deliverNotification(document, decision.exitCode, {
       env: ctx.env,
       platform: process.platform,
+      // Explicit, not inferred: the transport resolves `FACTORY_HOME/secrets/alerts-webhook` when no
+      // URL is configured, and the composition root is the only place that knows which home this
+      // invocation is using. A default would read the right file here and the wrong one under a test
+      // that set `FACTORY_HOME` to a throwaway directory.
+      home: ctx.home,
       warn: ctx.ui.err,
     });
   }
@@ -391,7 +396,7 @@ export const alertsVerb: VerbSpec = {
   configure: (command) =>
     command.option(
       '--notify',
-      'also deliver the alert set: a macOS notification, or a POST to FACTORY_ALERTS_WEBHOOK_URL',
+      'also deliver the alert set: a macOS notification, or a Discord webhook read from $FACTORY_HOME/secrets/alerts-webhook (mode 0600)',
     ),
   action: runAlerts,
 };

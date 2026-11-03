@@ -89,12 +89,15 @@ policy or model change; the audit tells you the certificate expired and a person
 class. **What checks it.** `factory alerts` runs both judgements in one read-only command — importing
 `verifyAnchor` and `certificateRecency`, not restating them — and exits `0` clean, `9` for an integrity
 alert, `8` when the anchor host is unreachable. A launchd job runs it daily at 04:00 into
-`~/.factory/alerts.log`. **Still true:** nothing pages a phone or an inbox by itself, and there is no
-on-call rotation to escalate to. An operator who opts in can be told — `factory alerts --notify` (run
-by the daily job) raises one macOS notification on this machine, or, with
-`FACTORY_ALERTS_WEBHOOK_URL` set, makes exactly one bounded POST of the same `alerts.v1` JSON to an
-endpoint you configured. Nothing retries a lost notification, and a host asleep at 04:00 stays quiet
-until it wakes. Expiry is _detectable_; whether it is _escalated_ is now the operator's choice.
+`~/.factory/alerts.log`. **Still true:** there is no on-call rotation and nothing pages a phone by
+itself. An operator who opts in can be told — the daily job runs `factory alerts --notify`, which
+raises one macOS notification on this machine, or makes exactly one bounded POST to the webhook in
+`$FACTORY_HOME/secrets/alerts-webhook` (mode `0600`, refused if it is readable by anyone else). A
+Discord webhook gets a message with one embed per alert, a red card for integrity and an amber one
+when the anchor host is unreachable, and `allowed_mentions: {parse: []}` so a message can never ping a
+role or `@here`; any other URL gets the raw `alerts.v1` JSON. Nothing retries a lost notification, and
+a host asleep at 04:00 stays quiet until it wakes. Expiry is _detectable_; whether it is _escalated_ is
+now the operator's choice.
 
 ## Packages
 
@@ -182,10 +185,11 @@ request` is read-only and prints the normalised operation, the exact payload to 
   `~/.factory/alerts.log`) asks both expiry questions in one read-only command and answers in an exit
   code: `0` clean, `9` a stale/missing/rolled-back anchor, a quarantined store or an expired class
   certificate, `8` when the anchor host cannot be reached — a transport failure is never reported as
-  "fine". **Notification is opt-in and local:** `factory alerts --notify` reaches this machine's
-  notification centre, or an endpoint you configured with `FACTORY_ALERTS_WEBHOOK_URL` (exactly one
-  bounded POST of the same `alerts.v1` JSON). It does not reach a phone or an inbox by itself, nothing
-  retries a lost notification, and a host asleep at 04:00 stays quiet until it wakes. Still not built:
+  "fine". **Notification is opt-in:** `factory alerts --notify` reaches this machine's notification
+  centre, or the webhook in `$FACTORY_HOME/secrets/alerts-webhook` (a Discord channel message with one
+  embed per alert and no mentions, or the raw `alerts.v1` JSON for any other endpoint), exactly one
+  bounded POST, `0600`-only. It does not reach a phone by itself, nothing retries a lost notification,
+  and a host asleep at 04:00 stays quiet until it wakes. Still not built:
   **scheduled re-certification** (a monitor says a certificate expired; a person decides to re-measure
   the class).
   ND3's ceiling is proven **through the real executor** (a paid `@live` spec arms it and crosses it on

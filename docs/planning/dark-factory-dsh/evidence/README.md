@@ -7,8 +7,10 @@ stated rather than implied.
 
 The whole-tree gate at the time of writing: `bash scripts/verify.sh` → **7 passed, 1 skipped, 0 failed**
 (preflight, typecheck, lint, format:check, test, build, panel; `live-model` skipped without a key), test
-stage **1472 passed | 7 skipped (1479)** across 99 passed files, measured at `57db9b5`
-(`docs/verification/2026-11-02T23-20-42Z/`), with all three `@docker` suites running. Every run writes
+stage **1501 passed | 7 skipped (1508)** across 100 passed files, measured at `5b9d6c3`
+(`docs/verification/2026-11-03T02-17-45Z/`), with all three `@docker` suites running — note that the
+same command reports `0 failed` with those eleven specs *skipped* when the Docker daemon is stopped, so
+read the skip count, not only the failure count. Every run writes
 `docs/verification/<run-id>/{verify.log,summary.json}`, and the summary names the commit it measured.
 
 | Phase | What it produced                                                                                           | Evidence                                                                                             | Re-run                                                            |

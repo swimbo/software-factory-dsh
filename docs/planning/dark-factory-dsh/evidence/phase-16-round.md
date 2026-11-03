@@ -239,3 +239,60 @@ does at 04:00); and the non-darwin path end-to-end (unit seam only, `platform: '
 4. **Scheduled re-certification** — a monitor says a certificate expired; a person decides to
    re-measure, and the measurement is paid. This is the last item standing between the operator's
    alerts and an empty inbox.
+
+## 8. Addendum — the channel is now a real Discord channel (`v0.6.1`, `5b9d6c3` + review)
+
+§4 shipped a transport that POSTs `alerts.v1` to any URL. The operator's channel is a **Discord
+webhook**, and Discord does not accept that document: it wants `content`/`embeds`, answers `204 No
+Content` on success and `429` with `retry_after` under load. So §4's honest sentence — "an operator who
+opts in can be told" — was true only for endpoints that happen to speak our JSON. This addendum closes
+that, and records the one delivery that proves it.
+
+**What changed.** A Discord URL (`discord.com`/`discordapp.com` + `/api/webhooks/`) takes a
+Discord-shaped body: one-line `content`, one embed per alert with the code, the meaning and the literal
+`next:` command, red for integrity, amber for "anchor unreachable"; `allowed_mentions: {parse: []}` is
+unconditional, so no message can ping a role or `@here`; content/embed/body limits are enforced with an
+`…and N more` tail rather than silent drops. `204`/`200` are success, `429` is retried once after
+`retry_after` (fractional honoured, capped at 5 s because a timer job must not sleep a minute), `400`
+quotes Discord's message and is not retried, redirects stay refused, and the exit code is still the
+evidence's. The secret moved to `$FACTORY_HOME/secrets/alerts-webhook`, `fstat`ed on its open descriptor
+and refused unless it is `0600` — a token in `~/Library/LaunchAgents` is a token in whatever backs that
+directory up. 29 new loopback-only specs (`apps/cli/src/notify-discord.test.ts`); deleting the
+`allowed_mentions` line turns the `@here` spec red (`expected undefined to deeply equal { parse: [] }`).
+
+**The live delivery, from the installed agent, not from a shell.** The 04:00 job was reinstalled with
+`--notify` (`launchctl bootout` + `bootstrap`, previous plist backed up under `~/.factory/`) and
+kickstarted:
+
+```
+$ launchctl kickstart -k gui/501/ai.factory.alerts ; tail -4 ~/.factory/alerts.log
+INTEGRITY  CERT_NEVER  all task classes
+           no class has ever been certified in this store; nothing to audit is not a licence
+           next: factory audit --certifications; docs/runbooks/certificate-expired.md
+NOTIFY  DELIVERED — https://discord.com accepted the Discord message (HTTP 204, 1 attempt)
+$ launchctl print … | grep 'last exit code'
+	last exit code = 9
+```
+
+So the timer job, its own environment, its own PATH, and the `0600` file all work together; exit 9 is
+`CERT_NEVER`, the honest reason (no class has ever been certified in this store).
+
+**A defect the install exposed.** `deploy/launchd/ai.factory.alerts.plist` had a comment containing
+`` `--notify` ``. `plutil` accepts it and `launchctl` loads it, but `--` is illegal inside an XML
+comment, so the file was not well-formed XML: any strict parser (python's `plistlib`, most CI linting)
+rejects it at line 15. Reworded, and both repo plists now parse with a strict parser as well as with
+`plutil`. Worth knowing because "the plist loads" was never the same claim as "the plist is valid".
+
+**The gate, re-run, and a hazard it hid.** `bash scripts/verify.sh` on this tree first reported `7
+passed, 1 skipped, 0 failed` — with the eleven `@docker` specs **skipped**, because OrbStack (`docker
+29.8.2`) had stopped between rounds and every docker suite self-gates on daemon readiness
+(`docs/verification/2026-11-03T02-15-30Z/`: 1486 passed | 22 skipped). That is the gate behaving
+exactly as designed and it is still a trap for a reader: `0 failed` does not mean the container layer
+ran. The daemon was restarted (`orb start`), `npx vitest run e2e/cli/docker` gave `11 passed (11)`, and
+the recorded run is `docs/verification/2026-11-03T02-17-45Z/` — **1501 passed | 7 skipped (1508)** across
+100 passed files, all `@docker` specs run. Both runs are kept.
+
+**Not verified:** that the message *rendered* in the channel (I can prove a `204` from Discord's API,
+not a screenshot); the `429` path against the real endpoint (loopback only — provoking a real rate
+limit on the operator's channel is not a test, it is an incident); `launchctl` install on any host
+other than this Mac. The macOS *local* notification path is unchanged from §4 and still unrendered.

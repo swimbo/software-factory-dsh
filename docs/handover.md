@@ -143,11 +143,12 @@ and the reason each one has:
   `privileged.decided` ledger event written when it is minted plus the `FACTORY_HOME/gates/` artifact a
   person reads; the store table records _which_ decisions have been spent, which is why "consumed"
   survives restarts. Replay protection is the marker, never a re-read of the artifact.
-- **No on-call rotation and no out-of-band escalation.** `factory alerts --notify` (the daily job runs
-  it) raises one macOS notification on this machine, or, with `FACTORY_ALERTS_WEBHOOK_URL` set, makes
-  exactly one bounded POST of the same `alerts.v1` JSON to an endpoint you configured. It does not
-  reach a phone or an inbox by itself, nothing retries a lost notification, and a host asleep at 04:00
-  stays quiet until it wakes — there is no rotation to escalate to.
+- **No on-call rotation.** `factory alerts --notify` (the daily job runs it) raises one macOS
+  notification on this machine, or makes exactly one bounded POST to the webhook in
+  `$FACTORY_HOME/secrets/alerts-webhook` — installed on this host, that is the Discord `#dsh` channel,
+  one embed per alert, `allowed_mentions: {parse: []}` so nothing can ping. The file must be `0600` or
+  the verb refuses it. Nothing retries a lost notification and a host asleep at 04:00 stays quiet until
+  it wakes; there is no rotation to escalate to.
 - **No scheduled re-certification.** `factory audit --certifications` exits 9 on a stale or absent
   class certificate; a person decides to re-measure the class.
 - **No anchor rotation and no automatic reconciliation** of a diverged anchor/ledger pair
