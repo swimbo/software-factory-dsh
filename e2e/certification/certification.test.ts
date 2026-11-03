@@ -77,12 +77,18 @@ function newestCertificate(): CertificateRow | null {
   }
 }
 
-function audits(): { code: number; body: Record<string, unknown> } {
+interface AuditRun {
+  readonly code: number;
+  readonly body: Record<string, unknown>;
+  readonly stderr: string;
+}
+
+function audits(): AuditRun {
   const run = runFactory(['audit', '--certifications', '--json'], {
     home: substrate.home,
     env: substrate.wallEnv(),
   });
-  return { code: run.code, body: jsonOf(run) };
+  return { code: run.code, body: jsonOf(run), stderr: run.stderr };
 }
 
 function alertCodes(): readonly unknown[] {
@@ -203,11 +209,14 @@ describe('twenty measured attempts of docs-typo-fix', () => {
         new Set([HOLDOUT_REVISION]),
       );
 
-      // `audit --certifications` reports a current class certificate, with the counts the store
-      // accumulated rather than the ones the loop would like. The *JSON* is the contract asserted
-      // here; the verb's exit code is not, because it is currently 9 for a reason unrelated to this
-      // class — see the report in the runbook's "what this does not prove" and the comment below.
+      // `audit --certifications` is the surface an operator actually reads, and after twenty
+      // measured attempts it has to be *clean*: exit 0, nothing listed as uncertified, no
+      // "STALE OR NEVER CERTIFIED" line on stderr. The audit used to fail this — see the comment on
+      // the mechanism assertions below — and a certificate the audit calls never-certified is a
+      // certificate an operator cannot use.
       const audit = audits();
+      expect(audit.code, audit.stderr).toBe(0);
+      expect(audit.stderr).not.toContain('STALE OR NEVER CERTIFIED');
       const classes = audit.body['classes'] as readonly Record<string, unknown>[];
       expect(classes).toHaveLength(1);
       expect(classes[0]).toMatchObject({
@@ -217,13 +226,47 @@ describe('twenty measured attempts of docs-typo-fix', () => {
         samples: 20,
         m: 20,
       });
-      // `uncertifiedUnits` still lists verified units, and this spec does not pin its contents
-      // beyond the two facts that must hold whatever the audit decides a unit-level judgement is:
-      // a rejected unit is never in it, and only units this run verified can be.
-      expect(audit.body['uncertifiedUnits']).not.toContain(unitIds[1]);
-      expect(audit.body['uncertifiedUnits']).not.toContain(unitIds[6]);
-      for (const listed of audit.body['uncertifiedUnits'] as readonly string[]) {
-        expect(unitIds.slice(0, 20)).toContain(listed);
+      expect(audit.body['uncertifiedUnits']).toEqual([]);
+      expect(audit.body['projectionPresent']).toBe(true);
+
+      // Why that is not automatic, asserted so a regression cannot pass: the store *strips*
+      // `certification` and `modelId` from the verdict body (`mapVerdict`, so the promotion
+      // signature cannot grow), which means a predicate that asks a verdict whether it carried a
+      // certificate answers "no" for every unit ever measured. That is what the audit used to do:
+      // it printed `STALE OR NEVER CERTIFIED 20 of 21 entries` and exited 9 on an honestly
+      // certified store. Reverting the one-line set construction in `apps/cli/src/verbs/audit.ts`
+      // to `verdict.verdict.certification === undefined` reddens the two assertions below, so they
+      // are the mutation's tripwire: the verdict carries no certificate, and the row it left behind
+      // is the only thing that says otherwise.
+      const certificates = openStore({ dir: join(substrate.home, 'state') });
+      try {
+        const audited = [...certificates.listUnits({ state: 'verified' })];
+        for (const state of ['promoted'] as const) {
+          audited.push(...certificates.listUnits({ state }));
+        }
+        const rejected = certificates.listUnits({ state: 'rejected' });
+        // The audit judges exactly the units that reached verified/promoted; a rejected unit is
+        // outside that surface and is not asked about. Every unit this loop submitted is one or the
+        // other — if a unit reached a fourth state the audit would silently stop covering it, which
+        // is the absence-as-approval failure the verb's own comments are about.
+        expect(audited.length + rejected.length).toBe(20);
+        expect(audited.length).toBeGreaterThanOrEqual(18);
+        const rows = certificates.classCertificates?.() ?? [];
+        const certificateVerdicts = new Set(rows.map((row) => row.verdictId));
+        for (const unit of audited) {
+          const verdict = certificates.latestVerdictForUnit(unit.unitId);
+          if (verdict === null) throw new Error(`no verdict stored for ${unit.unitId}`);
+          const body = verdict.verdict as unknown as Record<string, unknown>;
+          expect(body['certification'], 'the store strips the per-verdict certificate').toBe(
+            undefined,
+          );
+          expect(
+            certificateVerdicts.has(verdict.verdictId),
+            `verdict ${verdict.verdictId} left no certificate row behind`,
+          ).toBe(true);
+        }
+      } finally {
+        certificates.close();
       }
 
       // The alert that started this: CERT_NEVER is gone once the certificate exists. The anchor is
@@ -268,8 +311,11 @@ describe('twenty measured attempts of docs-typo-fix', () => {
         passes: 18,
       });
       const audit = audits();
+      expect(audit.code, audit.stderr).toBe(0);
+      expect(audit.stderr).not.toContain('STALE OR NEVER CERTIFIED');
       const classes = audit.body['classes'] as readonly Record<string, unknown>[];
       expect(classes[0]).toMatchObject({ state: 'current', outcome: 'certified', samples: 21 });
+      expect(audit.body['uncertifiedUnits']).toEqual([]);
       expect(alertCodes()).not.toContain('CERT_NEVER');
 
       // Both rows are kept: history is appended to, never rewritten. The certified row is still

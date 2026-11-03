@@ -47,5 +47,10 @@ point (`m` attempts, `k` of them passing). It is not a thing an operator or a jo
 no `factory certify`. So the only way to stop `factory alerts` reporting `CERT_NEVER` is to run enough
 real units of one class and let the verdicts accumulate.
 
-Not built: a batch driver that runs `m` units of a class and stops at `m - k` failures. Today that is a
-shell loop over `factory intent` + `factory run`, with the budget envelope as the stop condition.
+The batch driver is built: [`../../scripts/certify-class.sh`](../../scripts/certify-class.sh) runs `m`
+units of one class, reads the key per run, and stops at `m - k` failures — the third failure
+for the `m = 20, k = 18` operating point — so a doomed class costs three units rather than twenty. It
+refuses to start without the corpus, the class and a `FACTORY_HOME` that already exists.
+[`certify-class.md`](certify-class.md) is the whole path, including
+`scripts/certification-artifacts.sh`, which materialises the corpus and the twenty base revisions from
+this repository's own documentation so the loop has something to run against.

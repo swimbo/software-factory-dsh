@@ -8,7 +8,7 @@ the wall has judged `m` attempts of one class and `k` of them passed. The only w
 
 This runbook is the loop that spends the minimum and stops the moment the certificate becomes
 impossible. The driver lives at [`../../scripts/certify-class.sh`](../../scripts/certify-class.sh);
-the corpus layout is described in §3.
+the corpus layout is described in §4.
 
 **What a class certificate is.** One row in `class_certificates`, written inside the same
 transaction as the verdict that produced it: `task class`, `m`, `k`, `p0`, α, `samples`, `passes`,
@@ -37,7 +37,7 @@ for a live run are labelled as estimates.
 ```bash
 export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"   # 26.12.1, or preflight refuses
 export FACTORY_HOME="$PWD/.factory-certification"                # the store that will hold the evidence
-export FACTORY_HOLDOUT_ROOT="/path/outside/the/repo/holdout"     # the class corpus (§3)
+export FACTORY_HOLDOUT_ROOT="/path/outside/the/repo/holdout"     # the class corpus (§4)
 export FACTORY_HOLDOUT_TASK_CLASS="docs-typo-fix"
 export FACTORY_PRISTINE_REPO="/path/to/your-docs.git"            # a mirror git can clone from
 export FACTORY_REPO="your-docs"
@@ -64,12 +64,56 @@ SSH read:
 export CERTIFY_KEY_COMMAND="cat $FACTORY_HOME/secrets/bifrost-key"
 ```
 
-## 2. Plan twenty units — and only twenty
+## 2. Materialise the artefacts (free, once)
+
+Neither the corpus nor the twenty base revisions have to be written by hand. One script builds them
+from this repository's own documentation, in about six seconds, with no model call and no store
+write:
+
+```bash
+bash scripts/certification-artifacts.sh                                   # default root ~/.factory/certification
+bash scripts/certification-artifacts.sh --root /tmp/cert --revisions 3    # a small set, for a dry run
+```
+
+It prints the `export` block to paste, and this is what it leaves behind:
+
+| path                                        | what it is                                                                                                                                                     |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/`                                     | the repository the worker edits: this repository's `docs/**/*.md` with five class violations planted into three files per commit, one commit per base revision |
+| `docs.git/`                                 | a `--mirror` clone of it: the `FACTORY_PRISTINE_REPO` the wall clones                                                                                          |
+| `holdout/docs-typo-fix/<revision>/`         | the corpus `loadHoldout` reads (§4), with its rule scripts and `manifest.json`                                                                                 |
+| `spec-1.json … spec-<n>.json`, `restate.md` | one unit spec per base revision, and the restate-back text they bind                                                                                           |
+| `plan-units.sh`                             | submits and qualifies those specs against `$FACTORY_HOME`, then writes `units.txt`                                                                             |
+| `home/`                                     | an empty `FACTORY_HOME` for the loop; the store and the certificates end up here                                                                               |
+| `README.md`, `certification-artifacts.json` | what each piece is, and the marker that makes the root rebuildable                                                                                             |
+
+Three things it refuses, and each one is a certificate claim rather than tidiness:
+
+- **a root inside the checkout** — a corpus inside the repository is a corpus the worker can read;
+- **a non-empty directory it did not build** — it deletes and replaces its own root, nothing else;
+- **finishing if a planted revision stops violating all five rules** — a corpus that passes a
+  defective tree certifies nothing, so the build measures its own output before it returns.
+
+Documents of this repository that already break a class rule are dropped from the copy at build time
+and listed in `certification-artifacts.json`: broken relative links, `TODO` markers in prose, and
+everything that links to a dropped file. At the time of writing 48 of the 81 markdown files here do
+not survive that filter, and the number moves with the docs — that is a fact about these docs, not a
+defect of the build. The fixture is the subset that can honestly be repaired.
+
+The build never calls `intent` or `qualify`. A unit id only exists once the store has been written,
+and materialising artefacts has to stay repeatable and free: that is what `plan-units.sh` is for, and
+why it is emitted rather than run.
+
+## 3. Plan twenty units — and only twenty
 
 A certificate needs `m = 20` measured attempts. Each attempt is one unit whose base revision is a
 different commit of the docs repository and whose touch paths are `docs/`. One unit per revision, so
 that twenty attempts are twenty _different trees_ and the certificate is about the class rather than
 about one file.
+
+If you materialised the artefacts in §2, `<root>/plan-units.sh` is this section in executable form:
+run it against the `FACTORY_HOME` from that root and skip to §5. What follows is the same planner
+spelled out, for a corpus and a docs repository you built yourself.
 
 ```bash
 cat > restate.md <<'TEXT'
@@ -111,9 +155,9 @@ so twenty attempts are revisions 1…20 of the same slug. `restate.md` must cont
 qualifier's restate-back check is a token-overlap floor of 0.5, so the restatement has to name the
 same task in the same words. The
 `acceptance` oracle is the _visible_ check — the wall re-runs it on the candidate. It is a subset of
-the class rules: see §3 for why that gap is the point.
+the class rules: see §4 for why that gap is the point.
 
-## 3. The corpus: five rules, outside the repo
+## 4. The corpus: five rules, outside the repo
 
 `FACTORY_HOLDOUT_ROOT/<task-class>/<revision>/` holds a `manifest.json` (with `revisionHash`) and
 one script per rule; `loadHoldout` refuses an absent, empty or corrupt store, and a refusal is
@@ -141,7 +185,7 @@ anonymises the scenario ids (`holdout:01` … `holdout:05`). That is asserted ag
 [`../../e2e/certification/substrate.test.ts`](../../e2e/certification/substrate.test.ts) — the worker
 cannot read the measurement.
 
-## 4. Run the loop
+## 5. Run the loop
 
 ```bash
 bash scripts/certify-class.sh --units-file units.txt
@@ -171,13 +215,13 @@ ratified point moves the stop condition with it.
 | `5`  | an attempt came back `unknown` or needing a person                         | read that unit's verdict; the driver does not guess it was a pass |
 | `6`  | `factory run` refused the budget (`BUDGET_EXCEEDED`)                       | [budget-envelope-refusal.md](budget-envelope-refusal.md)          |
 | `8`  | the executor, mirror or credential was unusable — nothing was dispatched   | check `dsh`, the mirror, the key command                          |
-| `9`  | not returned by the driver; `audit` uses it for "stale or never certified" | read `classes[].state` in the JSON (see §6)                       |
+| `9`  | not returned by the driver; `audit` uses it for "stale or never certified" | read `classes[].state` in the JSON (see §7)                       |
 
 Named stop reasons: `failure-budget-exhausted`, `budget-refusal`, `environment-refusal`,
 `unmeasured-attempt`, `terminal-error`, `operating-point-reached`, `units-exhausted`,
 `credential-unavailable`.
 
-## 5. What "fixed" looks like
+## 6. What "fixed" looks like
 
 After twenty measured attempts (eighteen passing, two refused by the holdout):
 
@@ -195,17 +239,27 @@ If the loop stopped with `failure-budget-exhausted`, the honest reading is that 
 distinguish this class at this operating point. The fix is a better holdout or a better task class,
 not more attempts: re-running until it goes green is p-hacking the wall.
 
-## 6. What is dishonest or unattainable in this path
+## 7. What is dishonest or unattainable in this path
 
-- **`audit --certifications` exits `9` even after an honest certification.** Its
-  `uncertifiedUnits` list (in `apps/cli/src/verbs/audit.ts`, `certificateReport`) counts every
-  verified/promoted unit whose _re-read_ verdict has no `certification` field — but `mapVerdict` in
-  `packages/store/src/store.ts` deliberately does not persist that field ("read them with
-  `classCertificates()` / `certificatesForClass()`"). So a verified unit can never satisfy the
-  check, and the verb stays red while the class is `current`. **Read `classes[].state` in the JSON,
-  not the exit code**, and treat `uncertifiedUnits` as a list of units whose verdict predates the
-  certificate. The driver does exactly that. Reported, not patched, because the audit belongs to
-  another package.
+- **`audit --certifications` used to exit `9` after an honest certification — fixed, and pinned.**
+  Its `uncertifiedUnits` list (in `apps/cli/src/verbs/audit.ts`, `certificateReport`) asked each
+  verified/promoted unit's _re-read_ verdict whether it carried a `certification` field, but
+  `mapVerdict` in `packages/store/src/store.ts` deliberately strips that field, so no unit could
+  ever satisfy the check and the verb said `STALE OR NEVER CERTIFIED … of … entries` forever. It now
+  asks the certificate projection instead — did this verdict leave a row behind — and
+  `e2e/certification/certification.test.ts` asserts the three things an operator reads: exit `0`,
+  `uncertifiedUnits: []`, and no `STALE OR NEVER CERTIFIED` on stderr. Reverting that line reddens
+  the spec with the old line and exit `9` (measured: `18 of 19 entries` on a store with one rejected
+  unit). The driver still reads the store's `state` rather than the exit code, which stays correct
+  if the report is ever wrong again. One residual: `uncertifiedUnits` now means "a verified unit
+  whose verdict left no class-judgement row at all", not "a unit measured before `m` was reached" —
+  every verdict leaves a row, so a store at 3 of 20 samples reports an empty unit list and is kept
+  red by the class-level `never-certified` line instead. Covering both readings would mean asking
+  the projection for a row with `outcome: 'certified'` under the running basis, per unit's class;
+  that is a change to the audit, not to this loop.
+- **Nothing checks that the certificate was earned on a _varied_ corpus.** The artefacts script
+  refuses a revision whose planted defects stop discriminating, but a weaker corpus that still
+  discriminates is undetectable from the outside — see the next bullet.
 - **β is not measured.** Certifying a class that would regress is possible and unquantified.
 - **α is a property of the point, not of the class.** 0.0755 says "an honest class is refused about
   one time in thirteen"; it says nothing about how often a bad class is accepted.
@@ -214,8 +268,9 @@ not more attempts: re-running until it goes green is p-hacking the wall.
 - **Staleness is the only expiry.** Nothing re-runs a certification when the policy or model moves,
   and nothing raises an alert before a certificate goes stale — `audit --certifications` and
   `alerts` are commands someone has to run. **Not built**: a scheduled re-certification job.
-- **`docs/runbooks/live-model.md` still says the batch driver is not built.** It is now built; that
-  paragraph is out of date and should point here.
+- **The artefacts are a snapshot of these docs, not of yours.** `scripts/certification-artifacts.sh`
+  copies `docs/**/*.md` as they are on disk today; a docs change after the build makes the fixture
+  and the repository disagree. Rebuild (`--root` is disposable) before a loop you intend to trust.
 - **The offline proof measured the scripted executor.** The wall, store, criteria log, verdict and
   certificate path are real; the worker is not. The live path differs in exactly one way — a model
   makes the edits — and that is the part this suite cannot prove without spending.
@@ -223,7 +278,7 @@ not more attempts: re-running until it goes green is p-hacking the wall.
   unit's `factory run` refuses with `LANE_NOT_DARK`, which the driver classifies as a terminal error
   and stops.
 
-## 7. Per-unit cost model
+## 8. Per-unit cost model
 
 One unit is one attempt: one model turn over one or two steps. The only live measurement on record
 is ~12.7k tokens for one docs unit
@@ -238,20 +293,23 @@ call. The driver treats `6` as a stop, not a retry.
   free: mirror clone, attempt clone, receipt, faithfulness replay, five holdout scenarios on both
   sides, the visible suite, and the store write.
 
-## 8. The proof that this works, as measured
+## 9. The proof that this works, as measured
 
-| Step                                | Command                                                             | Result                                                                                                                                                |
-| ----------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| corpus loads, rules are class rules | `pnpm exec vitest run e2e/certification/substrate.test.ts`          | 4 passed — five rules fail every broken tree and pass every repaired tree; the corpus is outside the repo, absent from the prompt/launch record/clone |
-| pass, reject, and accumulation      | `pnpm exec vitest run e2e/certification/pipeline.test.ts`           | 3 passed — `samples` 1 → 2 → 3 across three revisions; the almost-fixed patch is `holdout_failed` with a green visible suite                          |
-| driver stop conditions              | `pnpm exec vitest run e2e/certification/driver.test.ts`             | 7 passed — including the mutation check: with the budget widened to `m - k + 1` the same plan runs past the third failure                             |
-| the driver over real verdicts       | `pnpm exec vitest run e2e/certification/driver-integration.test.ts` | 1 passed — four dispatches, third failure, fifth unit has no attempt; the substituted credential's sentinel is in no stream and no file               |
-| the certificate flips               | `pnpm exec vitest run e2e/certification/certification.test.ts`      | 2 passed — 20 real runs: `samples=19 passes=17 insufficient` → `samples=20 passes=18 certified`; `alerts` no longer reports `CERT_NEVER`              |
+| Step                                | Command                                                             | Result                                                                                                                                                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| corpus loads, rules are class rules | `pnpm exec vitest run e2e/certification/substrate.test.ts`          | 4 passed — five rules fail every broken tree and pass every repaired tree; the corpus is outside the repo, absent from the prompt/launch record/clone                                                    |
+| pass, reject, and accumulation      | `pnpm exec vitest run e2e/certification/pipeline.test.ts`           | 3 passed — `samples` 1 → 2 → 3 across three revisions; the almost-fixed patch is `holdout_failed` with a green visible suite                                                                             |
+| driver stop conditions              | `pnpm exec vitest run e2e/certification/driver.test.ts`             | 7 passed — including the mutation check: with the budget widened to `m - k + 1` the same plan runs past the third failure                                                                                |
+| the driver over real verdicts       | `pnpm exec vitest run e2e/certification/driver-integration.test.ts` | 1 passed — four dispatches, third failure, fifth unit has no attempt; the substituted credential's sentinel is in no stream and no file                                                                  |
+| the certificate flips               | `pnpm exec vitest run e2e/certification/certification.test.ts`      | 2 passed — 20 real runs: `samples=19 passes=17 insufficient` → `samples=20 passes=18 certified`; `audit --certifications` exits `0` with `uncertifiedUnits: []`; `alerts` no longer reports `CERT_NEVER` |
+| the persistent artefacts            | `pnpm exec vitest run e2e/certification/artifacts.test.ts`          | 6 passed — three revisions built in a temp root: every base fails all five rules and the visible check, the repair target passes both, the corpus loads and is absent from the repository's history      |
 
 Before the `criteriaLog` wiring in `apps/cli/src/wall.ts` was fixed, the same loop produced one row
 per run with `samples: 1` — the criteria log was created and discarded per evaluation, so
 `countClassAttempts` only ever saw the live revision and no number of paid attempts could reach
-`m`. The `1 → 2 → 3` sequence in the pipeline spec is that bug's regression test.
+`m`. The `1 → 2 → 3` sequence in the pipeline spec is that bug's regression test. The same is true of
+the audit's projection join described in §7: both were found by running the loop, and both now have a
+spec that goes red when the fix is reverted.
 
 ## Related
 

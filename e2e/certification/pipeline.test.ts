@@ -250,14 +250,21 @@ describe('the certification pipeline for docs-typo-fix', () => {
     const auditBody = jsonOf(audit);
     const classes = auditBody['classes'] as readonly Record<string, unknown>[];
     expect(classes[0]).toMatchObject({ state: 'never-certified', samples: 3, m: 20 });
-    // 3 < 20, so no class certificate exists, and the audit names the verified units rather than
-    // letting their verification imply a class judgement. The rejected unit is never in that list:
-    // it was measured and refused, which is a different fact. (What the audit *means* by an
-    // uncertified unit is an open question recorded in the runbook — `mapVerdict` in the store does
-    // not return `certification` at all, so a re-read verdict can never satisfy that check. The
-    // assertion here is only the part that holds either way.)
+    // 3 < 20, so no *certified* class certificate exists and the store must stay red. Two facts can
+    // carry that, and the audit's projection join changed which one does here:
+    //  - the class judgement is `never-certified` — a row with `outcome: 'insufficient'` is not a
+    //    certificate — and the verb counts a non-`current` class as bad and prints the line;
+    //  - `uncertifiedUnits` is now empty at this point. The audit asks the projection whether a
+    //    verified unit's verdict left a certificate row behind, and *every* verdict leaves one,
+    //    including the `insufficient` rows of a pre-`m` store. So the unit-level list means
+    //    "verified with no class-judgement row at all", not "measured before `m` was reached".
+    //    That gap is recorded in the runbook (§7); the assertion below pins the behaviour so a
+    //    future change to the meaning is a deliberate one.
+    expect(audit.stderr).toContain('STALE OR NEVER CERTIFIED');
+    expect(audit.stderr).toContain('1 of 1 entries');
     const uncertified = auditBody['uncertifiedUnits'] as readonly string[];
+    expect(uncertified).toEqual([]);
+    // The rejected unit is not verified, so it was never in that list either way.
     expect(uncertified).not.toContain(units[1]?.unitId ?? '');
-    expect(new Set(uncertified)).toEqual(new Set([units[0]?.unitId ?? '', units[2]?.unitId ?? '']));
   });
 });

@@ -1,6 +1,6 @@
 # Runbooks
 
-Nine 2am procedures. Each one is written for the person who did not build the thing: the symptom,
+Ten 2am procedures. Each one is written for the person who did not build the thing: the symptom,
 what the factory will refuse to do, the exact commands, what "fixed" looks like, and what to do when
 it does not work. Every command here was run against this tree; every limit that is real is labelled
 **not built** rather than described as a plan.
@@ -16,6 +16,7 @@ it does not work. Every command here was run against this tree; every limit that
 | [certificate-expired.md](certificate-expired.md)         | `audit --certifications` says a class certificate is stale                                                    | `9`, `8`           |
 | [evidence-expiry.md](evidence-expiry.md)                 | the morning check: did anything expire overnight?                                                             | `9`, `8`           |
 | [worker-container.md](worker-container.md)               | `run` refuses with `CONTAINER_UNAVAILABLE` or `CONFIGURATION_CONFLICT`, or you want the worker in a container | `8`, `4`           |
+| [certify-class.md](certify-class.md)                     | `alerts` reports `CERT_NEVER`: a class has never been certified, and you want it to be                        | `0`, `5`, `6`, `8` |
 
 Common ground, so no runbook has to repeat it:
 
