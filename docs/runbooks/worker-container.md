@@ -56,7 +56,12 @@ mountsDenied, labels}` — and `container: null` means "host process", never "un
 - **Not a second OS uid on this host.** The worker is not root _inside_ the container, but it is a
   container, not an account boundary on the machine. A root-level attacker on the host is out of scope.
 - **Network isolation is pinned by the argv spec, not probed from inside.** Deleting `--network none`
-  does not redden this suite; the wall's E2E-43 covers egress with a host control.
+  does not redden this suite; the wall's E2E-43 covers egress with a host control. The transport that
+  would let a containerised worker reach the credential proxy _is_ measured now —
+  `e2e/cli/docker/10-internal-bridge.test.ts` is a platform pin over docker's `--internal` network
+  (no default route, `ENETUNREACH` to the internet, the gateway not host-bindable on this runtime),
+  not a probe of the worker's own argv. See
+  [below](#when-the-two-settings-cannot-both-be-honoured).
 - **A `SIGKILL`ed control plane cannot clean up after itself — `factory recover` does.** `--rm` is a
   promise about the _client's_ lifetime, and the launcher's sweep runs in the process that just
   died, so the next recovery is the only later process that still knows the attempt id. For the
@@ -105,22 +110,79 @@ $ FACTORY_WORKER_ISOLATION=container FACTORY_LIVE_MODEL=1 BIFROST_API_KEY=sk-…
 CONFIGURATION_CONFLICT: FACTORY_WORKER_ISOLATION=container runs the worker with `--network none`,
 but a live model (FACTORY_LIVE_MODEL=1) authenticates through the credential proxy, which binds
 127.0.0.1 on the host. A container with no network cannot reach this host's loopback, so the model
-call inside the worker could never be authenticated. Two ways forward: unset FACTORY_WORKER_ISOLATION
-to drop the container and run this turn on the host (the default), or unset FACTORY_LIVE_MODEL and
-run the model call on the host, outside the containerised worker. Nothing was dispatched and no
-budget was reserved.
+call inside the worker could never be authenticated. The transport that would make the pair
+possible is not buildable on this host: docker runs in a VM here, so the `--internal` network
+gateway is not an address on this host (binding it fails with EADDRNOTAVAIL) and an `--internal`
+network has no route to a host process (ENETUNREACH, not a refusal). Both are measured by
+e2e/cli/docker/10-internal-bridge.test.ts and recorded in docs/runbooks/worker-container.md. Two
+ways forward: unset FACTORY_WORKER_ISOLATION to drop the container and run this turn on the host
+(the default), or unset FACTORY_LIVE_MODEL and run this turn without a model call
 traceId T-…
   runbook: docs/runbooks/worker-container.md §"When the two settings cannot both be honoured" — the
-daemon and the image are fine; unset FACTORY_WORKER_ISOLATION (drop the container) or
-FACTORY_LIVE_MODEL (call the model from the host), then re-run: factory run <unitId>
+  daemon and the image are fine; unset FACTORY_WORKER_ISOLATION (drop the container) or
+  FACTORY_LIVE_MODEL (call the model from the host), then re-run: factory run <unitId>
 $ echo $?
 8
 ```
 
-Why it cannot work: the container's network namespace is empty (`--network none`), and "this host's
-`127.0.0.1`" is a different machine from inside that namespace — the proxy is not reachable at any
-address the container has. The alternative — putting the proxy _inside_ the container — would put
-the operator's credential where the worker runs, which is what the container is for.
+### Why it cannot work on this host — measured, not asserted
+
+The design that would make the pair possible is a docker `--internal` bridge: the credential proxy
+binds the bridge gateway instead of loopback, the worker joins that network, and docker's missing
+NAT/default route keeps the worker off the internet. That design works on a native-Linux daemon,
+where the gateway (`docker0`'s address) is a real host interface. **It cannot work on this host**,
+because the docker daemon runs in a VM (OrbStack on macOS): the gateway is an address _inside_ the
+VM, and `--internal` drops the only container→host path the runtime otherwise provides.
+
+`npx vitest run e2e/cli/docker/10-internal-bridge.test.ts` pins this. It is a **platform pin, not a
+product feature**: green means docker's behaviour is still what this document says — not that
+container + live model works. On this host (macOS/OrbStack, docker 29.8.2) it measured, from inside
+the worker image:
+
+| measurement                                                                                 | result                                                                                                                |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `docker network inspect` on a `--internal` network                                          | `Internal: true`, subnet `192.168.97.0/24`, gateway `192.168.97.1`                                                    |
+| route table inside a container on it (`/proc/net/route`)                                    | only `192.168.97.0/24` — **no default route**                                                                         |
+| `1.1.1.1:443` and `8.8.8.8:53` from that container                                          | `ENETUNREACH` ("no route"), not `ECONNREFUSED` and not a 401                                                          |
+| the same probe from the default bridge                                                      | `CONNECTED` (control: the probe works)                                                                                |
+| container → sidecar container on the same internal network                                  | `CONNECTED` (control: the network works)                                                                              |
+| host bind to the gateway `192.168.97.1`                                                     | **`EADDRNOTAVAIL`** — the address is not on this host (interfaces are en0 `192.168.68.82`, bridge100 `192.168.139.3`) |
+| host credential proxy, bound `127.0.0.1` (today's default), from a default-bridge container | `CONNECTED`; no token → `401 unknown-token`; scoped token → `200`, gateway saw `Bearer <gateway key>`, usage recorded |
+| that same proxy, from the `--internal` network                                              | **`ENETUNREACH`** (routing), and `host.docker.internal` does not resolve there (`EAI_AGAIN`)                          |
+
+The last three rows are the both-directions part: the proxy is proven alive and reachable from a
+network that has a route to this host, and the failure from the internal network is a _routing_
+failure, not the proxy refusing. A spec that only showed the happy path would pass on a bridge
+that leaks; the negative is asserted as an error **kind** for exactly that reason. The suite cleans
+up by label (`org.factory.e2e=<run token>`) and fails if its network or a container it created
+survives, so a leftover network can never block the next attempt.
+
+### What is now possible, and what is not
+
+**Possible and shipping:** `packages/credential-proxy` can bind a configured address instead of
+loopback (`bindAddress`; the default is still `127.0.0.1`, unchanged for every existing caller) and
+reports the address the kernel actually bound (`boundAddress`). That is the seam a container
+transport needs; on its own it changes nothing an operator can turn on, and no launch record names
+it yet because the launcher still passes the default.
+
+**Not possible on this host, and not built:**
+
+1. **Native-Linux docker bridge.** Viable: the gateway is a real host interface there, so the proxy
+   binds it and a worker on the `--internal` network reaches it while the internet stays
+   `ENETUNREACH`. Preconditions: a Linux host (this tree has no CI; `scripts/verify.sh` runs on
+   macOS), and code that does **not** exist in this tree — create/reuse the network, attach the
+   worker to it, bind the proxy to the gateway, and sweep the network with the container on every
+   exit path and in `factory recover`. The Linux half of the platform-pin spec is written but
+   **UNPROVEN**: it has never run against a Linux daemon.
+2. **A proxy sidecar container.** A container running the credential proxy, attached to both an
+   `--internal` network (shared with the worker) and a NAT network (so it can reach the gateway),
+   is the one design that would work on this host today. It is not built, and it is not a refactor:
+   it moves the gateway key into a container — a different credential boundary from ADR-007's "the
+   key stays in this process" — and it depends on container→tailnet egress to the gateway host,
+   which nobody has measured. That is an operator decision, not a default this factory may pick.
+
+Neither option was measured beyond the table above; both are written down so the next round starts
+from the measurement instead of the assumption.
 
 Why it is refused **before** dispatch: the worker would otherwise start, fail to authenticate, and
 die as an unexplained 401 that looks like a model fault. The probe is the last place where "nothing

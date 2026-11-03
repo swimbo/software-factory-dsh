@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_BIND_ADDRESS,
   startCredentialProxy,
   pathWithinPrefix,
   type CredentialProxy,
@@ -135,6 +136,68 @@ async function call(
 
 const reasonOf = (body: string): string =>
   (JSON.parse(body) as { error: { reason: string } }).error.reason;
+
+/**
+ * Where the door is: the loopback default is a compatibility promise, and a configured bind is a
+ * promise that the report is the kernel's answer rather than an echo of the request.
+ *
+ * This is the seam a worker in a container needs. It is spec'd here, on the package that owns the
+ * listener, because whether a container can *reach* a given bind is a fact about the container
+ * runtime — `e2e/cli/docker/10-internal-bridge.test.ts` measures that separately and does not
+ * pretend this spec proves it.
+ */
+describe('the bind address: loopback by default, configuration when asked', () => {
+  it('binds loopback by default, reports it, and the reported base URL is the door clients use', async () => {
+    const started = await start();
+    expect(DEFAULT_BIND_ADDRESS).toBe('127.0.0.1');
+    expect(started.proxy.boundAddress).toBe('127.0.0.1');
+    // Byte-for-byte what every caller got before `bindAddress` existed.
+    expect(started.proxy.baseUrl).toBe(`http://127.0.0.1:${String(started.proxy.port)}/openai/v1`);
+    expect((await call(started, {})).status).toBe(200);
+  });
+
+  it('binds a configured address and reports the address the kernel bound', async () => {
+    // The wildcard, because it is bindable on every host this suite runs on: the assertion is
+    // about the option being applied, not about this machine's interface list. (A specific
+    // non-loopback address would make the spec a property of the developer's LAN.)
+    gateway = await fakeGateway();
+    const started = await startCredentialProxy({
+      upstream: { baseUrl: gateway.url, apiKey: GATEWAY_KEY },
+      now: () => '2026-11-01T12:00:00.000Z',
+      bindAddress: '0.0.0.0',
+    });
+    proxy = started;
+    expect(started.boundAddress).toBe('0.0.0.0');
+    expect(started.baseUrl).toBe(`http://0.0.0.0:${String(started.port)}/openai/v1`);
+
+    // Bound on the wildcard means bound on loopback too: a door reported but not opened is the
+    // failure mode a "boundAddress === requested" assertion alone would not catch.
+    const minted = started.tokens.mint({
+      attemptId: 'A-wildcard',
+      issuedAt: '2026-11-01T11:55:00.000Z',
+      expiresAt: '2026-11-01T12:40:00.000Z',
+    });
+    const response = await call({
+      baseUrl: `http://127.0.0.1:${String(started.port)}/openai/v1`,
+      token: minted.token,
+    });
+    expect(response.status).toBe(200);
+    expect(gateway.seen[0]?.authorization).toBe(`Bearer ${GATEWAY_KEY}`);
+  });
+
+  it('refuses an address this host does not own, naming the address and the kernel reason', async () => {
+    // TEST-NET-1 (RFC 5737): never assigned to a local interface, on any host.
+    await expect(
+      startCredentialProxy({
+        upstream: { baseUrl: 'http://127.0.0.1:9/openai/v1', apiKey: GATEWAY_KEY },
+        now: () => '2026-11-01T12:00:00.000Z',
+        bindAddress: '192.0.2.1',
+      }),
+    ).rejects.toThrow(/192\.0\.2\.1.*EADDRNOTAVAIL/u);
+    // Nothing was left listening: the rejection happened before the handle existed.
+    proxy = null;
+  });
+});
 
 describe('the key is injected by the proxy and never by the worker', () => {
   it('forwards the request with the gateway key, not the token', async () => {

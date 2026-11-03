@@ -25,6 +25,7 @@ export {
   startCredentialProxy,
   pathWithinPrefix,
   PROXY_REFUSALS,
+  DEFAULT_BIND_ADDRESS,
   type CredentialProxy,
   type CredentialProxyOptions,
   type ProxyEvent,

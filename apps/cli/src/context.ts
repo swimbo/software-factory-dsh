@@ -224,18 +224,58 @@ function moduleResolves(specifier: string): boolean {
 }
 
 /**
- * Why container isolation and a live model cannot be combined, or `null` when they are not.
+ * Why container isolation and a live model cannot be combined *today*, or `null` when they can.
  *
  * The two levers are named in the message because an operator who has to work out which pair of
  * settings produced an exit 8 at 2am pays for our brevity. The two ways forward are named for the
  * same reason: "it is impossible" without "here is what to do instead" is a wall, not a gate.
+ *
+ * ## This is a measurement, not an assumption
+ *
+ * The message used to say the combination "cannot both be honoured", which was an assertion we
+ * had never tested. `e2e/cli/docker/10-internal-bridge.test.ts` now measures the two facts that
+ * make it true on this host (macOS/OrbStack — a docker daemon inside a Linux VM):
+ *
+ *   - the `--internal` network's gateway is not an address on this host, so a host process
+ *     cannot bind it (`EADDRNOTAVAIL`), and
+ *   - an `--internal` network is `ENETUNREACH` towards every host address, including the
+ *     `host.docker.internal` route that works from a normal bridge network.
+ *
+ * On a **native-Linux** daemon the gateway *is* a host interface, so the transport is viable
+ * there — but nothing in this tree creates the network or binds the proxy to it, so the pair is
+ * still refused there too, for a reason the message says out loud rather than hiding behind the
+ * platform one. What the refusal must never do is let a worker start and fail later as an
+ * unexplained 401 that looks like a model fault.
  */
 const CONTAINER_LIVE_MODEL_REASON =
-  'container isolation and a live model cannot both be honoured: the worker has no network and ' +
-  'the credential proxy is on this host';
+  'container isolation and a live model cannot both be honoured today: the worker has no route ' +
+  'to the credential proxy, and the transport that would give it one is not available';
+
+/** The platform half of the refusal: the same fact, worded for the host that measured it. */
+function containerLiveModelTransportDetail(platform: NodeJS.Platform | string): string {
+  if (platform === 'linux') {
+    return (
+      'The transport that would make the pair possible — the credential proxy bound to the ' +
+      'gateway of an `--internal` network, the worker attached to that network — would work on ' +
+      'a native-Linux daemon, where the bridge gateway is a real host interface. It is not ' +
+      'built in this tree yet: nothing creates that network, attaches the worker to it, or ' +
+      'binds the proxy to the gateway, so the pair stays refused instead of dispatching a ' +
+      'worker that would fail with a 401.'
+    );
+  }
+  return (
+    'The transport that would make the pair possible is not buildable on this host: docker runs ' +
+    'in a VM here, so the `--internal` network gateway is not an address on this host (binding ' +
+    'it fails with EADDRNOTAVAIL) and an `--internal` network has no route to a host process ' +
+    '(ENETUNREACH, not a refusal). Both are measured by ' +
+    'e2e/cli/docker/10-internal-bridge.test.ts and recorded in ' +
+    'docs/runbooks/worker-container.md.'
+  );
+}
 
 function containerLiveModelRefusal(
   env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform | string,
 ): string | null {
   // "with a key" is part of the condition, not decoration: a run that has no credential cannot
   // spend, and refusing it for a network conflict would send the operator to fix the wrong thing.
@@ -245,10 +285,9 @@ function containerLiveModelRefusal(
     'FACTORY_WORKER_ISOLATION=container runs the worker with `--network none`, but a live model ' +
     '(FACTORY_LIVE_MODEL=1) authenticates through the credential proxy, which binds 127.0.0.1 on ' +
     "the host. A container with no network cannot reach this host's loopback, so the model call " +
-    'inside the worker could never be authenticated. Two ways forward: unset ' +
-    'FACTORY_WORKER_ISOLATION to drop the container and run this turn on the host (the default), ' +
-    'or unset FACTORY_LIVE_MODEL and run the model call on the host, outside the containerised ' +
-    'worker'
+    `inside the worker could never be authenticated. ${containerLiveModelTransportDetail(platform)} ` +
+    'Two ways forward: unset FACTORY_WORKER_ISOLATION to drop the container and run this turn on ' +
+    'the host (the default), or unset FACTORY_LIVE_MODEL and run this turn without a model call'
   );
 }
 
@@ -315,19 +354,24 @@ export function probeExecutor(
   // usage error and the operator has to learn about it before anything is reserved.
   const adapter = moduleAvailable ? requireAdapter() : null;
 
-  // (c) The one launch combination the factory cannot honour: a container worker with a live
-  // model. `worker-container.ts` launches the worker with `--network none`, and the credential
+  // (c) The one launch combination the factory cannot honour today: a container worker with a
+  // live model. `worker-container.ts` launches the worker with `--network none`, and the credential
   // proxy that fronts the gateway binds `127.0.0.1` on this host (ADR-007). A loopback address
   // inside the container's own, empty network namespace is not this host's loopback, so the
   // worker can never reach the token it would need — the failure surfaces after the worker
   // starts, as an unexplained 401 that looks like a model fault rather than a configuration one.
+  //
+  // The justification is measured, not asserted: `e2e/cli/docker/10-internal-bridge.test.ts` pins
+  // the platform fact (the `--internal` gateway is not host-bindable on a docker-in-a-VM host, and
+  // an internal network has no route to the host) and the platform's alternative (native Linux
+  // would work but is not wired). See `containerLiveModelRefusal`.
   //
   // Checked *before* `decideWorkerIsolation` on purpose: whether a docker daemon happens to be
   // running cannot change this answer, so shelling out to ask would only replace an accurate
   // message with a less accurate one.
   const conflict =
     adapter !== null && adapter.requestedIsolation(env) === 'container'
-      ? containerLiveModelRefusal(env)
+      ? containerLiveModelRefusal(env, process.platform)
       : null;
   if (conflict !== null) {
     return {
