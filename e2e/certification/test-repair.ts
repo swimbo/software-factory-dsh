@@ -362,7 +362,17 @@ process.exit(run.status ?? 1);
  * sentence (`runs=2 pass=2 fail=0 unknown=0`); it does not repeat the rule's stdout, so N lives in
  * the corpus and the runbook, not in the verdict row.
  */
-export const DIFFERENTIAL_SOURCE = `/**
+/**
+ * The differential rule, as source, for one class's domain-separation constant.
+ *
+ * The two certified classes share the generator: the domain kinds, the seeded sample, the
+ * comparison and the `FACTORY_DIFFERENTIAL` summary are one implementation, and the only thing
+ * a class parameterises is the domain-separation string that goes into the seed. A second copy
+ * of this file is how two classes end up measuring subtly different things and calling it the
+ * same rule.
+ */
+function differentialRuleSource(domain: string): string {
+  return `/**
  * Class rule: the candidate agrees with the repaired reference on generated inputs.
  *
  * The corpus knows the repair - it is the next commit in the fixture history - and ships it as
@@ -384,7 +394,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const DOMAIN = 'test-repair/differential/v1';
+const DOMAIN = '${domain}';
 const NEWLINE = String.fromCharCode(10);
 const corpusDir = dirname(import.meta.dirname);
 const cwd = process.cwd();
@@ -744,8 +754,13 @@ if (mismatches > 0) {
   console.error('FACTORY_DIFFERENTIAL ' + JSON.stringify(summary));
   process.exit(1);
 }
-process.stdout.write('FACTORY_DIFFERENTIAL ' + JSON.stringify(summary) + NEWLINE);
-`;
+process.stdout.write('FACTORY_DIFFERENTIAL ' + JSON.stringify(summary) + NEWLINE);`;
+}
+
+/** The `test-repair` rule: the machinery above, sealed with this class's domain. */
+export const DIFFERENTIAL_SOURCE = differentialRuleSource('test-repair/differential/v1');
+
+export { differentialRuleSource };
 
 /** The rule set, in the frozen shape the corpus writer and the artefacts script share. */
 export const TEST_REPAIR_RULES: readonly {

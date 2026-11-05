@@ -1,8 +1,8 @@
 {
   "schema": "verify/1",
   "plan": "dark-factory-dsh",
-  "runId": "2026-11-05T19-21-23Z",
-  "startedAt": "2026-11-05T19-21-23Z",
+  "runId": "2026-11-05T21-15-11Z",
+  "startedAt": "2026-11-05T21-15-11Z",
   "ok": true,
   "counts": {
     "pass": 7,
@@ -14,8 +14,8 @@
     "pnpm": "10.33.0",
     "git": {
       "branch": "main",
-      "head": "5a86dc0",
-      "dirtyPaths": 8
+      "head": "0822329",
+      "dirtyPaths": 14
     },
     "dsh": {
       "available": true,
@@ -33,7 +33,7 @@
       "command": "bash scripts/preflight.sh",
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 243,
+      "durationMs": 248,
       "reason": null
     },
     {
@@ -41,7 +41,7 @@
       "command": "pnpm run typecheck",
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 848,
+      "durationMs": 942,
       "reason": null
     },
     {
@@ -49,7 +49,7 @@
       "command": "pnpm run lint",
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 797,
+      "durationMs": 882,
       "reason": null
     },
     {
@@ -57,7 +57,7 @@
       "command": "pnpm run format:check",
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 4858,
+      "durationMs": 5095,
       "reason": null
     },
     {
@@ -65,7 +65,7 @@
       "command": "pnpm exec vitest run",
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 362284,
+      "durationMs": 498275,
       "reason": null
     },
     {
@@ -73,7 +73,7 @@
       "command": "pnpm run build",
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 710,
+      "durationMs": 662,
       "reason": null
     },
     {
@@ -81,7 +81,7 @@
       "command": "pnpm run test:e2e:panel",
       "status": "pass",
       "exitCode": 0,
-      "durationMs": 21874,
+      "durationMs": 19444,
       "reason": null
     },
     {
@@ -100,7 +100,7 @@
     }
   ],
   "artifacts": {
-    "log": "docs/verification/2026-11-05T19-21-23Z/verify.log",
-    "summary": "docs/verification/2026-11-05T19-21-23Z/summary.json"
+    "log": "docs/verification/2026-11-05T21-15-11Z/verify.log",
+    "summary": "docs/verification/2026-11-05T21-15-11Z/summary.json"
   }
 }
