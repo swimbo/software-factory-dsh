@@ -64,6 +64,11 @@ interface StoredCertificateView {
   readonly alpha: number;
   readonly policyVersion: string;
   readonly modelId: string | null;
+  /**
+   * The corpus the certificate names, `null` when the row predates corpus attribution (schema v5).
+   * Carried, not derived: the audit must print the same corpus the judgement compared.
+   */
+  readonly holdoutRevision: string | null;
   readonly recordedAt: string;
 }
 
@@ -96,6 +101,7 @@ function certificateReport(ctx: VerbInput['ctx']): {
       alpha: row.alpha,
       policyVersion: row.policyVersion,
       modelId: row.modelId,
+      holdoutRevision: row.holdoutRevision,
       recordedAt: row.recordedAt,
     });
     groups.set(row.taskClass, bucket);
@@ -136,6 +142,20 @@ function certificateReport(ctx: VerbInput['ctx']): {
   };
 }
 
+/**
+ * How the audit spells a corpus, including its absence.
+ *
+ * `null` is never printed as "any": on a certificate it means the row predates attribution, and on the
+ * newest measurement it means no measurement of this class has ever named one. Two different absences,
+ * two different sentences.
+ */
+function describeCorpus(corpus: string | null, side: 'certificate' | 'measurement'): string {
+  if (corpus !== null) return corpus;
+  return side === 'certificate'
+    ? 'an unnamed corpus (this certificate predates corpus attribution)'
+    : 'no named corpus';
+}
+
 export function runAudit(input: VerbInput): number {
   const { ctx } = input;
   const wantsEscapeRate = boolOption(input.options, 'escapeRate');
@@ -170,6 +190,14 @@ export function runAudit(input: VerbInput): number {
           // `current` and `never-certified` both mean "do not print a re-certify reason": the
           // former has none, the latter has no certificate to re-certify.
           reasons: judgement.state === 'stale' ? judgement.reasons : [],
+          // The corpus the certificate names (the fact it was measured under), and — when the
+          // judgement is stale — the corpus the latest measurement names. Both are in the JSON so a
+          // scripted reader can see the disagreement without parsing English out of `reasons`.
+          holdoutRevision: certificate?.holdoutRevision ?? null,
+          latestHoldoutRevision:
+            judgement.state === 'stale'
+              ? judgement.referenceHoldoutRevision
+              : (certificate?.holdoutRevision ?? null),
         };
       }),
       uncertifiedUnits: report.uncertifiedUnits,
@@ -184,6 +212,15 @@ export function runAudit(input: VerbInput): number {
       ctx.ui.err(`  ${judgement.taskClass}  ${judgement.state}`);
       for (const reason of judgement.state === 'stale' ? judgement.reasons : []) {
         ctx.ui.err(`    ${reason}`);
+      }
+      // The evidence line: a re-certify reason names the consequence ("the corpus changed"), this
+      // names the two facts it is drawn from. Printed for every stale class, because "policy
+      // changed" beside an unattributed corpus is what the operator needs to see before deciding
+      // between re-certifying and reading the old measurement as expired.
+      if (judgement.state === 'stale') {
+        ctx.ui.err(
+          `    certified ${judgement.certificate.policyVersion} under ${describeCorpus(judgement.certificate.holdoutRevision ?? null, 'certificate')}; latest measurement under ${describeCorpus(judgement.referenceHoldoutRevision, 'measurement')}`,
+        );
       }
     }
     for (const unitId of report.uncertifiedUnits) {

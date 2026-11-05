@@ -23,9 +23,9 @@ The table is written to **stderr** (every verb's human surface is), so `factory 
 **What it means.** A class certificate is the factory's evidence that _this_ wall, at _this_
 operating point, under _this_ policy and model, can tell a good change from a bad one at the
 published α. The row records the point (`m`, `k`, `p0`, α) and the identity it was judged under
-(policy version, model id). Change either identity and the old row is still true about the old
-world — so it is **expired evidence**, reported as a refusal rather than a warning. `9` is the
-integrity code; it does not mean the ledger is corrupt.
+(policy version, model id, holdout corpus). Change any of them and the old row is still true about
+the old world — so it is **expired evidence**, reported as a refusal rather than a warning. `9` is
+the integrity code; it does not mean the ledger is corrupt.
 
 **What the factory will refuse to do.** Nothing, by itself. A stale certificate does not block
 `run`; it blocks the _claim_ — `audit --certifications` is what turns the claim into an exit code
@@ -49,12 +49,14 @@ factory audit --certifications --json |
 
 Three cases, three different answers:
 
-| The reason line says             | What changed                        | What to do                                                                                             |
-| -------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `policy changed`                 | the wall's policy version moved     | re-run the class (§ below), or revert the policy — a policy change is a measurement change             |
-| `model changed`                  | `FACTORY_MODEL_ID` moved            | re-run the class against the new model; a certificate is about a model's behaviour, not a model family |
-| `model unknown`                  | the certificate has no model id     | the attempt ran before the model id was wired, or offline; re-run with `FACTORY_MODEL_ID` set          |
-| `nothing has ever been measured` | this task class was never certified | run the class to m attempts before treating it as certifiable                                          |
+| The reason line says             | What changed                                               | What to do                                                                                             |
+| -------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `policy changed`                 | the wall's policy version moved                            | re-run the class (§ below), or revert the policy — a policy change is a measurement change             |
+| `model changed`                  | `FACTORY_MODEL_ID` moved                                   | re-run the class against the new model; a certificate is about a model's behaviour, not a model family |
+| `model unknown`                  | the certificate has no model id                            | the attempt ran before the model id was wired, or offline; re-run with `FACTORY_MODEL_ID` set          |
+| `corpus changed`                 | the class was re-measured under a different holdout corpus | re-run the class against the corpus you intend to claim; the old pass describes a weaker test          |
+| `corpus unknown`                 | the certificate predates corpus attribution (schema v5)    | re-run the class: the store cannot prove which corpus that pass was measured against                   |
+| `nothing has ever been measured` | this task class was never certified                        | run the class to m attempts before treating it as certifiable                                          |
 
 **Re-certify a class** (this is the measurement, and it costs money when the model is live). The
 certificate is written by the wall on every verdict, so re-certifying is just running `m` units of

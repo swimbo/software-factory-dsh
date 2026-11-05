@@ -1,11 +1,19 @@
 /**
  * Is a stored class certificate current, or has the ground it stood on moved?
  *
- * A certificate is a statement "this class, at this operating point, under this policy version and
- * this model id, met k of m". Two of those inputs are world-state: change the policy (so the
- * operating point or the wall's rules change) or change the model, and the old measurement no
- * longer describes the thing being shipped. The judgement is therefore not "is the record valid" —
- * it always is, it is history — but "may it still be used to claim this class is fine today".
+ * A certificate is a statement "this class, at this operating point, under this policy version, this
+ * model id and this corpus, met k of m". Three of those inputs are world-state: change the policy (so
+ * the operating point or the wall's rules change), change the model, or change the corpus the class is
+ * measured against (a holdout can gain a rule — that is what happened when `test-repair` went from two
+ * rules to three), and the old measurement no longer describes the thing being shipped. The judgement
+ * is therefore not "is the record valid" — it always is, it is history — but "may it still be used to
+ * claim this class is fine today".
+ *
+ * The corpus is compared the way the policy version is: against the newest measurement this class
+ * wrote, with older-but-attributed rows as a bounded fallback. It is **not** compared against a
+ * running corpus from the environment, because an audit that read the operator's `FACTORY_HOLDOUT_ROOT`
+ * would let the same store answer differently from two shells — the ledger is the evidence, and the
+ * corpus a certificate names is read from the ledger.
  *
  * The function lives in the wall rather than the store because it is a judgement about wall
  * evidence, not a query: the store's job is to hand over rows, and a store that decided staleness
@@ -22,6 +30,12 @@ export interface StoredCertificate {
   readonly policyVersion: string;
   /** `null` means the attempt did not say which model produced it — unknown, never "unchanged". */
   readonly modelId: string | null;
+  /**
+   * The corpus the certificate was measured against, when the row names one. `null` (or absent, for a
+   * row written before schema v5) means "this certificate predates corpus attribution": it is stale,
+   * because there is no way to prove which evidence it describes — never current by wildcard.
+   */
+  readonly holdoutRevision?: string | null;
   readonly recordedAt: string;
 }
 
@@ -52,6 +66,12 @@ export type CertificateRecency =
       readonly certificate: StoredCertificate;
       /** Why it expired, in the audit's own words: these strings are printed verbatim. */
       readonly reasons: readonly string[];
+      /**
+       * The corpus the class was last measured under, when any of its rows names one. The audit
+       * prints it beside the certificate's own corpus so the disagreement is legible; `null` means no
+       * measurement of this class has ever named a corpus.
+       */
+      readonly referenceHoldoutRevision: string | null;
     }
   | {
       readonly taskClass: string;
@@ -118,6 +138,26 @@ export function certificateRecency(input: {
   }
   // A null on either side is "cannot prove it is current", never "unchanged": the model id is the
   // one input whose absence would otherwise silently widen a certificate to cover a model swap.
+  // The corpus is the third world-state input. Compared against the newest measurement of *this
+  // class* that names one — a row written before v5 names nothing, so the search walks past it rather
+  // than concluding the class has no corpus at all. A null on the certificate's side is stale with a
+  // reason that says why: treating it as a wildcard is the silent attribution this dimension exists
+  // to stop, and it would put every pre-v5 certificate back to `current` forever.
+  const referenceCorpus =
+    input.certificates.find((certificate) => (certificate.holdoutRevision ?? null) !== null)
+      ?.holdoutRevision ?? null;
+  const certifiedCorpus = certified.holdoutRevision ?? null;
+  if (certifiedCorpus === null) {
+    reasons.push(
+      referenceCorpus === null
+        ? 're-certify: corpus unknown (this certificate predates corpus attribution; no measurement of this class names one)'
+        : `re-certify: corpus unknown (this certificate predates corpus attribution; latest measurement under ${referenceCorpus})`,
+    );
+  } else if (referenceCorpus !== null && certifiedCorpus !== referenceCorpus) {
+    reasons.push(
+      `re-certify: corpus changed (certified under ${certifiedCorpus}, latest measurement under ${referenceCorpus})`,
+    );
+  }
   if (input.running.modelId !== null) {
     if (certified.modelId === null) {
       reasons.push(
@@ -135,6 +175,7 @@ export function certificateRecency(input: {
       state: 'stale',
       certificate: judged,
       reasons,
+      referenceHoldoutRevision: referenceCorpus,
     };
   }
   return { taskClass: input.taskClass, state: 'current', certificate: judged };

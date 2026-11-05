@@ -337,6 +337,10 @@ describe('run to verdict to promotion, with the real wall', () => {
       expect(certificate?.m).toBe(20);
       expect(certificate?.k).toBe(18);
       expect(certificate?.modelId).toBe('auto');
+      // The certificate names the corpus its verdict was measured against: that is the fact the
+      // wall compares when a class is re-measured under a stricter holdout (schema v4 → v5), and
+      // the row — not the verdict — is what `audit --certifications` reads.
+      expect(certificate?.holdoutRevision).toBe(HOLDOUT_ID);
       // Every scenario the wall ran passed, and there is at least one of each kind.
       const sources = new Set(row?.verdict.scenarios.map((scenario) => scenario.source));
       expect(sources.has('holdout')).toBe(true);

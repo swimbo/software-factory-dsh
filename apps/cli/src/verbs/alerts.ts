@@ -177,7 +177,10 @@ export function decideAlerts(facts: AlertFacts): AlertDecision {
           subject: recency.taskClass,
           at,
           reason: recency.reasons.join('; '),
-          investigation: 'factory audit --certifications; docs/runbooks/certificate-expired.md',
+          // The `next:` line an operator reads. It names the *class* to re-certify and the driver
+          // that does it: "the certificate expired" without "re-run the class" is a fact, not an
+          // instruction, and a stale certificate is only cleared by measuring the class again.
+          investigation: `re-certify ${recency.taskClass}: bash scripts/certify-class.sh --units-file units.txt; factory audit --certifications; docs/runbooks/certificate-expired.md`,
         });
       } else {
         alerts.push({
@@ -304,6 +307,7 @@ function certificatesFrom(ctx: VerbInput['ctx']): readonly CertificateRecency[] 
       outcome: row.outcome,
       policyVersion: row.policyVersion,
       modelId: row.modelId,
+      holdoutRevision: row.holdoutRevision,
       recordedAt: row.recordedAt,
     });
     groups.set(row.taskClass, bucket);

@@ -8,7 +8,7 @@
  * enforced at this layer rather than in code.
  */
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * Declared migrations. A store one version behind is opened only when a migration here says how to
@@ -22,12 +22,31 @@ export const SCHEMA_VERSION = 4;
  *
  * A destructive change (dropping or reshaping a column) must never appear here: an operator's ledger
  * is evidence, and there is no `--force` in this CLI.
+ *
+ * v4 → v5 adds a **column** for the first time, and SQLite has no `ADD COLUMN IF NOT EXISTS`. The
+ * statement is therefore declared in `addColumns` rather than `statements`: the store runs it only
+ * when the table exists and the column does not. That matters for an old store opened by this
+ * binary, because `SCHEMA_SQL` runs before the declared steps and recreates a *missing* table in its
+ * current shape — the v1 → v5 path would otherwise reach `ADD COLUMN` with the column already there
+ * and refuse to open a ledger it could read.
  */
 export interface Migration {
   readonly from: number;
   readonly to: number;
   readonly note: string;
   readonly statements: readonly string[];
+  /**
+   * `ALTER TABLE … ADD COLUMN` statements, with the table and column each one adds. Idempotent by
+   * inspection instead of by swallowing a duplicate-column error: the store skips one whose column
+   * is already there.
+   */
+  readonly addColumns?: readonly AddColumn[];
+}
+
+export interface AddColumn {
+  readonly table: string;
+  readonly column: string;
+  readonly statement: string;
 }
 
 const USAGE_RECORDS_DDL = `CREATE TABLE IF NOT EXISTS usage_records (
@@ -53,6 +72,12 @@ CREATE INDEX IF NOT EXISTS usage_unit ON usage_records(unit_id);`;
  *
  * One row per verdict that carries a certificate. The primary key is derived from the verdict id, so
  * "one certificate per verdict" is a schema fact rather than a promise the insert path keeps.
+ *
+ * `holdout_revision` was added in v4 → v5 and is part of this DDL as well as of that step: a store
+ * that predates the table entirely gets the current shape from this `CREATE` while the step's
+ * `ADD COLUMN` is skipped by inspection, and a store that already has the old table gets the column
+ * from the step. `NULL` means "recorded before the column existed", which the wall judges stale;
+ * `certificate_sha` stays the digest of the judgement it always was, so old rows still verify.
  */
 const CLASS_CERTIFICATES_DDL = `CREATE TABLE IF NOT EXISTS class_certificates (
   certificate_id      TEXT PRIMARY KEY,
@@ -68,6 +93,7 @@ const CLASS_CERTIFICATES_DDL = `CREATE TABLE IF NOT EXISTS class_certificates (
   outcome             TEXT NOT NULL CHECK (outcome IN ('certified','not-certified','insufficient')),
   policy_version      TEXT NOT NULL,
   model_id            TEXT,
+  holdout_revision    TEXT,
   recorded_at         TEXT NOT NULL,
   certificate_sha     TEXT NOT NULL
 );
@@ -98,6 +124,26 @@ const PRIVILEGED_DECISIONS_DDL = `CREATE TABLE IF NOT EXISTS privileged_decision
 CREATE TRIGGER IF NOT EXISTS privileged_decisions_no_delete BEFORE DELETE ON privileged_decisions
 BEGIN SELECT RAISE(ABORT, 'privileged_decisions is append-only'); END;`;
 
+/**
+ * v4 → v5 (corpus attribution): `class_certificates.holdout_revision`, the corpus the certificate's
+ * verdict was measured against.
+ *
+ * Additive and nullable. Every row that already exists keeps `NULL`, which the wall reads as
+ * "this certificate predates corpus attribution" — **never** as "matches any corpus". A null that
+ * matched would recreate, for every historical row, the silent attribution this column exists to
+ * stop: a class re-measured under a stricter corpus would keep showing the old certificate as
+ * current.
+ *
+ * Why a column and not a join to `verdicts.holdout_revision`: the certificate is the thing the audit
+ * prints, and a display that has to join to name its own evidence is a display that can be pointed at
+ * the wrong row. The verdict stays the deeper record; this is the projection saying what it measured.
+ */
+const CLASS_CERTIFICATES_CORPUS_DDL: AddColumn = {
+  table: 'class_certificates',
+  column: 'holdout_revision',
+  statement: 'ALTER TABLE class_certificates ADD COLUMN holdout_revision TEXT;',
+};
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     from: 1,
@@ -116,6 +162,13 @@ export const MIGRATIONS: readonly Migration[] = [
     to: 4,
     note: 'R5: privileged_decisions, the one-use marker that makes a decision single-operation across processes',
     statements: [PRIVILEGED_DECISIONS_DDL],
+  },
+  {
+    from: 4,
+    to: 5,
+    note: 'corpus attribution: class_certificates.holdout_revision, so a certificate names the corpus it measured',
+    statements: [],
+    addColumns: [CLASS_CERTIFICATES_CORPUS_DDL],
   },
 ];
 

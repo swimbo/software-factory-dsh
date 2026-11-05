@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 
 import { contentHash } from '@factory/contracts';
 import { DEFAULT_POLICY, currentPolicyVersion } from '@factory/qualifier';
-import { openStore } from '@factory/store';
+import { openSqlite, openStore } from '@factory/store';
 
 import { EXIT } from './exit.ts';
 import { FIXED_NOW, baseSpec, jsonOf, runCli, seedUnit, tempHome } from './testing.ts';
@@ -36,6 +36,12 @@ interface CertificateSeed {
    * same class, which is what the loop produces and what the projection groups on.
    */
   readonly slug?: string;
+  /**
+   * The corpus the attempt was measured against. Defaults to one per index; pass the same value
+   * twice to model two attempts of one class under one corpus (the corpus is a staleness input, so a
+   * test about something else has to hold it still).
+   */
+  readonly holdoutRevision?: string;
 }
 
 /**
@@ -77,7 +83,7 @@ function seedCertificate(home: string, seed: CertificateSeed, index: number): st
       attemptId,
       receiptId: null,
       receiptSha: null,
-      holdoutRevision: null,
+      holdoutRevision: seed.holdoutRevision ?? `holdout/${index.toString()}`,
       policyVersion: seed.policyVersion ?? currentPolicyVersion(),
       wallVersion: 'wall/0.1.0',
       outcome: 'unknown',
@@ -86,7 +92,7 @@ function seedCertificate(home: string, seed: CertificateSeed, index: number): st
         unitId,
         attemptId,
         receiptSha: `sha256:${'a'.repeat(64)}`,
-        holdoutRevision: `holdout/${index.toString()}`,
+        holdoutRevision: seed.holdoutRevision ?? `holdout/${index.toString()}`,
         policyVersion: seed.policyVersion ?? currentPolicyVersion(),
         wallVersion: 'wall/0.1.0',
         outcome: 'unknown',
@@ -97,7 +103,7 @@ function seedCertificate(home: string, seed: CertificateSeed, index: number): st
           candidateRate: 0,
           threshold: 0,
           observed: null,
-          holdoutRevision: `holdout/${index.toString()}`,
+          holdoutRevision: seed.holdoutRevision ?? `holdout/${index.toString()}`,
         },
         reasons: ['holdout_unavailable'],
         ...(seed.modelId === null ? {} : { modelId: seed.modelId ?? 'auto' }),
@@ -341,6 +347,9 @@ describe('factory audit --certifications', () => {
         passes: 1,
         samples: 1,
         slug: 'slug-check-next-attempt',
+        // Same corpus as the certificate: this test is about which row's counts are printed, and a
+        // different corpus would make the class stale for a reason that has its own spec below.
+        holdoutRevision: 'holdout/1',
       },
       2,
     );
@@ -356,5 +365,124 @@ describe('factory audit --certifications', () => {
         m: 20,
       }),
     ]);
+  });
+
+  it('exits 9 when the class was re-measured under a newer corpus, and prints both ids', () => {
+    // The defect this closes: bumping a class's corpus id left the old certificate `current`. The
+    // measurement is the evidence, so a newer attempt under a different corpus expires the pass
+    // even when it measured too little to certify.
+    const home = tempHome();
+    seedCertificate(
+      home,
+      { taskClass: 'test-repair', outcome: 'certified', passes: 19, samples: 20 },
+      1,
+    );
+    seedCertificate(
+      home,
+      {
+        taskClass: 'test-repair',
+        outcome: 'insufficient',
+        passes: 1,
+        samples: 3,
+        slug: 'slug-after-corpus-bump',
+        holdoutRevision: 'holdout/2026-11-04',
+      },
+      2,
+    );
+
+    const result = audit(home, { FACTORY_MODEL_ID: 'auto' });
+    expect(result.status).toBe(EXIT.integrity);
+    const classes = jsonOf(result)['classes'] as Array<Record<string, unknown>>;
+    expect(classes[0]).toMatchObject({
+      taskClass: 'test-repair',
+      state: 'stale',
+      // The counts still describe the `certified` row, not the newer measurement.
+      outcome: 'certified',
+      samples: 20,
+      holdoutRevision: 'holdout/1',
+      latestHoldoutRevision: 'holdout/2026-11-04',
+    });
+    expect(classes[0]?.['reasons']).toEqual([
+      're-certify: corpus changed (certified under holdout/1, latest measurement under holdout/2026-11-04)',
+    ]);
+    // The evidence line: the two facts the reason is drawn from, side by side.
+    expect(result.stderr).toContain('certified ');
+    expect(result.stderr).toContain('under holdout/1');
+    expect(result.stderr).toContain('latest measurement under holdout/2026-11-04');
+    expect(result.stderr).toContain('expired evidence, not a warning');
+  });
+
+  it('never lets an unattributed certificate borrow the corpus of a newer measurement', () => {
+    // The two facts a pre-v5 store holds after one new attempt: the certificate names no corpus, the
+    // attempt does. A `NULL` that matched the reference would print `current` and attribute the old
+    // pass to a corpus it was never measured against — so this exits 9 and says which corpus it
+    // cannot prove.
+    const home = tempHome();
+    seedCertificate(
+      home,
+      { taskClass: 'test-repair', outcome: 'certified', passes: 19, samples: 20 },
+      1,
+    );
+    seedCertificate(
+      home,
+      {
+        taskClass: 'test-repair',
+        outcome: 'insufficient',
+        passes: 1,
+        samples: 3,
+        slug: 'slug-first-new-corpus',
+        holdoutRevision: 'holdout/2026-11-04',
+      },
+      2,
+    );
+    const raw = openSqlite({ path: join(home, 'state', 'factory.db') });
+    raw
+      .prepare(
+        "UPDATE class_certificates SET holdout_revision = NULL WHERE certificate_id = 'cert:V-1'",
+      )
+      .run();
+    raw.close();
+
+    const result = audit(home, { FACTORY_MODEL_ID: 'auto' });
+    expect(result.status).toBe(EXIT.integrity);
+    const classes = jsonOf(result)['classes'] as Array<Record<string, unknown>>;
+    expect(classes[0]).toMatchObject({
+      taskClass: 'test-repair',
+      state: 'stale',
+      outcome: 'certified',
+      samples: 20,
+      holdoutRevision: null,
+      latestHoldoutRevision: 'holdout/2026-11-04',
+    });
+    expect(classes[0]?.['reasons']).toEqual([
+      're-certify: corpus unknown (this certificate predates corpus attribution; latest measurement under holdout/2026-11-04)',
+    ]);
+    expect(result.stderr).toContain('latest measurement under holdout/2026-11-04');
+  });
+
+  it('reads a certificate that names no corpus as stale, and says it predates attribution', () => {
+    // Every row in a pre-v5 store. `NULL` must not be a wildcard: that would put the whole
+    // historical projection back to `current` and silently attribute evidence to the running corpus.
+    const home = tempHome();
+    seedCertificate(
+      home,
+      { taskClass: 'docs-typo-fix', outcome: 'certified', passes: 19, samples: 20 },
+      1,
+    );
+    const raw = openSqlite({ path: join(home, 'state', 'factory.db') });
+    raw.prepare('UPDATE class_certificates SET holdout_revision = NULL').run();
+    raw.close();
+
+    const result = audit(home, { FACTORY_MODEL_ID: 'auto' });
+    expect(result.status).toBe(EXIT.integrity);
+    const classes = jsonOf(result)['classes'] as Array<Record<string, unknown>>;
+    expect(classes[0]).toMatchObject({ state: 'stale', holdoutRevision: null });
+    expect(classes[0]?.['reasons']).toEqual([
+      're-certify: corpus unknown (this certificate predates corpus attribution; no measurement of this class names one)',
+    ]);
+    expect(result.stderr).toContain('predates corpus attribution');
+    expect(result.stderr).toContain(
+      'under an unnamed corpus (this certificate predates corpus attribution); latest measurement under no named corpus',
+    );
   });
 });

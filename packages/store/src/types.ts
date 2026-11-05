@@ -364,6 +364,12 @@ export interface Store {
  * One class certificate, as stored. Append-only: a certificate is a fact about a verdict, so it is
  * never updated in place — a re-certification adds a row. `modelId` is `null` when the attempt did
  * not record one, which reads as "unknown", never as "unchanged since".
+ *
+ * `holdoutRevision` names the corpus the certificate was measured against. `null` means the row was
+ * written before the store attributed corpora (schema v5), which the wall judges **stale** with a
+ * reason that says so — a null corpus is "cannot prove which evidence this describes", never "any
+ * corpus". There is no upgrade that fills it in: the certificate did not record it, and inventing one
+ * from a later measurement would be the silent attribution this column exists to prevent.
  */
 export interface ClassCertificateRow {
   readonly certificateId: string;
@@ -379,6 +385,7 @@ export interface ClassCertificateRow {
   readonly outcome: 'certified' | 'not-certified' | 'insufficient';
   readonly policyVersion: string;
   readonly modelId: string | null;
+  readonly holdoutRevision: string | null;
   readonly recordedAt: string;
   readonly certificateSha: string;
 }

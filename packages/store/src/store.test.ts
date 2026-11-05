@@ -917,6 +917,9 @@ describe('verdicts: unknown is not pass', () => {
       outcome: 'certified',
       policyVersion: 'policy/2026-11-01',
       modelId: 'auto',
+      // The corpus the certificate was measured under, carried from its verdict. A certificate that
+      // cannot name this cannot be re-judged when the holdout moves (v4 → v5 added the column).
+      holdoutRevision: 'holdout/7',
       recordedAt: AT,
     });
     expect(certificate?.certificateId).toBe('cert:V-1');
@@ -975,6 +978,90 @@ describe('verdicts: unknown is not pass', () => {
       expect(stored[0]?.outcome).toBe(outcome);
       expect(stored[0]?.passes).toBe(passes);
     }
+  });
+
+  it('takes the corpus from the verdict body when the row itself left the column unknown', () => {
+    // Two records of the same fact: the `verdicts.holdout_revision` column and the verdict body the
+    // wall signed. The certificate reads the body — the thing the wall measured — and uses the row's
+    // column only as the first choice. This is not a hypothetical: `audit --certifications` seeds
+    // verdicts exactly like this.
+    const { receiptSha } = receiptedUnit();
+    const verdict: VerdictType = {
+      ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+      modelId: 'auto',
+      certification: {
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        p0: 0.95,
+        alpha: 0.07548367378849634,
+        samples: 20,
+        passes: 19,
+        outcome: 'certified',
+      },
+    };
+    const row = { ...verdictRow(verdict, 'R-1'), holdoutRevision: null };
+    store.insertVerdict(row, options('tr-verify'));
+
+    const [certificate] = certificatesOfStore();
+    expect(certificate).toMatchObject({ outcome: 'certified', holdoutRevision: 'holdout/7' });
+  });
+
+  it('opens a v4 store by adding the corpus column, and the old row stays readable with NULL', () => {
+    // The state every operator's store is in: `class_certificates` without `holdout_revision` and a
+    // recorded schema version of 4. `ALTER TABLE … ADD COLUMN` is the migration; SQLite refuses it
+    // twice, so this spec is also the proof that the store inspects before it alters — the column is
+    // already there on the v1 → v5 path, where SCHEMA_SQL recreates the table first.
+    const { receiptSha } = receiptedUnit();
+    const verdict: VerdictType = {
+      ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+      modelId: 'auto',
+      certification: {
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        p0: 0.95,
+        alpha: 0.07548367378849634,
+        samples: 20,
+        passes: 19,
+        outcome: 'certified',
+      },
+    };
+    store.insertVerdict(verdictRow(verdict, 'R-1'), options('tr-verify'));
+    expect(certificatesOfStore()[0]?.holdoutRevision).toBe('holdout/7');
+    store.close();
+
+    // Rewind to v4: the row loses the column's value (as a pre-v5 row did — it never had one) and the
+    // recorded version is the old one.
+    const raw = openSqlite({ path: dbPath });
+    raw.prepare('ALTER TABLE class_certificates DROP COLUMN holdout_revision').run();
+    raw.prepare('DELETE FROM schema_migration WHERE version = 5').run();
+    raw
+      .prepare(
+        "INSERT INTO schema_migration (version, applied_at, checksum) VALUES (4, '2026-11-01T00:00:00.000Z', 'v4')",
+      )
+      .run();
+    raw.close();
+
+    const migrated = openStore({ dir, now: clock });
+    store = migrated;
+    expect(migrated.migrationsApplied()).toEqual([expect.objectContaining({ from: 4, to: 5 })]);
+    // The old row is readable — not dropped, not rewritten — and it names no corpus, which is the
+    // honest value: the certificate's verdict did name one, but the certificate itself never did, and
+    // inventing it here would be the attribution the wall is supposed to judge.
+    const [certificate] = certificatesOfStore();
+    expect(certificate).toMatchObject({ outcome: 'certified', samples: 20, holdoutRevision: null });
+
+    // Reopening does not re-run the step, and the column is still there for new rows.
+    migrated.close();
+    const reopened = openStore({ dir, now: clock });
+    store = reopened;
+    expect(reopened.migrationsApplied()).toEqual([]);
+    const columns = openSqlite({ path: dbPath })
+      .prepare('PRAGMA table_info(class_certificates)')
+      .all<{ name: string }>()
+      .map((column) => column.name);
+    expect(columns).toContain('holdout_revision');
   });
 
   it('refuses a certificate that claims certified on evidence below its own operating point', () => {

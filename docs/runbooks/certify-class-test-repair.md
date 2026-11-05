@@ -155,14 +155,27 @@ wall's own test-surface check _and_ by rule 3. That redundancy is what makes the
 **The corpus id moved, and re-measuring is what makes the old certificate stale.** The two-rule corpus
 was `h-test-repair-real-2026-11-03`; this one is `…-2026-11-04`, and every scenario id moved with it
 (`holdout:01` is now the differential rule). The id is recorded on every verdict row and every
-criteria-log line, so evidence stays attributable. What it does **not** do is expire the certificate
-by itself: `certificatesRecency` (`packages/wall/src/certificate-recency.ts`) compares `policyVersion`
-and `modelId`, and `class_certificates` has no column for the corpus revision, so a certificate
-measured against the old corpus still reads `current` until a newer `certified` row replaces it. The
-mechanism that fixes this is the loop in §5 — twenty fresh attempts against the new corpus, after
-which `judgedCertificate` prefers the newer row. A stored `holdout_revision` compared alongside the
-policy version would close it structurally; that change is in `packages/store` and `packages/wall` and
-is **not built**.
+criteria-log line, so evidence stays attributable, and — since schema v5 — on every certificate row
+too: `class_certificates.holdout_revision`, compared by `certificatesRecency`
+(`packages/wall/src/certificate-recency.ts`) with the newest measurement of the class that names a
+corpus. So the corpus is a fourth identity input beside the policy version and the model id, and it
+expires the claim the same way:
+
+- the live `test-repair` certificate (`cert:V-921a457ae54e`, verdict
+  `h-test-repair-real-2026-11-03`) was written **before** the column existed, so after the v4 → v5
+  migration its `holdout_revision` is `NULL`. `NULL` is "this certificate predates corpus
+  attribution", which is **stale**, never a wildcard that matches whatever corpus is running. Its
+  verdict still names `h-test-repair-real-2026-11-03`, one join away, but the certificate itself does
+  not claim a corpus and the store does not invent one for it.
+- the first attempt of §5 writes a row under `h-test-repair-real-2026-11-04`; from that row on the
+  class reads `stale` for a second reason — `re-certify: corpus changed (certified under
+h-test-repair-real-2026-11-03, latest measurement under h-test-repair-real-2026-11-04)` — and the
+  twentieth attempt, if the class earns it, writes the `certified` row under the new corpus that makes
+  it `current` again.
+
+The consequence to plan for: a class certified before v5 has to be re-measured once (twenty fresh
+attempts, §5) before it can be claimed as current again. That is the cost of not letting the store
+attribute a corpus it never recorded.
 
 ## 5. Run the loop
 

@@ -24,9 +24,35 @@ transaction as the verdict that produced it: `task class`, `m`, `k`, `p0`, α, `
 | `certified` at α = 0.0755 | _If_ this class truly passes `p0 = 0.95`, about one honest class in thirteen fails certification. α is a property of the operating point, identical for every class; it is **not** a measurement of this class and says nothing about production.                                                                                                                                     |
 | `certified`               | Nothing about how often a class that _would regress_ is certified in general — that rate is still unmeasured. β(p), the chance that a class whose true pass rate is `p` is certified, **is** computable (`P(Binomial(m, p) ≥ k)`; table in §6), and the corpus's detection of planted regressions is counted there too: 5 of 5 single-rule, 3 of them invisible to the visible check. |
 | The holdout agreed        | The holdout is five rules its author wrote. It can only measure what that author thought of. A green certificate is a floor on class quality, not a proof of correctness — and an operator who controls the holdout store can write a weak-but-discriminating corpus the wall cannot detect.                                                                                          |
-| Current                   | Current _under this policy version and this model id_. Change either and `certificateRecency` reports `stale` (`re-certify: …`); the old row is still true about the old world.                                                                                                                                                                                                       |
-| Certified once            | Certified until the policy or the model changes. A later failing unit does **not** revoke it: `passes` never decreases, so once `passes >= k` the class stays certified in that store. A regression after certification is caught by the unit walls, not by the certificate.                                                                                                          |
+| Current                   | Current _under this policy version, this model id and this corpus_. Change any of the three and `certificateRecency` reports `stale` (`re-certify: …`); the old row is still true about the old world.                                                                                                                                                                                |
+| Certified once            | Certified until the policy, the model or the class's corpus changes. A later failing unit does **not** revoke it: `passes` never decreases, so once `passes >= k` the class stays certified in that store. A regression after certification is caught by the unit walls, not by the certificate.                                                                                      |
 | `samples = 20`            | Twenty attempts were **accumulated**, not twenty consecutive units of the current tree. The row describes the measurement history, not today's code.                                                                                                                                                                                                                                  |
+
+**What a certificate names.** A `class_certificates` row is the statement "this class, at this
+operating point (`m`, `k`, `p0`, α), under this policy version, this model id and this holdout corpus,
+met k of m". The identity is stored (`policy_version`, `model_id`, `holdout_revision`) and all three
+world-state inputs are re-checked by `certificateRecency`:
+
+| The reason line says | What changed                                                                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `policy changed`     | the wall's rules or operating point moved — the digest of the policy the certificate was minted under is not the running one                                         |
+| `model changed`      | `FACTORY_MODEL_ID` moved; the certificate describes one model's behaviour                                                                                            |
+| `model unknown`      | the row never recorded a model id (offline, or before the wiring); `null` is unknown, never "unchanged"                                                              |
+| `corpus changed`     | the class was re-measured under a different holdout corpus: the certificate is compared with the newest measurement of the class that names one                      |
+| `corpus unknown`     | the certificate names no corpus at all — it predates schema v5. It cannot prove which evidence it describes, so it is stale by definition, never current by wildcard |
+
+`audit --certifications` prints the two facts a corpus reason is drawn from, for every stale class:
+
+```
+  test-repair  stale
+    re-certify: corpus changed (certified under h-test-repair-real-2026-11-03, latest measurement under h-test-repair-real-2026-11-04)
+    certified sha256:a368cc6f… under h-test-repair-real-2026-11-03; latest measurement under h-test-repair-real-2026-11-04
+```
+
+`corpus unknown` prints `under an unnamed corpus (this certificate predates corpus attribution);
+latest measurement under no named corpus` when nothing of the class has ever named one. The store
+never infers the corpus: a `NULL` is not a wildcard, and the row — not the verdict it points at — is
+what the audit judges, because the row is what the certificate claims.
 
 The offline proof below was run with a **scripted executor**: no model call, no network, no spend.
 Nothing in this runbook was executed against a paid model in this tree's history, and the numbers
@@ -393,9 +419,14 @@ not more attempts: re-running until it goes green is p-hacking the wall.
   one time in thirteen"; it says nothing about how often a bad class is accepted.
 - **The corpus is written by the same side that is being certified.** It can only measure what its
   author thought of. A weaker but still discriminating corpus certifies a worse class.
-- **Staleness is the only expiry.** Nothing re-runs a certification when the policy or model moves,
-  and nothing raises an alert before a certificate goes stale — `audit --certifications` and
-  `alerts` are commands someone has to run. **Not built**: a scheduled re-certification job.
+- **Staleness is the only expiry, and it now has a corpus dimension.** Schema v5 stores
+  `class_certificates.holdout_revision`, so a class re-measured under a stricter corpus expires its
+  old certificate as soon as the first new row lands (the `alerts` `CERT_STALE` `next:` line names
+  the class to re-certify). What is still absent is anything that _notices_ without being asked:
+  nothing re-runs a certification when the policy, the model or the corpus moves, and nothing raises
+  an alert before a certificate goes stale — `audit --certifications` and `alerts` are commands
+  someone has to run. **Not built**: a scheduled re-certification job, and a corpus-identity check
+  in preflight.
 - **The artefacts are a snapshot of these docs, not of yours.** `scripts/certification-artifacts.sh`
   copies `docs/**/*.md` as they are on disk today; a docs change after the build makes the fixture
   and the repository disagree. Rebuild (`--root` is disposable) before a loop you intend to trust.

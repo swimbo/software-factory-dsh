@@ -39,7 +39,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AlertsV1, type Alert } from '@factory/contracts';
 import { currentPolicyVersion } from '@factory/qualifier';
-import { openStore } from '@factory/store';
+import { openSqlite, openStore } from '@factory/store';
 import type { CertificateRecency } from '@factory/wall';
 
 import { EXIT } from './exit.ts';
@@ -204,6 +204,7 @@ describe('decideAlerts', () => {
             reasons: [
               're-certify: policy changed (certified under policy/old, running policy/new)',
             ],
+            referenceHoldoutRevision: 'holdout/2026-11-01',
           },
           { taskClass: 'tiny-class', state: 'never-certified', certificate: null },
         ],
@@ -218,6 +219,37 @@ describe('decideAlerts', () => {
       // the tree (`docs/runbooks/ledger-anchor.md`, `certificate-expired.md`).
       expect(alert.investigation).toContain('factory audit --certifications');
     }
+    // A stale certificate is cleared by measuring the class again, so the `next:` line names the
+    // class and the driver that does it — "the evidence expired" is a fact, not an instruction.
+    const stale = decision.alerts.find((alert) => alert.code === 'CERT_STALE');
+    expect(stale?.investigation).toContain('re-certify old-class');
+    expect(stale?.investigation).toContain('scripts/certify-class.sh');
+    expect(decision.exitCode).toBe(EXIT.integrity);
+  });
+
+  it('[a corpus change is a CERT_STALE whose reason names both corpora]', () => {
+    // `decideAlerts` does not re-judge: the wall's reasons are the alert's reason, verbatim. What
+    // this pins is that the corpus dimension reaches the operator instead of being flattened into
+    // "stale".
+    const decision = decideAlerts(
+      facts({
+        certificates: [
+          {
+            taskClass: 'test-repair',
+            state: 'stale',
+            certificate: { ...CURRENT.certificate, taskClass: 'test-repair' },
+            reasons: [
+              're-certify: corpus changed (certified under h-test-repair-real-2026-11-03, latest measurement under h-test-repair-real-2026-11-04)',
+            ],
+            referenceHoldoutRevision: 'h-test-repair-real-2026-11-04',
+          },
+        ],
+      }),
+    );
+    const [alert] = decision.alerts;
+    expect(alert?.code).toBe('CERT_STALE');
+    expect(alert?.reason).toContain('h-test-repair-real-2026-11-03');
+    expect(alert?.reason).toContain('h-test-repair-real-2026-11-04');
     expect(decision.exitCode).toBe(EXIT.integrity);
   });
 
@@ -349,6 +381,31 @@ describe('factory alerts', () => {
     const payload = jsonOf(result);
     expect(payload['ok']).toBe(false);
     expect((payload['anchor'] as { state: string }).state).toBe('unconfigured');
+  });
+
+  it('reads a certificate that names no corpus as expired evidence, and says to re-certify the class', () => {
+    // The row shape every pre-v5 store has: the projection is there, it is readable, and it cannot
+    // prove which corpus it measured. That is stale — not a wildcard that matches the running corpus.
+    const { home, anchorDir } = seededHome();
+    const raw = openSqlite({ path: join(home, 'state', 'factory.db') });
+    raw.prepare('UPDATE class_certificates SET holdout_revision = NULL').run();
+    raw.close();
+
+    const result = runCli(['alerts', '--json'], { home, env: { FACTORY_ANCHOR_DIR: anchorDir } });
+    expect(result.status).toBe(EXIT.integrity);
+    const alerts = jsonOf(result)['alerts'] as Array<{
+      code: string;
+      subject: string;
+      reason: string;
+      investigation: string;
+    }>;
+    const stale = alerts.find((alert) => alert.code === 'CERT_STALE');
+    expect(stale?.subject).toBe('refactor-extract-helper');
+    expect(stale?.reason).toContain('predates corpus attribution');
+    expect(stale?.investigation).toContain('re-certify refactor-extract-helper');
+    expect(stale?.investigation).toContain('scripts/certify-class.sh');
+    expect(result.stderr).toContain('CERT_STALE');
+    expect(result.stderr).toContain('next: re-certify refactor-extract-helper');
   });
 
   it('exits 9 when the store has no certificates, and never calls that clean', () => {

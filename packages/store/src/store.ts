@@ -271,6 +271,7 @@ interface ClassCertificateDbRow {
   outcome: string;
   policy_version: string;
   model_id: string | null;
+  holdout_revision: string | null;
   recorded_at: string;
   certificate_sha: string;
 }
@@ -301,6 +302,7 @@ function certificateFromRow(row: ClassCertificateDbRow): ClassCertificateRow {
     outcome: row.outcome,
     policyVersion: row.policy_version,
     modelId: row.model_id,
+    holdoutRevision: row.holdout_revision,
     recordedAt: row.recorded_at,
     certificateSha: row.certificate_sha,
   };
@@ -394,12 +396,29 @@ export function openStore(options: OpenStoreOptions): Store {
       }
       for (const step of path) {
         for (const statement of step.statements) stmt(statement).run();
+        for (const addition of step.addColumns ?? []) {
+          // SQLite has no `ADD COLUMN IF NOT EXISTS`, so presence is inspected rather than assumed.
+          // The case this exists for: an old store whose table `SCHEMA_SQL` has already recreated in
+          // the current shape before the declared steps ran — the column is there, and running the
+          // `ALTER` would refuse to open a ledger this binary can read.
+          const present = stmt(`PRAGMA table_info(${addition.table})`)
+            .all<{ name: string }>()
+            .some((column) => column.name === addition.column);
+          if (!present) stmt(addition.statement).run();
+        }
         stmt('INSERT INTO schema_migration (version, applied_at, checksum) VALUES (?, ?, ?)').run(
           step.to,
           now(),
           // The current binary's checksum, not the step's: this row asserts "this store now
           // conforms to SCHEMA_SQL", which is what the next open compares against.
-          step.to === SCHEMA_VERSION ? schemaChecksum : sha256Hex(step.statements.join('\n')),
+          step.to === SCHEMA_VERSION
+            ? schemaChecksum
+            : sha256Hex(
+                [
+                  ...step.statements,
+                  ...(step.addColumns ?? []).map((addition) => addition.statement),
+                ].join('\n'),
+              ),
         );
         migrationsApplied.push({ from: step.from, to: step.to, note: step.note });
       }
@@ -1929,6 +1948,11 @@ export function openStore(options: OpenStoreOptions): Store {
           }
           const certificateId = `cert:${row.verdictId}`;
           const modelId = verdict.modelId ?? null;
+          // The corpus this certificate was measured under, carried from its verdict. Every verdict
+          // the store accepts names a corpus — the contract requires a non-empty `holdoutRevision`,
+          // because a measurement that named none is `unknown`, never a pass — so a `NULL` in the
+          // column means exactly one thing: the row was written before v4 → v5 added it.
+          const certificateCorpus = row.holdoutRevision ?? verdict.holdoutRevision;
           const certificateSha = contentHash({
             certificateId,
             verdictId: row.verdictId,
@@ -1947,8 +1971,9 @@ export function openStore(options: OpenStoreOptions): Store {
           });
           stmt(
             `INSERT INTO class_certificates (certificate_id, verdict_id, unit_id, task_class, m, k, p0,
-               alpha, samples, passes, outcome, policy_version, model_id, recorded_at, certificate_sha)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               alpha, samples, passes, outcome, policy_version, model_id, holdout_revision, recorded_at,
+               certificate_sha)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             certificateId,
             row.verdictId,
@@ -1963,6 +1988,7 @@ export function openStore(options: OpenStoreOptions): Store {
             certificate.outcome,
             row.policyVersion,
             modelId,
+            certificateCorpus,
             row.evaluatedAt,
             certificateSha,
           );
@@ -2061,7 +2087,7 @@ export function openStore(options: OpenStoreOptions): Store {
     classCertificates(): readonly ClassCertificateRow[] {
       return stmt(
         `SELECT certificate_id, verdict_id, unit_id, task_class, m, k, p0, alpha, samples, passes,
-                outcome, policy_version, model_id, recorded_at, certificate_sha
+                outcome, policy_version, model_id, holdout_revision, recorded_at, certificate_sha
            FROM class_certificates ORDER BY recorded_at DESC, rowid DESC`,
       )
         .all<ClassCertificateDbRow>()
@@ -2071,7 +2097,7 @@ export function openStore(options: OpenStoreOptions): Store {
     certificatesForClass(taskClass: string): readonly ClassCertificateRow[] {
       return stmt(
         `SELECT certificate_id, verdict_id, unit_id, task_class, m, k, p0, alpha, samples, passes,
-                outcome, policy_version, model_id, recorded_at, certificate_sha
+                outcome, policy_version, model_id, holdout_revision, recorded_at, certificate_sha
            FROM class_certificates WHERE task_class = ? ORDER BY recorded_at DESC, rowid DESC`,
       )
         .all<ClassCertificateDbRow>(taskClass)
