@@ -16,7 +16,10 @@
  *      repaired reference module per base commit, the hidden-behaviour probe, and the
  *      instrument-immutability rule, plus `manifest.json`. Written *after* the commits because the
  *      probe and the reference are selected by base commit, and the corpus must be outside the
- *      repository the worker can write;
+ *      repository the worker can write. `<revision>` is **content-addressed**
+ *      (`<label>-<8 hex of corpusContentDigest>`, see `corpusRevisionId`), so a rebuild that changes
+ *      any rule, probe, repaired reference or base commit mints a new id and a certificate measured
+ *      against the old corpus goes stale by itself — an id is an identity, not a date-stamped slot;
  *   4. `<root>/spec-1.json … spec-N.json`, `<root>/restate.md` and `<root>/plan-units.sh` — the
  *      planner, emitted rather than executed: submitting a unit writes the store, and materialising
  *      artefacts must stay a free, idempotent, store-free operation;
@@ -43,6 +46,7 @@ import {
   mkdirSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -58,6 +62,8 @@ import {
   VISIBLE_CHECK_PATH,
   VISIBLE_CHECK_SOURCE,
   assertRevisionDiscriminates,
+  corpusRevisionId,
+  writeTestRepairManifest,
   buggySource,
   fixtureJson,
   fixturePath,
@@ -89,11 +95,18 @@ export const ARTEFACT_REPO_ID = 'test-repair-certification';
  * about nothing.
  *
  * The token also moved with the rulebook: `…-2026-11-03` named a two-rule corpus, this one names the
- * three-rule corpus that adds the differential comparison. Certificates measured against the old token
- * are not evidence about this one, and re-measuring is how that gets fixed — the store's recency
- * judgement compares policy and model, not the corpus, so an old row does not expire on its own.
+ * three-rule corpus that adds the differential comparison.
+ *
+ * What this constant is *not* is the revision id. A date names a slot: two builds on the same day —
+ * one with the fixture as it was, one after a rule or a hidden expectation changed — would carry the
+ * same name for different evidence, and the store's recency judgement compares names, so the older
+ * certificate would read `current` while naming a corpus it was never measured against. The id is
+ * this label plus the first eight hex of the corpus's content digest (`corpusRevisionId`), so a
+ * rebuild that changes any rule, probe, repaired reference or base commit mints a new id and the old
+ * certificate goes stale by itself. `…-2026-11-04` is therefore the prefix every build today's
+ * fixture produces shares, not the whole id.
  */
-export const ARTEFACT_HOLDOUT_REVISION = 'h-test-repair-real-2026-11-04';
+export const ARTEFACT_HOLDOUT_BASE_REVISION = 'h-test-repair-real-2026-11-04';
 
 /** How many distinct bases a certificate needs: the ratified `m`. */
 export const DEFAULT_REVISIONS = 20;
@@ -157,6 +170,14 @@ export interface ArtefactsOptions {
   readonly revisions?: number;
   readonly createdAt?: string;
   readonly sourceCommit?: string;
+  /**
+   * The fixture table to build from. Defaults to `TEST_REPAIR_REVISIONS`.
+   *
+   * Overridden only by the artefacts spec, which builds the same corpus twice with one hidden
+   * expectation changed to prove the id follows the content. The generator itself always uses the
+   * table the fixture module exports.
+   */
+  readonly revisionTable?: readonly TestRepairRevision[];
   /** One line per phase, so the operator sees the build thinking rather than hanging. */
   readonly onProgress?: (line: string) => void;
 }
@@ -198,6 +219,17 @@ function runProcess(argv: readonly string[], cwd: string, env?: NodeJS.ProcessEn
   }
 }
 
+/**
+ * The date every fixture commit carries.
+ *
+ * The corpus digest is keyed by the base commits (`hidden/index.json` and every probe filename name
+ * them), so a history stamped by the wall clock would mint a different corpus id on every rebuild of
+ * unchanged content — the slot-name defect one level down. A fixture's commit date is a fixture like
+ * any other, so it is pinned; two builds of the same content are byte-identical and therefore
+ * content-address to the same id.
+ */
+const ARTEFACT_COMMIT_DATE = '2026-01-01T00:00:00+00:00';
+
 /** The env a git subprocess gets: no global/system config, fixed identity, no interactive prompts. */
 function gitEnv(): NodeJS.ProcessEnv {
   return {
@@ -205,6 +237,8 @@ function gitEnv(): NodeJS.ProcessEnv {
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_TERMINAL_PROMPT: '0',
+    GIT_AUTHOR_DATE: ARTEFACT_COMMIT_DATE,
+    GIT_COMMITTER_DATE: ARTEFACT_COMMIT_DATE,
   };
 }
 
@@ -299,8 +333,9 @@ function visibleCheckFails(tree: string): boolean {
 }
 
 /** The revision a unit index uses, cycling the table when more bases are asked for than exist. */
-function revisionFor(index: number): TestRepairRevision {
-  const revision = TEST_REPAIR_REVISIONS[index % TEST_REPAIR_REVISIONS.length];
+/** The revision at `index` in `table`, cycling: more bases than revisions repeats the table. */
+function revisionAt(table: readonly TestRepairRevision[], index: number): TestRepairRevision {
+  const revision = table[index % table.length];
   if (revision === undefined) throw new Error('the revision table is empty');
   return revision;
 }
@@ -331,6 +366,8 @@ export function materializeTestRepairArtifacts(options: ArtefactsOptions): Artef
   const root = resolve(options.root);
   const sourceRoot = resolve(options.sourceRoot);
   const revisions = options.revisions ?? DEFAULT_REVISIONS;
+  const table = options.revisionTable ?? TEST_REPAIR_REVISIONS;
+  const revisionFor = (index: number): TestRepairRevision => revisionAt(table, index);
   if (!Number.isInteger(revisions) || revisions < 1) {
     throw new RangeError(`--revisions must be a positive integer, got ${String(revisions)}`);
   }
@@ -418,17 +455,33 @@ export function materializeTestRepairArtifacts(options: ArtefactsOptions): Artef
   }
 
   // The corpus needs the commit of every base: the hidden probe is selected by base revision, so the
-  // corpus cannot be written before the history exists.
-  const corpus = writeTestRepairCorpus(holdoutRoot, {
-    revision: ARTEFACT_HOLDOUT_REVISION,
+  // corpus cannot be written before the history exists. It is written under the base label first,
+  // because its id contains a digest of the tree it is about to have.
+  const provisional = writeTestRepairCorpus(holdoutRoot, {
+    revision: ARTEFACT_HOLDOUT_BASE_REVISION,
     revisions: built.map((entry) => ({ baseRev: entry.commit, revision: entry.revision })),
   });
+  const holdoutRevision = corpusRevisionId(ARTEFACT_HOLDOUT_BASE_REVISION, provisional.dir);
+  const revisionDir = join(holdoutRoot, TEST_REPAIR_TASK_CLASS, holdoutRevision);
+  if (revisionDir !== provisional.dir) {
+    renameSync(provisional.dir, revisionDir);
+    // The manifest names its own id and every scenario argv is a path under the revision directory,
+    // so it is rewritten under the final name. Its body is derived from the renamed directory, which
+    // is also a check that the rename kept the rules.
+    writeTestRepairManifest(revisionDir, holdoutRevision);
+  }
   const loaded = loadHoldout(holdoutRoot, TEST_REPAIR_TASK_CLASS);
-  if (loaded === null || loaded.revision !== ARTEFACT_HOLDOUT_REVISION) {
-    throw new Error(`the corpus just written does not load: ${corpus.dir}`);
+  if (loaded === null || loaded.revision !== holdoutRevision) {
+    throw new Error(`the corpus just written does not load as ${holdoutRevision}: ${revisionDir}`);
+  }
+  const rederived = corpusRevisionId(ARTEFACT_HOLDOUT_BASE_REVISION, revisionDir);
+  if (rederived !== holdoutRevision) {
+    throw new Error(
+      `the corpus id is not content-addressed: wrote ${holdoutRevision}, re-derived ${rederived}`,
+    );
   }
   progress(
-    `artifacts: corpus ${TEST_REPAIR_TASK_CLASS}@${loaded.revision} with ` +
+    `artifacts: corpus ${TEST_REPAIR_TASK_CLASS}@${holdoutRevision} with ` +
       `${loaded.scenarios.length.toString()} rule(s) at ${holdoutRoot}`,
   );
 
@@ -443,7 +496,7 @@ export function materializeTestRepairArtifacts(options: ArtefactsOptions): Artef
           'for a repaired one',
       );
     }
-    const basePassing = rulesPassing(repo, corpus.dir);
+    const basePassing = rulesPassing(repo, revisionDir);
     if (basePassing.length > 0) {
       throw new Error(
         `revision ${label} passes ${basePassing.join(', ')} while its test is red: the rule stopped ` +
@@ -454,7 +507,7 @@ export function materializeTestRepairArtifacts(options: ArtefactsOptions): Artef
     // The repair target for this revision: the same tree with the source fixed. Both rules and the
     // visible check have to pass, or no worker could ever earn a verdict.
     writeFileSync(join(repo, modulePath(entry.revision)), entry.revision.fixed);
-    const repairedPassing = rulesPassing(repo, corpus.dir);
+    const repairedPassing = rulesPassing(repo, revisionDir);
     if (repairedPassing.length !== TEST_REPAIR_RULES.length) {
       throw new Error(
         `the repaired tree for revision ${label} fails a class rule: a corpus that refuses the ` +
@@ -498,7 +551,7 @@ export function materializeTestRepairArtifacts(options: ArtefactsOptions): Artef
     repo,
     mirror,
     holdoutRoot,
-    holdoutRevision: ARTEFACT_HOLDOUT_REVISION,
+    holdoutRevision,
     home,
     taskClass: TEST_REPAIR_TASK_CLASS,
     repoId: ARTEFACT_REPO_ID,
@@ -752,7 +805,7 @@ holds no live store — ${code('FACTORY_HOME')} points at ${code('home/')}, whic
 | ---- | ---------- |
 | ${code('repo/')} | The repository the worker edits: one commit per base revision, each a small ES module with one genuine defect, the test that fails because of it, and the expectation data that test reads. |
 | ${code('repo.git/')} | The bare mirror the wall clones. ${code('FACTORY_PRISTINE_REPO')} points here; it is the only repository the wall trusts. |
-| ${code(`holdout/${artefacts.taskClass}/${artefacts.holdoutRevision}/`)} | The class corpus: three rule scripts, one repaired reference module per base commit, plus ${code('manifest.json')}, read by ${code('loadHoldout')} from outside every worktree. |
+| ${code(`holdout/${artefacts.taskClass}/${artefacts.holdoutRevision}/`)} | The class corpus: three rule scripts, one repaired reference module per base commit, plus ${code('manifest.json')}, read by ${code('loadHoldout')} from outside every worktree. The id is content-addressed: its ${code('-<8hex>')} suffix is a digest of everything in this directory, so rebuilding after changing a rule or a hidden expectation mints a new id and a certificate measured against this one reads stale rather than current. |
 | ${code(`spec-1.json … spec-${artefacts.revisions.length.toString()}.json`)} | One unit spec per base revision: ${code('slug')}, ${code('repo')}, ${code('baseRev')}, the acceptance oracle, the budget estimate. |
 | ${code('restate.md')} | The restate-back sentence every spec binds. ${code('factory intent --restate')} hashes it into the mandate. |
 | ${code('plan-units.sh')} | Submits and qualifies the specs against ${code('$FACTORY_HOME')} and writes ${code('units.txt')}. |

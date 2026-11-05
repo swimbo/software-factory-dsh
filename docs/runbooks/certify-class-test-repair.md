@@ -32,7 +32,7 @@ export FACTORY_HOLDOUT_TASK_CLASS="test-repair"
 export FACTORY_PRISTINE_REPO="$HOME/.factory/certification-test-repair/repo.git"
 export FACTORY_REPO="test-repair-certification"
 export FACTORY_TEST_ROOT="tests"
-export FACTORY_WALL_SUITE="node $HOME/.factory/certification-test-repair/holdout/test-repair/h-test-repair-real-2026-11-04/suite/run-tests.mjs"
+export FACTORY_WALL_SUITE="node $HOME/.factory/certification-test-repair/holdout/test-repair/h-test-repair-real-2026-11-04-<8hex>/suite/run-tests.mjs"
 export FACTORY_MODEL_ID="<the model id the attempts run under>"
 export FACTORY_MODEL_API="openai-completions"   # the proxy's wire shape; see live-model.md
 export FACTORY_LIVE_MODEL=1                     # the consent switch: this run may spend
@@ -41,8 +41,11 @@ export DSH_BIN="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cl
 ```
 
 `bash scripts/test-repair-artifacts.sh` prints this block already filled in for the root it built;
-paste that instead of editing the paths by hand. The key reaches the controller, never the worker —
-see [live-model.md](live-model.md) and §1 of [certify-class.md](certify-class.md).
+paste that instead of editing the paths by hand. The `-<8hex>` suffix is not decoration: the corpus id
+is content-addressed (§4), so a rebuild that changed any rule or hidden expectation mints a different
+id, and a hand-edited path would point the wall at a corpus that no longer exists. The key reaches the
+controller, never the worker — see [live-model.md](live-model.md) and §1 of
+[certify-class.md](certify-class.md).
 
 **Two things are specific to this class and are not defaults you can forget.**
 
@@ -131,9 +134,33 @@ re-run a command by hand to find out why:
 
 ## 4. The corpus: three rules, outside the repo
 
-The corpus lives at `$FACTORY_HOLDOUT_ROOT/test-repair/h-test-repair-real-2026-11-04/`, is loaded by
-`loadHoldout`, and never enters an attempt clone. The verdict anonymises the ids as `holdout:01` …
-`holdout:03`, so a worker cannot learn which rule it missed.
+The corpus lives at `$FACTORY_HOLDOUT_ROOT/test-repair/h-test-repair-real-2026-11-04-<8hex>/`, is
+loaded by `loadHoldout`, and never enters an attempt clone. The verdict anonymises the ids as
+`holdout:01` … `holdout:03`, so a worker cannot learn which rule it missed.
+
+**The id is content-addressed, because an id that names a slot is not an identity.** The directory
+name is `<label>-<8 hex>`, where the label is the class and the date the loop was planned, and the
+suffix is the first eight characters of `corpusContentDigest` (`e2e/certification/test-repair.ts`): a
+sha256 over the bytes the wall reads — the three rule scripts, the pinned suite wrapper, every probe,
+every repaired reference, `hidden/index.json`, and the manifest's scenario list. The manifest's own
+`revision` field and the absolute paths in its `argv` are masked out of the digest, because they
+contain the id the digest is computing; the masking loses nothing, since the scenario list itself is
+hashed field by field. Everything is deliberately part of the digest, not just the rules: the
+reference modules and the probes _are_ hidden expectations, and a corpus whose references changed is a
+different corpus even when its rule scripts did not. For the same reason the fixture commits are
+stamped with a fixed date (`ARTEFACT_COMMIT_DATE`): the base shas are keys in `hidden/index.json`, so
+a wall-clock stamp would make the id change on every rebuild of unchanged content.
+
+This is the same defect the certificate-recency work fixed, one level down. `certificatesRecency`
+compares ids. With a date-only id, two builds on the same day — one before a rule change, one after —
+would carry the _same_ name for different evidence, and the older certificate would keep reading
+`current` while naming a corpus it was never measured against. With the digest suffix, a rebuild that
+changes any rule, probe, repaired reference or base commit mints a new id, the old certificate goes
+stale by itself, and re-certification is triggered by content instead of by the operator's memory. The
+artefacts spec proves both directions: two builds of the same fixture, a year and a directory apart,
+mint the same id and the same commit shas; a build with one changed probe mints a different id while
+the commit shas stay identical (`e2e/certification/test-repair-artifacts.test.ts`, "mints the same
+corpus id …" and "mints a new corpus id …").
 
 **Rule 1 — differential behaviour** (`holdout:01`). For every base commit the corpus ships
 `hidden/<sha>.reference.mjs`: the _repaired_ module, byte for byte, written at build time from the
@@ -208,10 +235,15 @@ suite states the convention. Every such edge is now a visible case for all twent
 
 The edges where the base and the reference **disagree** stay out of the fixture on purpose. They are
 the boundary the defect lives on, and a visible case for each hands a lookup-table repair exactly the
-inputs that catch it: measured, revealing every edge let the `bytes` cheat — the buggy function plus a
-table keyed by the visible cases — pass the whole corpus and certify, because the boundary values it
-needed were in the table. The safe-edge rule keeps the fixture honest without disarming the rule; the
-seeded samples and the hidden probes still catch a repair keyed to the visible inputs.
+inputs that catch it — and this is measured, not argued. Making **all 118** declared edges visible
+(the obvious reading of "make the tests stricter") let the **lookup-table cheat for `bytes`** — the
+buggy function plus a table keyed by the visible cases — pass the whole corpus and _certify_:
+`test-repair-certification.test.ts` went red with `expected +0 to be 3` while the pipeline spec stayed
+green, because the boundary values the differential rule generates from (`1024`, `1023`, `1025`, …)
+were now table entries instead of evidence. Revealing only the safe edges restored the refusal, and
+both cheat specs are green. The rule, then: **the fixture may show what the base already gets right;
+it must not show where the base is wrong.** Anyone tempted to make the fixture stricter by adding
+disagreement edges should expect to lose exactly this measurement.
 
 **The residual.** The corpus can only check what the visible evidence makes checkable. Where a
 behaviour is not visible-testable — because it is unreachable from a fixture-shaped input, or because
@@ -222,16 +254,19 @@ still land on a convention no edge and no visible case exhibits, and when one do
 to make it visible (or drop it from the domain), not to let the certificate absorb it. §9 names what
 the current measurement leaves.
 
-**The corpus id moved, and re-measuring is what makes the old certificate stale.** The two-rule corpus
-was `h-test-repair-real-2026-11-03`; this one is `…-2026-11-04`, and every scenario id moved with it
-(`holdout:01` is now the differential rule). The id is recorded on every verdict row and every
-criteria-log line, so evidence stays attributable, and — since schema v5 — on every certificate row
-too: `class_certificates.holdout_revision`, compared by `certificatesRecency`
-(`packages/wall/src/certificate-recency.ts`) with the newest measurement of the class that names a
-corpus. So the corpus is a fourth identity input beside the policy version and the model id, and it
-expires the claim the same way:
+**The corpus id follows the corpus, and re-measuring is what makes the old certificate stale.** The
+two-rule corpus was `h-test-repair-real-2026-11-03`; the three-rule corpus this runbook describes is
+`h-test-repair-real-2026-11-04-<8hex>`, and every scenario id moved with it (`holdout:01` is now the
+differential rule). The digest suffix is what makes the id an identity rather than a label: change a
+rule, a reference or a probe and the next build mints a new id (compare `h-test-repair-real-2026-11-04`
+without a suffix, which was a slot — the same name for whatever the fixture happened to be that day).
+The id is recorded on every verdict row and every criteria-log line, so evidence stays attributable,
+and — since schema v5 — on every certificate row too: `class_certificates.holdout_revision`, compared
+by `certificatesRecency` (`packages/wall/src/certificate-recency.ts`) with the newest measurement of
+the class that names a corpus. So the corpus is a fourth identity input beside the policy version and
+the model id, and it expires the claim the same way:
 
-- the live `test-repair` certificate (`cert:V-921a457ae54e`, verdict
+- the live `test-repair` certificate (verdict under the two-rule corpus,
   `h-test-repair-real-2026-11-03`) was written **before** the column existed. The v4 → v5 migration
   backfills it from the verdict it names — an exact join on the row that produced the certificate — so
   it records `h-test-repair-real-2026-11-03` and stays `current` until a measurement under the new
@@ -240,11 +275,13 @@ expires the claim the same way:
   moved). What the migration will **not** do is copy a corpus from anywhere else: a certificate whose
   verdict names none, or is missing, stays `NULL` — "this certificate predates corpus attribution" —
   which is **stale**, never a wildcard that matches whatever corpus is running.
-- the first attempt of §5 writes a row under `h-test-repair-real-2026-11-04`; from that row on the
-  class reads `stale` for a second reason — `re-certify: corpus changed (certified under
-h-test-repair-real-2026-11-03, latest measurement under h-test-repair-real-2026-11-04)` — and the
-  twentieth attempt, if the class earns it, writes the `certified` row under the new corpus that makes
-  it `current` again.
+- the first attempt of §5 writes a row under the new id; from that row on the class reads `stale`
+  for a second reason — `re-certify: corpus changed (certified under <the corpus the certificate
+names>, latest measurement under <the corpus this attempt names>)` — and the twentieth attempt, if
+  the class earns it, writes the `certified` row under the new corpus that makes it `current` again.
+  A rebuild that changes the corpus and a rebuild that does not both behave correctly: the first
+  mints a new id and the class goes stale on the first measurement, the second keeps the id and the
+  certificate is untouched.
 
 The consequence to plan for: a class whose _corpus did not move_ is not re-measured at all — the
 backfilled row is current, and the first attempt of §5 is what makes it stale. A class certified
@@ -339,21 +376,22 @@ scenario (a spawn, an exit-code check, a criteria-log line). It adds nothing to 
 All offline (`FACTORY_EXECUTOR=fake`), in the gate. The commands are the gate's; the durations are
 measured on this machine and grow with the number of rules, which is the cost of the third one.
 
-| Step                          | Command                                                                    | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ----------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the fixture is a real class   | `pnpm exec vitest run e2e/certification/test-repair.test.ts`               | 7 passed, 4.6 s — twenty revisions of twenty different modules, each one literal defect away from its repair, each base failing its visible test, each repair passing, each probe failing on the base and passing on the repair, and each differential domain failing on the base and passing on the repair with exactly the declared point count (44–52)                                                                                                                                                                 |
-| the cheap repairs are refused | `pnpm exec vitest run e2e/certification/test-repair-pipeline.test.ts`      | 11 passed, 30 s — honest repair `pass` (`delta {baseRate:0, candidateRate:1}`, all three rules green); lookup `fail` on `holdout:01`+`holdout:02`; fixture weakening `fail` on all three scenarios with the pinned suite **green**; test weakening refused by policy as well as the corpus; the scale-guarded repair refused by `holdout:01` alone; the trimmed fixture refused by `holdout:03` alone; the differential rule refusing both cheats with no other rule in the corpus; and the three mutation checks (below) |
-| the certificate flips         | `pnpm exec vitest run e2e/certification/test-repair-certification.test.ts` | 2 passed, 86 s — 20 real runs: `samples=19 passes=17 insufficient` → `samples=20 passes=18 certified`; two refusals measured; criteria log exactly 120 rows (20 revisions × 3 rules × 2 sides); `audit --certifications` exits `0` with `uncertifiedUnits: []`; `alerts` no longer reports `CERT_NEVER`                                                                                                                                                                                                                   |
-| the persistent artefacts      | `pnpm exec vitest run e2e/certification/test-repair-artifacts.test.ts`     | 6 passed, 5.4 s — three revisions built in a temp root: every base fails all three rules and the visible check, its repaired tree passes all three, the corpus loads, ships one reference module per base commit and is absent from the repository's history                                                                                                                                                                                                                                                              |
+| Step                          | Command                                                                    | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the fixture is a real class   | `pnpm exec vitest run e2e/certification/test-repair.test.ts`               | 9 passed, 4.9 s — twenty revisions of twenty different modules, each one literal defect away from its repair, each base failing its visible test, each repair passing, each probe failing on the base and passing on the repair, and each differential domain failing on the base and passing on the repair with exactly the declared point count (44–52); plus the two discovery specs: every safe edge is a visible case, and the POSIX `paths` variant reddens the visible suite before a paid run                           |
+| the cheap repairs are refused | `pnpm exec vitest run e2e/certification/test-repair-pipeline.test.ts`      | 11 passed, 30 s — honest repair `pass` (`delta {baseRate:0, candidateRate:1}`, all three rules green); lookup `fail` on `holdout:01`+`holdout:02`; fixture weakening `fail` on all three scenarios with the pinned suite **green**; test weakening refused by policy as well as the corpus; the scale-guarded repair refused by `holdout:01` alone; the trimmed fixture refused by `holdout:03` alone; the differential rule refusing both cheats with no other rule in the corpus; and the three mutation checks (below)       |
+| the certificate flips         | `pnpm exec vitest run e2e/certification/test-repair-certification.test.ts` | 2 passed, 86 s — 20 real runs: `samples=19 passes=17 insufficient` → `samples=20 passes=18 certified`; two refusals measured; criteria log exactly 120 rows (20 revisions × 3 rules × 2 sides); `audit --certifications` exits `0` with `uncertifiedUnits: []`; `alerts` no longer reports `CERT_NEVER`                                                                                                                                                                                                                         |
+| the persistent artefacts      | `pnpm exec vitest run e2e/certification/test-repair-artifacts.test.ts`     | 9 passed, 50 s — three revisions built in a temp root: every base fails all three rules and the visible check, its repaired tree passes all three, the corpus loads, ships one reference module per base commit and is absent from the repository's history; twenty real specs qualify `dark` through `intent`+`qualify`, a taken store is refused with the next free revision, and the corpus id is content-addressed (same content → same id a year and a directory apart; one changed probe → new id with identical commits) |
 
-The full twenty-revision build (`bash scripts/test-repair-artifacts.sh` with no flags) is 17 s and
+The full twenty-revision build (`bash scripts/test-repair-artifacts.sh` with no flags) is 16 s and
 leaves a 212 KB corpus in 46 files: three rule scripts, twenty probes, twenty reference modules, the
-pinned suite, the index and the manifest. `N` per revision is in the index — the count is
-`edges.length + samples`:
+pinned suite, the index and the manifest. Building it twice, 22 seconds apart, wrote the same id
+(`h-test-repair-real-2026-11-04-ffa87379`) both times while `createdAt` moved — content-addressed, not
+timestamped. `N` per revision is in the index — the count is `edges.length + domain.samples`:
 
 ```bash
 node -e 'const i = require(process.argv[1]); for (const [sha, e] of Object.entries(i)) console.log(sha.slice(0, 7), e.fn.padEnd(12), e.domain.edges.length + e.domain.samples)' \
-  "$FACTORY_HOLDOUT_ROOT/test-repair/h-test-repair-real-2026-11-04/hidden/index.json"
+  "$FACTORY_HOLDOUT_ROOT/test-repair/"*/hidden/index.json
 ```
 
 **The three mutation checks.** Each deletes exactly one rule with `writeTestRepairCorpus(..., {omit})`

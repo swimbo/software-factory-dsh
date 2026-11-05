@@ -49,6 +49,11 @@ world-state inputs are re-checked by `certificateRecency`:
     certified sha256:a368cc6f… under h-test-repair-real-2026-11-03; latest measurement under h-test-repair-real-2026-11-04
 ```
 
+The ids above are from the run before the corpora were content-addressed; a rebuild now appends the
+`-<8hex>` digest suffix to the corpus name, so the same reason line will show the suffixed form (§4 of
+[certify-class-test-repair.md](certify-class-test-repair.md) says why the suffix is an identity and the
+date is not).
+
 `corpus unknown` prints `under an unnamed corpus (this certificate predates corpus attribution);
 latest measurement under no named corpus` when nothing of the class has ever named one. The store
 never infers the corpus: a `NULL` is not a wildcard, and the row — not the verdict it points at — is
@@ -247,6 +252,27 @@ The corpus is never in the prompt, the launch record or the attempt clone, and t
 anonymises the scenario ids (`holdout:01` … `holdout:05`). That is asserted against a real clone in
 [`../../e2e/certification/substrate.test.ts`](../../e2e/certification/substrate.test.ts) — the worker
 cannot read the measurement.
+
+**Known weakness: this class's corpus id is a label, not an identity.** The directory is
+`h-docs-typo-real-2026-11-02` — a fixed string with no digest in it
+([`../../e2e/certification/artifacts.ts`](../../e2e/certification/artifacts.ts),
+`ARTEFACT_HOLDOUT_REVISION`), so every rebuild reuses the same name whatever the corpus contains.
+`certificateRecency` compares ids, so if a rule or a hidden expectation in this corpus changed, the
+next measurement would be recorded under the same id as the old one: the existing certificate would
+keep reading `current` while naming evidence it was never measured against, and the alert that should
+fire (`re-certify: corpus changed`) would not. That is the defect the `test-repair` generator fixed by
+content-addressing its id — `<label>-<8 hex>` over the corpus tree, see §4 of
+[certify-class-test-repair.md](certify-class-test-repair.md) and `corpusRevisionId` in
+[`../../e2e/certification/test-repair.ts`](../../e2e/certification/test-repair.ts).
+
+It is deliberately **not** fixed here yet: this corpus is unchanged and its certificate
+(`h-docs-typo-real-2026-11-02`, samples `m = 20`) is valid, and applying the change now would mint a
+new id and expire roughly 6.4 M tokens of evidence for a naming improvement. The fix has to be applied
+to the docs-class generator **before the next rebuild of this corpus, or when this class is next
+re-measured — whichever comes first**, together with the two specs the test-repair generator now
+carries (same content → same id; one changed hidden expectation → new id). Until then: do not rebuild
+the docs corpus as a free experiment without expecting the certificate to be read against evidence it
+no longer describes.
 
 ## 5. Run the loop
 

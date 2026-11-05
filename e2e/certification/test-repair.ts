@@ -50,9 +50,10 @@
  * replay), and no clock, no network, no model.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { contentHash } from '../../packages/contracts/src/index.ts';
@@ -843,13 +844,34 @@ export function writeTestRepairCorpus(
   }
   writeFileSync(join(revisionDir, 'hidden', 'index.json'), `${JSON.stringify(index, null, 2)}\n`);
 
+  const scenarios = writeTestRepairManifest(revisionDir, revision, options.omit ?? []);
+  return { dir: revisionDir, scenarios };
+}
+
+/** The file the wall reads to learn the scenario set. Part of the corpus digest, under a mask. */
+export const CORPUS_MANIFEST_FILE = 'manifest.json';
+
+/**
+ * Write `manifest.json` for an existing revision directory.
+ *
+ * Separate from the file writer because the revision id is content-addressed: the corpus is written
+ * once under a provisional name, hashed, and then renamed, so the manifest's `revision` field and the
+ * absolute paths in its `argv` have to be rewritten under the final name. Writing the body from the
+ * files on disk — rather than carrying it across — is also what makes the second write a check: the
+ * scenario list is derived from the directory, so a rename that lost a rule would fail to load.
+ */
+export function writeTestRepairManifest(
+  revisionDir: string,
+  revision: string,
+  omit: readonly CorpusRuleId[] = [],
+): readonly HoldoutScenario[] {
+  const omitted = new Set<CorpusRuleId>(omit);
   const scenarios = holdoutScenarios(revisionDir).filter(
     (scenario) => !omitted.has(scenario.id as CorpusRuleId),
   );
   if (scenarios.length === 0) throw new Error('a corpus with no scenarios is not a corpus');
-
   writeFileSync(
-    join(revisionDir, 'manifest.json'),
+    join(revisionDir, CORPUS_MANIFEST_FILE),
     `${JSON.stringify(
       {
         revision,
@@ -861,8 +883,82 @@ export function writeTestRepairCorpus(
       2,
     )}\n`,
   );
+  return scenarios;
+}
 
-  return { dir: revisionDir, scenarios };
+/** Every file in a written corpus, relative to its revision directory, in byte order. */
+function corpusFiles(revisionDir: string): readonly string[] {
+  const found: string[] = [];
+  const walk = (directory: string): void => {
+    const entries = readdirSync(directory, { withFileTypes: true })
+      .map((entry) => ({ name: entry.name, isDirectory: entry.isDirectory() }))
+      .sort((left, right) => (left.name === right.name ? 0 : left.name < right.name ? -1 : 1));
+    for (const entry of entries) {
+      const target = join(directory, entry.name);
+      if (entry.isDirectory) walk(target);
+      else found.push(relative(revisionDir, target).split(sep).join('/'));
+    }
+  };
+  walk(revisionDir);
+  return [...found].sort((left, right) => (left === right ? 0 : left < right ? -1 : 1));
+}
+
+/**
+ * The digest of a written corpus: every byte the wall can read, with the corpus's own name masked out.
+ *
+ * The corpus id has to be an identity, not a slot. A date in the id only says when the operator
+ * started; two builds on the same day — one with the fixture fixed, one without — mint the same name
+ * for different evidence, and `certificatesRecency` compares names, so the certificate would read
+ * `current` while naming a corpus it was never measured against. This digest is what the 8-hex suffix
+ * of the id is made of.
+ *
+ * The name and the revision directory are masked out of `manifest.json` before hashing, and only
+ * there: the manifest states its own revision id and every scenario `argv` is an absolute path under
+ * the revision directory, so hashing it unmasked would make the digest depend on the name it is
+ * computing, and on where the root happens to live. Everything else — the three rule scripts, the
+ * suite wrapper, every probe, every repaired reference, `hidden/index.json` and the manifest's
+ * scenario list — is hashed as written. The masking is not a weakening: the id is derived *from* the
+ * digest, so it cannot be part of the evidence the digest identifies.
+ */
+export function corpusContentDigest(revisionDir: string): string {
+  const name = basename(revisionDir);
+  const hash = createHash('sha256');
+  for (const file of corpusFiles(revisionDir)) {
+    hash.update(`${file}\u0000`, 'utf8');
+    const bytes = readFileSync(join(revisionDir, ...file.split('/')));
+    if (file === CORPUS_MANIFEST_FILE) {
+      const masked = bytes
+        .toString('utf8')
+        .split(revisionDir)
+        .join('<corpus>')
+        .split(name)
+        .join('<revision>')
+        // `revisionHash` is the wall's hash over the scenario list, whose `argv` entries are
+        // absolute paths under the revision directory — so it changes with the name even when the
+        // evidence does not. It is derived from the body above (which *is* hashed), so masking the
+        // value loses nothing: the scenario list itself is covered field by field.
+        .replace(/("revisionHash": ")[^"]*"/u, '$1<hash>"');
+      hash.update(masked, 'utf8');
+    } else {
+      hash.update(bytes);
+    }
+    hash.update('\u0000', 'utf8');
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * The content-addressed corpus id: `<base>-<8 hex of the corpus digest>`.
+ *
+ * `base` is the operator's label — the class and the date the loop was planned — and the suffix is
+ * the identity. A rebuild that changes a rule, a probe, a repaired reference or any base commit's sha
+ * mints a new id, so a certificate measured against the old corpus goes stale by itself instead of
+ * waiting for someone to remember it should. Renaming the directory after it is written is safe
+ * because the digest masks the name; `corpusRevisionId(base, dir)` on the renamed directory returns
+ * the same id, which is the property the spec checks.
+ */
+export function corpusRevisionId(base: string, revisionDir: string): string {
+  return `${base}-${corpusContentDigest(revisionDir).slice(0, 8)}`;
 }
 
 // ---------------------------------------------------------------------------------------------

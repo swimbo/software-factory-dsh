@@ -20,6 +20,13 @@
 # *emitted* as `<root>/plan-units.sh`, not executed, because submitting a unit writes the ledger and
 # building artefacts has to stay a free, repeatable operation.
 #
+# The corpus id is content-addressed, not timestamped: `h-test-repair-real-<date>-<8 hex>`, where the
+# suffix is a digest of every rule, probe, repaired reference and base commit the wall reads
+# (`corpusRevisionId` in e2e/certification/test-repair.ts). `--created-at` is recorded in the marker
+# and the README, and it does not name the corpus. A rebuild that changes any of that evidence mints a
+# new id, so the previous certificate goes stale by itself instead of reading `current` while naming a
+# corpus it was never measured against.
+#
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

@@ -36,7 +36,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DEFAULT_POLICY, restateOverlap } from '../../packages/qualifier/src/index.ts';
 import { assertHoldoutOutsideRepo, loadHoldout } from '../../packages/wall/src/index.ts';
 import {
-  ARTEFACT_HOLDOUT_REVISION,
+  ARTEFACT_HOLDOUT_BASE_REVISION,
   ARTEFACT_KIND,
   ARTEFACT_MARKER_FILE,
   ARTEFACT_REPO_ID,
@@ -47,6 +47,8 @@ import { TEST_REPAIR_REVISIONS, type TestRepairRevision } from './test-repair-re
 import {
   TEST_REPAIR_TASK_CLASS,
   assertRevisionDiscriminates,
+  corpusContentDigest,
+  corpusRevisionId,
   modulePath,
   testPath,
 } from './test-repair.ts';
@@ -130,6 +132,7 @@ let workspace = '';
 let build!: ArtefactBuild;
 let specs: readonly Record<string, unknown>[] = [];
 let baseRevs: readonly string[] = [];
+let holdoutRevision = '';
 let sourceState = '';
 
 beforeAll(() => {
@@ -148,6 +151,11 @@ beforeAll(() => {
       : {};
   });
   baseRevs = specs.map((spec) => String(spec['baseRev']));
+  // The corpus id is content-addressed (`<base>-<8 hex>`), so it is read from the build rather than
+  // assumed: a spec that hard-coded it would stop testing the naming rule the moment it mattered.
+  const classDir = join(root, 'holdout', TEST_REPAIR_TASK_CLASS);
+  const revisionsOnDisk = existsSync(classDir) ? readdirSync(classDir) : [];
+  holdoutRevision = revisionsOnDisk[0] ?? '';
 }, BUILD_TIMEOUT_MS);
 
 afterAll(() => {
@@ -182,7 +190,25 @@ describe('the persistent test-repair artefacts', () => {
     expect(corpus, 'the corpus must load or every verdict would be unknown').not.toBeNull();
     if (corpus === null) throw new Error('unreachable: asserted above');
     expect(corpus.taskClass).toBe(TEST_REPAIR_TASK_CLASS);
-    expect(corpus.revision).toBe(ARTEFACT_HOLDOUT_REVISION);
+    // The id is the operator's label *plus* a digest of the corpus: `<base>-<8 hex>`. A label alone
+    // names a slot — two builds on the same day would share it — and the store's recency judgement
+    // compares ids, so a rebuild that changes a rule or a hidden expectation has to mint a new one.
+    expect(corpus.revision).toBe(holdoutRevision);
+    expect(corpus.revision).toMatch(
+      new RegExp(`^${ARTEFACT_HOLDOUT_BASE_REVISION}-[0-9a-f]{8}$`, 'u'),
+    );
+    expect(
+      corpus.revision,
+      'the suffix is the corpus digest, so the id names the evidence it was built from',
+    ).toBe(
+      corpusRevisionId(
+        ARTEFACT_HOLDOUT_BASE_REVISION,
+        join(holdoutRoot, TEST_REPAIR_TASK_CLASS, holdoutRevision),
+      ),
+    );
+    expect(
+      corpusContentDigest(join(holdoutRoot, TEST_REPAIR_TASK_CLASS, holdoutRevision)),
+    ).toHaveLength(64);
     expect(corpus.scenarios).toHaveLength(3);
     const ids = corpus.scenarios.map((scenario) => scenario.id);
     expect(ids).toEqual([...ids].sort());
@@ -195,9 +221,9 @@ describe('the persistent test-repair artefacts', () => {
       // Every scenario argv names a rule script in this corpus, and the differential rule's own
       // file is there rather than borrowed from the fixture build.
       expect(readFileSync(script, 'utf8')).toContain('holdout:');
-      expect(
-        script.startsWith(join(holdoutRoot, TEST_REPAIR_TASK_CLASS, ARTEFACT_HOLDOUT_REVISION)),
-      ).toBe(true);
+      expect(script.startsWith(join(holdoutRoot, TEST_REPAIR_TASK_CLASS, holdoutRevision))).toBe(
+        true,
+      );
     }
 
     // The specs: one per base, distinct revisions and bases, the repo identity the wall will enforce.
@@ -234,14 +260,14 @@ describe('the persistent test-repair artefacts', () => {
     expect(marker['kind']).toBe(ARTEFACT_KIND);
     expect(marker['revisions']).toBe(REVISIONS);
     expect(marker['taskClass']).toBe(TEST_REPAIR_TASK_CLASS);
-    expect(marker['holdoutRevision']).toBe(ARTEFACT_HOLDOUT_REVISION);
+    expect(marker['holdoutRevision']).toBe(holdoutRevision);
     expect(marker['sourceCommit']).toBe(run(['git', 'rev-parse', 'HEAD'], REPO_ROOT).stdout.trim());
     expect(typeof marker['createdAt']).toBe('string');
     expect(build.stdout).toContain(`export FACTORY_HOLDOUT_ROOT="${holdoutRoot}"`);
     expect(build.stdout).toContain(`export FACTORY_PRISTINE_REPO="${mirror}"`);
     expect(build.stdout).toContain('export FACTORY_TEST_ROOT="tests"');
     expect(build.stdout).toContain(
-      `export FACTORY_WALL_SUITE="node ${join(holdoutRoot, TEST_REPAIR_TASK_CLASS, ARTEFACT_HOLDOUT_REVISION, 'suite', 'run-tests.mjs')}"`,
+      `export FACTORY_WALL_SUITE="node ${join(holdoutRoot, TEST_REPAIR_TASK_CLASS, holdoutRevision, 'suite', 'run-tests.mjs')}"`,
     );
   });
 
@@ -317,7 +343,7 @@ describe('the persistent test-repair artefacts', () => {
     // measure a tree the candidate did not get.
     const corpus = loadHoldout(holdoutRoot, TEST_REPAIR_TASK_CLASS);
     if (corpus === null) throw new Error('the corpus did not load');
-    const revisionDir = join(holdoutRoot, TEST_REPAIR_TASK_CLASS, ARTEFACT_HOLDOUT_REVISION);
+    const revisionDir = join(holdoutRoot, TEST_REPAIR_TASK_CLASS, holdoutRevision);
     const index = JSON.parse(
       readFileSync(join(revisionDir, 'hidden', 'index.json'), 'utf8'),
     ) as Record<
@@ -430,9 +456,119 @@ describe('the persistent test-repair artefacts', () => {
       `${String(REVISIONS)} of ${String(REVISIONS)} spec revision(s) are already in the store`,
     );
     expect(replan.stderr).toContain(`next free revision: ${String(REVISIONS + 1)}`);
+    // The per-revision listing is the part that says *why*: the revision is taken by a named unit,
+    // not refused for its content. Without it the operator re-reads the spec looking for a mistake.
+    expect(replan.stderr).toMatch(/plan-units: {3}revision \d+ is U-[0-9a-f]+/u);
+    expect(replan.stderr).toContain("a unit's identity is (repo, slug, revision)");
     expect(replan.stderr).toContain('nothing was submitted');
     expect(existsSync(join(build.root, 'units.txt'))).toBe(false);
   }, 120_000);
+
+  it(
+    'mints the same corpus id for the same content, whatever the clock and the root say',
+    () => {
+      const first = materializeTestRepairArtifacts({
+        root: join(workspace, 'id-first'),
+        sourceRoot: REPO_ROOT,
+        revisions: 3,
+        createdAt: '2026-11-05T00:00:00Z',
+      });
+      const second = materializeTestRepairArtifacts({
+        root: join(workspace, 'id-second'),
+        sourceRoot: REPO_ROOT,
+        revisions: 3,
+        createdAt: '2027-03-09T12:00:00Z',
+      });
+
+      // Two builds a year and a directory apart, same fixture: the id has to be the same, or it is
+      // naming a slot (when the operator ran the build) rather than the evidence (what the corpus
+      // says). The recency judgement compares ids, so a clock in the id would expire a certificate
+      // for a corpus that did not change.
+      expect(second.holdoutRevision).toBe(first.holdoutRevision);
+      expect(second.holdoutRevision).toMatch(
+        new RegExp(`^${ARTEFACT_HOLDOUT_BASE_REVISION}-[0-9a-f]{8}$`, 'u'),
+      );
+      // The base commits are part of the corpus digest, so "same evidence" has to mean identical
+      // commits: a fixture history stamped by the wall clock would move the id on every rebuild.
+      expect(second.revisions.map((entry) => entry.commit)).toEqual(
+        first.revisions.map((entry) => entry.commit),
+      );
+      for (const artefacts of [first, second]) {
+        const loaded = loadHoldout(artefacts.holdoutRoot, TEST_REPAIR_TASK_CLASS);
+        expect(loaded?.revision, 'each build loads under its own id').toBe(
+          artefacts.holdoutRevision,
+        );
+      }
+    },
+    BUILD_TIMEOUT_MS,
+  );
+
+  it(
+    'mints a new corpus id when one hidden expectation changes, and only then',
+    () => {
+      const table = TEST_REPAIR_REVISIONS.slice(0, 3);
+      const baseline = materializeTestRepairArtifacts({
+        root: join(workspace, 'id-baseline'),
+        sourceRoot: REPO_ROOT,
+        revisions: 3,
+        revisionTable: table,
+        createdAt: '2026-11-05T00:00:00Z',
+      });
+      // One hidden expectation, changed: a comment line in the first probe. It cannot weaken the
+      // probe (a comment runs nothing), which is the point — the *evidence* moved, so the id must
+      // move, whether or not the change would have been caught by a test.
+      const changed = table.map((revision, index) =>
+        index === 0
+          ? { ...revision, hidden: `${revision.hidden}\n// one hidden expectation changed\n` }
+          : revision,
+      );
+      const mutated = materializeTestRepairArtifacts({
+        root: join(workspace, 'id-mutated'),
+        sourceRoot: REPO_ROOT,
+        revisions: 3,
+        revisionTable: changed,
+        createdAt: '2026-11-05T00:00:00Z',
+      });
+
+      expect(mutated.holdoutRevision).not.toBe(baseline.holdoutRevision);
+      // Only the hidden side moved: the fixture commits are identical, so the new id is about the
+      // corpus content and not about the tree or the clock. If this equality ever fails while the
+      // ids differ, the id is not naming the evidence and the spec above is not enough.
+      expect(mutated.revisions.map((entry) => entry.commit)).toEqual(
+        baseline.revisions.map((entry) => entry.commit),
+      );
+      // The id is stable on the tree it names: re-deriving it from the renamed directory is the
+      // property that makes the digest an identity rather than a one-shot hash.
+      for (const artefacts of [baseline, mutated]) {
+        const revisionDir = join(
+          artefacts.holdoutRoot,
+          TEST_REPAIR_TASK_CLASS,
+          artefacts.holdoutRevision,
+        );
+        expect(corpusRevisionId(ARTEFACT_HOLDOUT_BASE_REVISION, revisionDir)).toBe(
+          artefacts.holdoutRevision,
+        );
+        const loaded = loadHoldout(artefacts.holdoutRoot, TEST_REPAIR_TASK_CLASS);
+        expect(loaded?.revision).toBe(artefacts.holdoutRevision);
+      }
+      const probe = (artefacts: {
+        readonly holdoutRoot: string;
+        readonly holdoutRevision: string;
+      }) =>
+        readFileSync(
+          join(
+            artefacts.holdoutRoot,
+            TEST_REPAIR_TASK_CLASS,
+            artefacts.holdoutRevision,
+            'hidden',
+            `${baseline.revisions[0]?.commit ?? ''}.probe.mjs`,
+          ),
+          'utf8',
+        );
+      expect(probe(mutated)).not.toBe(probe(baseline));
+    },
+    BUILD_TIMEOUT_MS,
+  );
 
   it('refuses a directory it did not create, a root inside the checkout, and a revision that stops discriminating', () => {
     const foreign = join(workspace, 'not-ours');
