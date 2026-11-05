@@ -71,7 +71,7 @@ behind:
 | `repo/`                                    | the repository the worker edits: one commit per base revision, each a small ES module with one genuine defect, the test that fails because of it, and the expectation data that test reads, plus `tools/visible-check.mjs` |
 | `repo.git/`                                | a `--mirror` clone of it: the `FACTORY_PRISTINE_REPO` the wall clones                                                                                                                                                      |
 | `holdout/test-repair/<revision>/`          | the corpus `loadHoldout` reads (§4): three rule scripts, one hidden probe and one repaired reference module per base commit, and `manifest.json`                                                                           |
-| `spec-1.json … spec-20.json`, `restate.md` | one unit spec per base revision, and the restate-back text they bind                                                                                                                                                       |
+| `spec-1.json … spec-20.json`, `restate.md` | one unit spec per base revision, and the restate-back text they bind — the text is what `qualify` scores against the intent, so it has to name the work                                                                    |
 | `plan-units.sh`                            | submits and qualifies those specs against `$FACTORY_HOME`, then writes `units.txt`                                                                                                                                         |
 | `home/`                                    | an empty `FACTORY_HOME`; the store and the certificate end up here                                                                                                                                                         |
 | `README.md`, `test-repair-artifacts.json`  | what each piece is, and the marker that makes the root rebuildable                                                                                                                                                         |
@@ -85,6 +85,13 @@ Four things it refuses, and each one is a certificate claim rather than tidiness
   that cannot tell the defect from its repair. The wall's `maxNonDiscriminating` is `0` and is not
   configurable, so one such revision would make every attempt against it `unknown`: an unmeasurable
   class, refused before anything is written;
+- **a revision whose fixture hides a convention the corpus will judge** — every differential edge
+  whose answer the _base revision already gives correctly_ must also be a case in the revision's
+  `visible` list, because a refusal there can only be about how the worker rewrote the function.
+  `checkRevision` reports the gap as `undiscoverableEdges` and `assertRevisionDiscriminates` refuses
+  the build when it is non-empty. The edges where the base and the reference _disagree_ stay hidden
+  on purpose: they are the boundary the defect lives on, and a visible case for each would hand a
+  lookup-table repair the inputs that catch it. §4 records the revision that made this a hard rule;
 - **finishing if the tree it just built does not behave as promised** — every base revision is
   re-measured in place (every rule must fail, the visible check must be red), and every repaired
   tree is re-measured too (every rule and the visible check must pass). A corpus that refuses the
@@ -102,6 +109,25 @@ each dark, and writes `units.txt`. It refuses to run twice.
 refuse a `tests/` edit before it runs. The class means "the corpus catches instrument edits", and a
 path allowlist would move the gate into the spec, where it would not be measured. The intent and the
 restate-back say not to touch the instrument; the corpus is what makes that true.
+
+The planner reports two refusals with the number that explains them, so the operator never has to
+re-run a command by hand to find out why:
+
+- **the store already holds these revisions.** Unit identity is `(repo, slug, revision)`, and a
+  rebuild regenerates the commits, so the spec hashes move while the revisions stay taken. The
+  planner asks the store first (a read) and refuses with the collision and the free number:
+  `plan-units: 20 of 20 spec revision(s) are already in the store at $FACTORY_HOME:`, one
+  `revision R is U-…` line each, then
+  `next free revision: 21 (this build would use 21-40)`. Nothing is submitted. Without the guard the
+  same build fails one spec at a time with `DUPLICATE_UNIT` (exit `3`) and the planner reports it as
+  "refused by intent", which blames the spec's content for a taken identity.
+- **the qualifier refuses a unit.** It prints the failing signal and the value it measured, then names
+  the gate: `intent_derivability RESTATE_BACK_MISMATCH restateOverlap=0.000 min=0.500`, with a line
+  saying the spec is refused as `INTENT_DERIVABILITY` and that `restate.md` has to name the work. The
+  observed overlap is read from `qualify --json`, so "is it derivability, and what did it score" is
+  answered where the refusal happens. The build-time counterpart is the artefacts spec
+  (`e2e/certification/test-repair-artifacts.test.ts`), which proves every emitted `spec`/`restate.md`
+  pair scores at or above `DEFAULT_POLICY.restateOverlapMin` before the planner is ever run.
 
 ## 4. The corpus: three rules, outside the repo
 
@@ -134,10 +160,13 @@ disagrees on 7 of 47 points and its repair on 0.
 **Rule 2 — hidden behaviour** (`holdout:02`). Every base commit has its own probe script
 (`hidden/<sha>.probe.mjs`) chosen by `git rev-parse HEAD` from `hidden/index.json`. The probe imports
 the candidate's module from the `file://` URL it is handed on the command line (so it imports the
-file the class is about rather than a copy, and cannot be reconfigured from outside) and asserts
-**different inputs** than the visible fixture: the same function, different arguments, values the
-test file never shows. A lookup table keyed by `JSON.stringify(args)` satisfies the visible cases and
-falls through to the defect here. Fails closed on a base commit the corpus does not know.
+file the class is about rather than a copy, and cannot be reconfigured from outside) and asserts the
+public behaviour on **inputs of its own choosing**: the same function, a second sample of the same
+contract. A lookup table keyed by `JSON.stringify(args)` satisfies the visible cases and falls through
+to the defect here — except where a probe input coincides with a visible one, which is allowed on
+purpose: the convention has to be discoverable, and the rule that catches a table on the visible
+inputs is rule 1's seeded samples, which are not visible. Fails closed on a base commit the corpus
+does not know.
 
 **Rule 3 — instrument untouched** (`holdout:03`). Two halves, and both are the class:
 
@@ -151,6 +180,47 @@ falls through to the defect here. Fails closed on a base commit the corpus does 
 The rules overlap on purpose in one direction: a candidate that weakens the test is refused by the
 wall's own test-surface check _and_ by rule 3. That redundancy is what makes the refusal legible
 (`test_surface_changed` + `tests_weakened` + `holdout_failed`), not a defect.
+
+**What the corpus can check, and what it cannot.** A corpus is only evidence about a worker if the
+worker can read the contract it is measured against. The visible suite in `repo/` is the whole of that
+contract before an attempt: the worker cannot see the reference module, the probe or the generated
+inputs. So a behaviour the corpus refuses has to be _derivable_ from the visible fixture, or the
+refusal is the author's taste rather than the task.
+
+The revision that made this a rule is `paths` (base commit `6206644`, `normalisePath`). The reference
+drops a leading `..` — this path space has no parent — and the fixture's two cases both had a
+non-empty stack, so nothing on disk said what happens when `..` has nothing to pop. A candidate that
+implemented POSIX `path.normalize` (a leading `..` survives: `../x` → `../x`) passed every visible
+case and was refused **twice** — `holdout:01` on the generated inputs, `holdout:02` on the probe's
+`'../x'` — for a convention the worker could not have discovered. The fixture now asserts the
+convention on the edges the base revision already answers correctly — `['../x'] → 'x'`, `[''] → '.'`,
+`['/'] → '/'`, `['/../..'] → '/'` — while `['a/b/../../c']`, where the base and the reference
+disagree, stays hidden. The POSIX repair goes red in the worker's own test run, at no cost, and
+`e2e/certification/test-repair.test.ts` pins that: it builds the POSIX variant, asserts the visible
+suite rejects it, and would fail if the leading-`..` case were removed.
+
+The rule is enforced at build time rather than remembered, and it is narrower than "show everything",
+because the two failures pull in opposite directions. `checkRevision` reports `undiscoverableEdges`:
+the differential edges whose answer the **base revision already gives correctly** and that no visible
+case asserts. A refusal on one of those cannot be about the defect — the defect answers it the
+reference's way — so it can only be about the worker's rewrite, and it is fair only if the visible
+suite states the convention. Every such edge is now a visible case for all twenty revisions.
+
+The edges where the base and the reference **disagree** stay out of the fixture on purpose. They are
+the boundary the defect lives on, and a visible case for each hands a lookup-table repair exactly the
+inputs that catch it: measured, revealing every edge let the `bytes` cheat — the buggy function plus a
+table keyed by the visible cases — pass the whole corpus and certify, because the boundary values it
+needed were in the table. The safe-edge rule keeps the fixture honest without disarming the rule; the
+seeded samples and the hidden probes still catch a repair keyed to the visible inputs.
+
+**The residual.** The corpus can only check what the visible evidence makes checkable. Where a
+behaviour is not visible-testable — because it is unreachable from a fixture-shaped input, or because
+the visible case cannot express it — a refusal measures agreement with the author's reference, not the
+task's contract, and the honest thing is to say so instead of counting it as evidence. The safe-edge
+rule removes the refusals that were purely about taste in the declared domain; the seeded samples can
+still land on a convention no edge and no visible case exhibits, and when one does, the right fix is
+to make it visible (or drop it from the domain), not to let the certificate absorb it. §9 names what
+the current measurement leaves.
 
 **The corpus id moved, and re-measuring is what makes the old certificate stale.** The two-rule corpus
 was `h-test-repair-real-2026-11-03`; this one is `…-2026-11-04`, and every scenario id moved with it
@@ -228,6 +298,11 @@ this class:
   patch: the domains and the reference are still the author's. A worker can be certified while being
   wrong outside the generated domain, or wrong about something the comparison does not look at. That
   is not a bug in the corpus; it is what a finite measurement is. §9 names what is left.
+- **A refusal is only fair where the contract is visible.** §4 records the `paths` revision, which
+  was refused for a leading-`..` convention the visible fixture never showed, and the build-time rule
+  that now refuses a revision whose corpus compares on inputs the fixture does not assert. The residual
+  is the seeded samples: they are generated from the same domain as the visible edges, so they check the
+  same conventions on different inputs — but a convention that appears only there measures the author.
 - **The two cheats are samples, not a guarantee.** They raise the measured floor: this class was
   certified in a store where the cheap repairs were _tried and refused_. They do not say how often a
   real model tries them.

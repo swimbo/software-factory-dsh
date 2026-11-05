@@ -98,10 +98,26 @@ export const ARTEFACT_HOLDOUT_REVISION = 'h-test-repair-real-2026-11-04';
 /** How many distinct bases a certificate needs: the ratified `m`. */
 export const DEFAULT_REVISIONS = 20;
 
-/** The `restateBack` sentence every spec binds. It has to match `spec.restateBack` exactly. */
+/**
+ * The `restateBack` sentence every spec binds. It has to match `spec.restateBack` exactly.
+ *
+ * The words are load-bearing, and the first version of this text proved it the hard way. `qualify`
+ * scores the restatement against the spec's `intent` with the overlap coefficient over significant
+ * tokens (`restateOverlap`), and the policy floor is 0.500. "You asked for: fix the source so the
+ * failing test passes…" shares *fix*, *source*, *test* and *fixture* with an intent that also says
+ * repair/revision/tests/src/fails/rather/data — 0.357, so the very first spec was rejected
+ * `RESTATE_BACK_MISMATCH` and a planner built from these artefacts could not produce one unit.
+ *
+ * Naming the work — the source, the revision, failing test in `tests/`, fix in `src/` — scores
+ * 0.714 on all twenty intents. A generator whose output cannot pass the gate is a defect of the same
+ * class as a runbook whose commands do not run, so the emitted text is covered by a spec that runs
+ * the generator's own artefacts through `intent` + `qualify` and asserts lane `dark`
+ * (`test-repair-artifacts.test.ts`). Change this sentence and that spec is the thing that tells you.
+ */
 export const RESTATE_TEXT =
-  'You asked for: fix the source so the failing test passes, without changing the test or its ' +
-  'fixture data. Not asking for: a new dependency, a test rewrite or a documentation change.';
+  'You asked for: repair the source for this revision — fix the failing test in tests/ rather than ' +
+  'editing the test or its fixture data, and src/ is where the fix belongs. Not asking for: a new ' +
+  'dependency, a test rewrite or a documentation change.';
 
 /** One commit of the artefacts repository. */
 export interface ArtefactRevision {
@@ -608,15 +624,85 @@ if [ -s "\$ARTEFACTS/units.txt" ]; then
 fi
 
 cd "\$(dirname "\$0")" || exit 1
+
+# Unit identity is (repo, slug, revision), so a rebuild — which regenerates the commits and therefore
+# the spec hashes — followed by a plan against a store that already holds those revisions fails one
+# spec at a time with DUPLICATE_UNIT, and this loop then reports it as "refused by intent", which
+# blames the spec's content for what is really a taken identity. Ask the store first: it is a read,
+# it writes nothing, and it can say the one number the operator needs — the next free revision.
+SPECS=(spec-*.json)
+if [ "\${#SPECS[@]}" -eq 0 ]; then
+  echo "plan-units: no spec-*.json in \$ARTEFACTS; nothing to plan" >&2
+  exit 2
+fi
+WANTED="\$(for spec in "\${SPECS[@]}"; do jq -r '.revision' "\$spec"; done | tr '\\n' ' ')"
+STORE_PLAN="\$("\$NODE_BIN" --input-type=module -e '
+import { existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+const [dbPath, repo, slug, ...wanted] = process.argv.slice(1);
+const wantedSet = new Set(wanted.map((value) => Number(value)));
+const answer = { collided: [], taken: 0, highest: 0 };
+if (existsSync(dbPath)) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    const hasTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = ? AND name = ?")
+      .get("table", "units");
+    if (hasTable !== undefined) {
+      for (const row of db
+        .prepare("SELECT unit_id, revision FROM units WHERE repo = ? AND slug = ?")
+        .all(repo, slug)) {
+        const revision = Number(row.revision);
+        answer.taken += 1;
+        answer.highest = Math.max(answer.highest, revision);
+        if (wantedSet.has(revision)) answer.collided.push({ revision, unitId: String(row.unit_id) });
+      }
+    }
+  } finally {
+    db.close();
+  }
+}
+answer.nextFree = answer.highest + 1;
+process.stdout.write(JSON.stringify(answer) + "\\n");
+' "\$FACTORY_HOME/state/factory.db" "\$(jq -r '.repo' "\${SPECS[0]}")" "\$(jq -r '.slug' "\${SPECS[0]}")" \$WANTED)" || {
+  echo "plan-units: could not read the store at \$FACTORY_HOME/state/factory.db; refusing to submit blind" >&2
+  exit 2
+}
+COLLIDED="\$(printf '%s' "\$STORE_PLAN" | jq -r '.collided | length')"
+if [ "\${COLLIDED:-0}" -gt 0 ]; then
+  NEXT="\$(printf '%s' "\$STORE_PLAN" | jq -r '.nextFree')"
+  LAST=\$((NEXT + \${#SPECS[@]} - 1))
+  echo "plan-units: \${COLLIDED} of \${#SPECS[@]} spec revision(s) are already in the store at \$FACTORY_HOME:" >&2
+  printf '%s' "\$STORE_PLAN" | jq -r '.collided[] | "plan-units:   revision \\(.revision) is \\(.unitId)"' >&2
+  echo "plan-units: a unit's identity is (repo, slug, revision), so these revisions are taken, not free." >&2
+  echo "plan-units: next free revision: \${NEXT} (this build would use \${NEXT}-\${LAST}). Bump the specs' revision fields, or plan against a store that does not hold this class." >&2
+  echo "plan-units: nothing was submitted; units.txt is unchanged" >&2
+  exit 2
+fi
+
 : > units.txt
 for spec in spec-*.json; do
-  unitId="\$("$NODE_BIN" "\$FACTORY_ENTRY" intent --file "\$spec" --restate restate.md --json | jq -r .unitId)"
-  if [ -z "\$unitId" ] || [ "\$unitId" = "null" ]; then
+  intentErr="$(mktemp)"
+  unitId="\$("$NODE_BIN" "\$FACTORY_ENTRY" intent --file "\$spec" --restate restate.md --json 2>"\$intentErr" | jq -r '.unitId // empty')"
+  if [ -z "\$unitId" ]; then
     echo "plan-units: \$spec was refused by intent; nothing more was submitted" >&2
+    sed 's/^/plan-units:   /' "\$intentErr" | sed '/^\$/d' >&2
+    if grep -q 'restateOverlap=' "\$intentErr"; then
+      echo "plan-units: that is the derivability gate (signal intent_derivability); the overlap it measured is quoted above" >&2
+    fi
+    rm -f "\$intentErr"
     exit 1
   fi
-  if ! "$NODE_BIN" "\$FACTORY_ENTRY" qualify "\$unitId" --cold-start --json >/dev/null; then
-    echo "plan-units: qualify refused \$unitId; drop it from units.txt or fix the spec" >&2
+  rm -f "\$intentErr"
+  if ! qualifyJson="$("$NODE_BIN" "\$FACTORY_ENTRY" qualify "\$unitId" --cold-start --json 2>/dev/null)"; then
+    echo "plan-units: qualify refused \$unitId; nothing more was submitted" >&2
+    printf '%s' "\$qualifyJson" | jq -r '
+      (.signals // [])[] | select(.outcome == "fail")
+      | "plan-units:   \\(.name) \\(.reason) \\(.observed)"
+    ' >&2 2>/dev/null
+    if printf '%s' "\$qualifyJson" | jq -e '(.signals // []) | any(.outcome == "fail" and .name == "intent_derivability")' >/dev/null 2>&1; then
+      echo "plan-units: that is the derivability gate: the restate-back does not overlap the intent enough to score above the policy floor, so the spec is refused as INTENT_DERIVABILITY and qualify exits 3. Rewrite restate.md so it names the work." >&2
+    fi
     exit 1
   fi
   printf '%s\\n' "\$unitId" >> units.txt
@@ -716,7 +802,7 @@ twenty samples rather than one defect measured twenty times.
 ## What a certificate measured here means
 
 It means the class's three rules were measured twenty times against this tree: the public behaviour on
-inputs the fixture never shows, the instrument left exactly as the base revision had it, and the
+inputs of its own choosing, the instrument left exactly as the base revision had it, and the
 candidate's agreement with the repaired reference on generated inputs. The third is the strongest and
 the one to quote precisely — a passing attempt **agrees with the known repair on the generated inputs**,
 which is a claim about a finite set (44–52 points per revision), not a proof of correctness. It does

@@ -283,7 +283,10 @@ process.exit(suite.status ?? 1);
 `;
 
 /**
- * Class rule 2: the public behaviour, probed with inputs the visible fixture never shows.
+ * Class rule 2: the public behaviour, probed with inputs of the probe's own choosing. The visible
+ * fixture is the contract (every differential edge the base revision already answers correctly must
+ * appear there); the probe is a second sample of it, so a repair keyed to the visible inputs falls
+ * through to the defect.
  *
  * The probe file is chosen by the base revision's commit, so a candidate cannot tell from the
  * corpus which probe it will get — it is not in its tree, and the probe is resolved from the commit
@@ -1002,6 +1005,21 @@ export interface RevisionCheck {
   readonly differentialPassesOnRepair: boolean;
   /** How many generated inputs the rule compared on the repair side — the claim's N. */
   readonly differentialPoints: number;
+  /**
+   * The declared differential inputs the base revision already answers correctly and no visible case
+   * asserts, as JSON.
+   *
+   * A refusal on such an input cannot be about the defect — the defect answers it the reference's way
+   * — so it is a refusal of the worker's *rewrite*, and it is only fair if the visible suite states
+   * the convention. `paths` was refused twice for keeping a leading `..` (POSIX `path.normalize`)
+   * where the reference drops it: the base revision drops it too, so the base agrees, nothing on disk
+   * said which convention held, and the repair was refused for the author's taste. The inputs where
+   * the base and the reference *disagree* stay out of the fixture on purpose — those are the
+   * boundaries the differential rule needs hidden to catch a lookup-table repair.
+   *
+   * Empty is the only accepted value; the fixture spec fails on a non-empty list.
+   */
+  readonly undiscoverableEdges: readonly string[];
 }
 
 function probePasses(revision: TestRepairRevision, source: string): boolean {
@@ -1017,6 +1035,81 @@ function probePasses(revision: TestRepairRevision, source: string): boolean {
       encoding: 'utf8',
     });
     return run.status === 0;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The runner that compares the base revision's answers with the reference's, one process per revision.
+ *
+ * Both sources are ES modules the fixture wrote, so they are imported rather than evaluated: the tree
+ * has no runtime transpiler and a `new Function` here would both bypass the module semantics and need
+ * a lint suppression this repository does not allow.
+ */
+const DISCOVERABLE_RUNNER = `const [baseUrl, referenceUrl, name, edgesJson] = process.argv.slice(2);
+const base = (await import(baseUrl))[name];
+const reference = (await import(referenceUrl))[name];
+const answer = (fn, args) => {
+  try {
+    return JSON.stringify({ ok: true, value: fn(...args) });
+  } catch (error) {
+    return JSON.stringify({ ok: false, error: String(error && error.message) });
+  }
+};
+const edges = JSON.parse(edgesJson);
+const safe = edges.filter((args) => answer(base, args) === answer(reference, args));
+process.stdout.write(JSON.stringify({ safe }) + "\\n");
+`;
+
+/**
+ * The declared inputs the corpus compares on whose answer the base revision already gives.
+ *
+ * These are the inputs a corpus refusal cannot be about the *defect*: the defect answers them the way
+ * the reference does, so a refusal there can only be about how the worker *rewrote* the function —
+ * the author's taste, unless the worker can read the convention off the visible suite. So every safe
+ * edge has to be a visible case; the corpus's own `differential.edges` are where the author declares
+ * what is interesting, and this is the part of that declaration that must be discoverable.
+ *
+ * The other edges — the ones where the base and the reference disagree — deliberately stay out of the
+ * fixture: they are the boundary the defect lives on, and a visible case for each would hand a
+ * lookup-table repair the very inputs that catch it (measured: revealing all edges lets the `bytes`
+ * cheat certify; revealing only the safe ones leaves the differential rule's teeth intact).
+ */
+function undiscoverableEdges(revision: TestRepairRevision): readonly string[] {
+  const dir = mkdtempSync(join(tmpdir(), 'test-repair-discoverable-'));
+  try {
+    const baseFile = join(dir, 'base.mjs');
+    const referenceFile = join(dir, 'reference.mjs');
+    const runnerFile = join(dir, 'runner.mjs');
+    writeFileSync(baseFile, buggySource(revision));
+    writeFileSync(referenceFile, revision.fixed);
+    writeFileSync(runnerFile, DISCOVERABLE_RUNNER);
+    const run = spawnSync(
+      process.execPath,
+      [
+        runnerFile,
+        pathToFileURL(baseFile).href,
+        pathToFileURL(referenceFile).href,
+        revision.fn,
+        JSON.stringify(revision.differential.edges ?? []),
+      ],
+      { encoding: 'utf8' },
+    );
+    const line = run.stdout.split('\n').find((row) => row.startsWith('{"safe"'));
+    if (run.status !== 0 || line === undefined) {
+      throw new Error(
+        `revision ${revision.id}: could not compare the base and the reference ` +
+          `(${run.stdout}${run.stderr})`,
+      );
+    }
+    const safe = (JSON.parse(line) as { safe?: readonly unknown[] }).safe ?? [];
+    const asserted = new Set(
+      revision.visible.map((visibleCase) => JSON.stringify(visibleCase.args)),
+    );
+    return safe
+      .filter((edge) => !asserted.has(JSON.stringify(edge)))
+      .map((edge) => JSON.stringify(edge));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1042,6 +1135,7 @@ export function checkRevision(revision: TestRepairRevision): RevisionCheck {
     differentialFailsOnBase: !differentialOnBase.agrees,
     differentialPassesOnRepair: differentialOnRepair.agrees,
     differentialPoints: differentialOnRepair.compared,
+    undiscoverableEdges: undiscoverableEdges(revision),
   };
 }
 
@@ -1057,6 +1151,20 @@ export function assertRevisionDiscriminates(revision: TestRepairRevision): void 
     problems.push('the differential rule passes on the base revision');
   }
   if (!check.differentialPassesOnRepair) problems.push('the differential rule fails on the repair');
+  if (check.undiscoverableEdges.length > 0) {
+    const shown = check.undiscoverableEdges.slice(0, 4).join(', ');
+    const rest =
+      check.undiscoverableEdges.length > 4
+        ? ` and ${(check.undiscoverableEdges.length - 4).toString()} more`
+        : '';
+    problems.push(
+      `the differential domain declares ${check.undiscoverableEdges.length.toString()} input(s) ` +
+        `whose answer the base revision already gives and no visible case asserts ` +
+        `(${shown}${rest}): a corpus refusal there can only be about the worker's rewrite, so the ` +
+        `convention has to be visible — assert the input in the fixture or drop it from ` +
+        `differential.edges`,
+    );
+  }
   if (check.differentialPoints < MINIMUM_DIFFERENTIAL_POINTS) {
     problems.push(
       `the differential rule compared only ${check.differentialPoints.toString()} inputs ` +

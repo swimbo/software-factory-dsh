@@ -16,6 +16,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   FIXTURES_ROOT,
   TESTS_ROOT,
+  assertRevisionDiscriminates,
   buggySource,
   checkRevision,
   fixtureJson,
@@ -54,8 +55,8 @@ describe('the test-repair fixture', () => {
       // case") has nothing to delete — except where the module's API legitimately has one shape.
       expect(revision.visible.length, revision.id).toBeGreaterThan(0);
       expect(revision.visible[0]?.args.length, revision.id).toBe(revision.params.length);
-      // The probe has to say something the fixture does not: at least two assertions, all against
-      // inputs the visible cases never show.
+      // At least two assertions, on inputs of the probe's own: the visible fixture is the contract,
+      // the probe is a second sample of it, so a repair keyed to the visible inputs falls through.
       expect(revision.hidden, revision.id).toContain('process.argv[2]');
       // The module under test arrives on argv, not in the environment: a probe a caller can
       // reconfigure measures the caller's choice, and the lint forbids the read.
@@ -130,6 +131,71 @@ describe('the test-repair fixture', () => {
     }
     const points = checks.map((check) => check.differentialPoints);
     expect(Math.min(...points)).toBeGreaterThanOrEqual(40);
+  });
+
+  it('makes every input the corpus compares on visible, so a refusal is readable before it costs', () => {
+    // The visible suite is the whole contract the worker can see before a paid attempt. The corpus
+    // refuses a repair for disagreeing with the reference on an input, so every *declared* input has
+    // to be asserted by a visible case: otherwise the refusal measures the author's taste. This is
+    // the check that would have caught the `paths` defect at build time instead of twice at 3.5
+    // minutes a run: the reference drops a leading `..`, the visible cases showed none, and the
+    // candidate that kept it (POSIX `path.normalize`) was refused for a convention nothing on disk
+    // stated.
+    expect(
+      checks.filter((check) => check.undiscoverableEdges.length > 0).map((check) => check.id),
+    ).toEqual([]);
+
+    const paths = TEST_REPAIR_REVISIONS.find((revision) => revision.id === 'paths');
+    expect(paths).toBeDefined();
+
+    // Mutation: delete the leading-`..` visible case and the build refuses before any paid run,
+    // naming the input the corpus still compares on.
+    const leading = paths?.visible.findIndex(
+      (visibleCase) => JSON.stringify(visibleCase.args) === JSON.stringify(['../x']),
+    );
+    expect(leading).toBeGreaterThanOrEqual(0);
+    const thinned = {
+      ...(paths as NonNullable<typeof paths>),
+      visible: (paths?.visible ?? []).filter((_, index) => index !== leading),
+    };
+    expect(checkRevision(thinned).undiscoverableEdges).toContain('["../x"]');
+    expect(() => assertRevisionDiscriminates(thinned)).toThrow(/no visible case asserts/u);
+  });
+
+  it('refuses the leading-parent convention in the visible suite before a paid run', () => {
+    // The repair the corpus refused twice: POSIX semantics, a leading `..` is preserved because the
+    // path space has a parent. The reference drops it because this one does not. The point of the
+    // visible case is that this disagreement is now free to discover: the worker's own test run goes
+    // red instead of a 3.5-minute certification attempt.
+    const paths = TEST_REPAIR_REVISIONS.find((revision) => revision.id === 'paths');
+    expect(paths).toBeDefined();
+    // The bug's find text stays in place, so `buggySource` can still cut the base revision from it;
+    // the added `else` is the only difference from the reference.
+    const posix = (paths?.fixed ?? '').replace(
+      '      if (segments.length > 0) segments.pop();',
+      "      if (segments.length > 0) segments.pop();\n      else if (!absolute) segments.push('..');",
+    );
+    expect(posix).not.toBe(paths?.fixed);
+    // The POSIX variant carries its own defect marker, so the base side stays parseable: the two
+    // added lines are exactly what a repair that keeps the parent segment writes.
+    const check = checkRevision({
+      ...(paths as NonNullable<typeof paths>),
+      fixed: posix,
+      bug: [
+        {
+          find:
+            '      if (segments.length > 0) segments.pop();\n' +
+            "      else if (!absolute) segments.push('..');",
+          replace: "      /* '..' has nothing to pop here */",
+        },
+      ],
+    });
+    // Red in the visible suite: that is the discovery, and it costs nothing.
+    expect(check.repairPassesVisible).toBe(false);
+    // The hidden probe refuses it too — it asserts the collapse on `../x`, which is why the
+    // candidate that kept the parent was refused as `holdout:02`. The change here is that the worker
+    // learns it from the test they are allowed to run, before the attempt costs anything.
+    expect(check.probePassesOnRepair).toBe(false);
   });
 
   it('has a hidden probe that discriminates: it fails on every base revision and passes on every repair', () => {

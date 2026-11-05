@@ -33,6 +33,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { DEFAULT_POLICY, restateOverlap } from '../../packages/qualifier/src/index.ts';
 import { assertHoldoutOutsideRepo, loadHoldout } from '../../packages/wall/src/index.ts';
 import {
   ARTEFACT_HOLDOUT_REVISION,
@@ -52,7 +53,9 @@ import {
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SCRIPT = join(REPO_ROOT, 'scripts', 'test-repair-artifacts.sh');
-const REVISIONS = 3;
+// The real configuration: `DEFAULT_REVISIONS` is 20, and the certification loop needs 20 units. A
+// smaller build would make "every spec qualifies dark" a statement about a build nobody runs.
+const REVISIONS = 20;
 const BUILD_TIMEOUT_MS = 120_000;
 
 interface RunResult {
@@ -85,6 +88,19 @@ function run(argv: readonly string[], cwd: string, env?: NodeJS.ProcessEnv): Run
       stderr: String(failed.stderr ?? ''),
     };
   }
+}
+
+/** The `export …` block the build prints, as an environment for the planner it emitted. */
+function envFromExports(text: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const line of text.split('\n')) {
+    const match = /^export ([A-Z0-9_]+)="(.*)"$/u.exec(line);
+    if (match === null) continue;
+    const [, key, value] = match;
+    if (key === undefined || value === undefined) continue;
+    env[key] = value;
+  }
+  return env;
 }
 
 /** The revision a 1-based spec revision names. */
@@ -345,6 +361,78 @@ describe('the persistent test-repair artefacts', () => {
     expect(refused.stderr).toContain('FACTORY_HOME');
     expect(existsSync(join(build.root, 'units.txt'))).toBe(false);
   });
+
+  it('emits artefacts that pass its own gate: every spec qualifies dark, and a taken store is refused with the next revision', () => {
+    // The defect this covers: the restate template shared too few words with the per-revision
+    // intents — `restateOverlap=0.357` against a policy floor of 0.500 — so `qualify` rejected the
+    // very first spec with RESTATE_BACK_MISMATCH and a planner built from these artefacts produced
+    // an empty `units.txt`. The lesson is that the *emitted artefacts* are the thing to test: a
+    // spec that compared `RESTATE_TEXT` with a literal would have stayed green while every plan
+    // failed, exactly as the runbook's commands have to be run to be true.
+    const env = envFromExports(build.stdout);
+    const planner = join(build.root, 'plan-units.sh');
+    const plan = run(['bash', planner], build.root, env);
+    expect(plan.code, plan.stderr).toBe(0);
+    expect(plan.stdout).toContain(`${String(REVISIONS)} unit(s) qualified dark`);
+
+    const planned = readFileSync(join(build.root, 'units.txt'), 'utf8').trim().split('\n');
+    expect(planned).toHaveLength(REVISIONS);
+    expect(new Set(planned).size).toBe(REVISIONS);
+
+    // The lane is the qualifier's judgement, so read it back from the store rather than trusting
+    // the planner's own summary line.
+    const status = run(
+      [
+        process.execPath,
+        join(REPO_ROOT, 'apps', 'cli', 'src', 'main.ts'),
+        'status',
+        '--all',
+        '--json',
+      ],
+      build.root,
+      env,
+    );
+    expect(status.code, status.stderr).toBe(0);
+    const reported = JSON.parse(status.stdout) as {
+      readonly units?: readonly { readonly lane: string | null }[];
+    };
+    const storeUnits = reported.units ?? [];
+    expect(storeUnits).toHaveLength(REVISIONS);
+    for (const unit of storeUnits) expect(unit.lane).toBe('dark');
+
+    // The restatement against the floor the qualifier applies, for every spec, not just the first:
+    // the thin template scored 0.357, and a restatement that is only *mostly* about the task is the
+    // failure mode the gate exists for.
+    const restate = readFileSync(join(build.root, 'restate.md'), 'utf8').trim();
+    for (const spec of specs) {
+      const overlap = restateOverlap(String(spec['intent']), restate);
+      expect(
+        overlap,
+        `restateOverlap=${overlap.toFixed(3)} for: ${String(spec['intent'])}`,
+      ).toBeGreaterThanOrEqual(DEFAULT_POLICY.restateOverlapMin);
+    }
+
+    // A rebuild regenerates the commits, so the spec hashes change while the revisions do not; the
+    // next plan against the same store is a taken identity, not a bad spec. Simulate that by moving
+    // one spec's `baseRev` — without the check, `intent` refuses it as DUPLICATE_UNIT (exit 3) and
+    // the planner reports "refused by intent", which blames the spec's content for a taken identity.
+    // So it must say which revisions are taken and which one is free, before it submits anything.
+    const firstSpecPath = join(build.root, 'spec-1.json');
+    const firstSpec = JSON.parse(readFileSync(firstSpecPath, 'utf8')) as Record<string, unknown>;
+    writeFileSync(
+      firstSpecPath,
+      `${JSON.stringify({ ...firstSpec, baseRev: '0'.repeat(40) }, null, 2)}\n`,
+    );
+    rmSync(join(build.root, 'units.txt'));
+    const replan = run(['bash', planner], build.root, env);
+    expect(replan.code).toBe(2);
+    expect(replan.stderr).toContain(
+      `${String(REVISIONS)} of ${String(REVISIONS)} spec revision(s) are already in the store`,
+    );
+    expect(replan.stderr).toContain(`next free revision: ${String(REVISIONS + 1)}`);
+    expect(replan.stderr).toContain('nothing was submitted');
+    expect(existsSync(join(build.root, 'units.txt'))).toBe(false);
+  }, 120_000);
 
   it('refuses a directory it did not create, a root inside the checkout, and a revision that stops discriminating', () => {
     const foreign = join(workspace, 'not-ours');

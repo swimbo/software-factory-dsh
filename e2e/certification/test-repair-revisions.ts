@@ -129,6 +129,11 @@ export function formatBytes(bytes) {
       { args: [1024], expected: '1 KB' },
       { args: [512], expected: '512 B' },
       { args: [1536], expected: '1.5 KB' },
+      { args: [0], expected: '0 B' },
+      { args: [1], expected: '1 B' },
+      { args: [1023], expected: '1023 B' },
+      { args: [1025], expected: '1.0 KB' },
+      { args: [1099511627776], expected: '1024 GB' },
     ],
     differential: {
       args: [{ kind: 'int', min: 0, max: 1099511627776 }],
@@ -167,6 +172,10 @@ export function parseDuration(text) {
       { args: ['1h30m'], expected: 5400 },
       { args: ['45s'], expected: 45 },
       { args: ['2m'], expected: 120 },
+      { args: ['0m'], expected: 0 },
+      { args: ['1h'], expected: 3600 },
+      { args: ['2h'], expected: 7200 },
+      { args: ['0h'], expected: 0 },
     ],
     differential: {
       args: [{ kind: 'text', charset: 'duration', maxLength: 8 }],
@@ -207,6 +216,8 @@ export function slugify(text) {
     visible: [
       { args: ['Hello, World!'], expected: 'hello-world' },
       { args: ["Ada's Notes"], expected: 'adas-notes' },
+      { args: [''], expected: '' },
+      { args: ['a--b'], expected: 'a-b' },
     ],
     differential: {
       args: [{ kind: 'text', charset: 'unicode', maxLength: 30 }],
@@ -252,6 +263,9 @@ export function toCsvLine(fields) {
     visible: [
       { args: [['a', 'b']], expected: 'a,b' },
       { args: [['he said "hi"']], expected: '"he said ""hi"""' },
+      { args: [['plain', 'line\nbreak']], expected: 'plain,"line\nbreak"' },
+      { args: [[]], expected: '' },
+      { args: [['']], expected: '' },
     ],
     differential: {
       args: [{ kind: 'strings', maxCount: 4 }],
@@ -314,6 +328,8 @@ export function dedupeBy(items, keyName) {
           { id: 2, name: 'b' },
         ],
       },
+      { args: [[], 'id'], expected: [] },
+      { args: [[{ id: 1, name: 'a' }], 'id'], expected: [{ id: 1, name: 'a' }] },
     ],
     differential: {
       args: [
@@ -379,6 +395,7 @@ export function clamp(value, low, high) {
       { args: [15, 0, 10], expected: 10 },
       { args: [-3, 0, 10], expected: 0 },
       { args: [5, 0, 10], expected: 5 },
+      { args: [0, 0, 0], expected: 0 },
     ],
     differential: {
       args: [{ kind: 'range', min: -1000, max: 1000 }],
@@ -423,6 +440,9 @@ export function roundTo(value, step) {
     visible: [
       { args: [0.30000000000000004, 0.1], expected: 0.3 },
       { args: [2.25, 0.5], expected: 2.5 },
+      { args: [1.005, 0.01], expected: 1 },
+      { args: [-2.5, 1], expected: -2 },
+      { args: [0, 0.1], expected: 0 },
     ],
     differential: {
       args: [
@@ -462,7 +482,13 @@ export function escapeHtml(text) {
 }
 `,
     bug: [{ find: '/[&<>"\']/g', replace: '/[&<>"]/g' }],
-    visible: [{ args: ["it's <b>"], expected: 'it&#39;s &lt;b&gt;' }],
+    visible: [
+      { args: ["it's <b>"], expected: 'it&#39;s &lt;b&gt;' },
+      { args: [''], expected: '' },
+      { args: ['"'], expected: '&quot;' },
+      { args: ['&'], expected: '&amp;' },
+      { args: ['<script>alert(1)</script>'], expected: '&lt;script&gt;alert(1)&lt;/script&gt;' },
+    ],
     differential: {
       args: [{ kind: 'text', charset: 'html', maxLength: 40 }],
       edges: [
@@ -513,8 +539,15 @@ export function truncate(text, max) {
       },
     ],
     visible: [
-      { args: ['😀😀😀😀', 2], expected: '😀😀…' },
+      {
+        args: ['\ud83d\ude00\ud83d\ude00\ud83d\ude00\ud83d\ude00', 2],
+        expected: '\ud83d\ude00\ud83d\ude00\u2026',
+      },
       { args: ['hello', 10], expected: 'hello' },
+      { args: ['abcdef', 0], expected: '\u2026' },
+      { args: ['', 5], expected: '' },
+      { args: ['abc', 3], expected: 'abc' },
+      { args: ['abc', 4], expected: 'abc' },
     ],
     differential: {
       args: [
@@ -571,6 +604,10 @@ export function parseQuery(text) {
     visible: [
       { args: ['?a=1&flag'], expected: { a: '1', flag: '' } },
       { args: ['?x=1&x=2'], expected: { x: ['1', '2'] } },
+      { args: ['?q=a%20b'], expected: { q: 'a b' } },
+      { args: [''], expected: {} },
+      { args: ['?a='], expected: { a: '' } },
+      { args: ['?a=1'], expected: { a: '1' } },
     ],
     differential: {
       args: [{ kind: 'text', charset: 'query', maxLength: 30 }],
@@ -667,6 +704,12 @@ export function safeJsonParse(text, fallback) {
     visible: [
       { args: ['null', 'missing'], expected: null },
       { args: ['{"ok":true}', null], expected: { ok: true } },
+      { args: ['false', 'fallback'], expected: false },
+      { args: ['{"a":1}', 'fb'], expected: { a: 1 } },
+      { args: ['not json', 'fb'], expected: 'fb' },
+      { args: ['[1,2]', 'fb'], expected: [1, 2] },
+      { args: ['', 'fb'], expected: 'fb' },
+      { args: ['0', 7], expected: 0 },
     ],
     differential: {
       args: [{ kind: 'text', charset: 'json', maxLength: 30 }, { kind: 'fallback' }],
@@ -731,6 +774,29 @@ export function mergeIntervals(intervals) {
         expected: [
           [0, 1],
           [2, 3],
+        ],
+      },
+      {
+        args: [
+          [
+            [1, 10],
+            [2, 3],
+          ],
+        ],
+        expected: [[1, 10]],
+      },
+      { args: [[]], expected: [] },
+      { args: [[[3, 3]]], expected: [[3, 3]] },
+      {
+        args: [
+          [
+            [1, 4],
+            [5, 8],
+          ],
+        ],
+        expected: [
+          [1, 4],
+          [5, 8],
         ],
       },
     ],
@@ -807,6 +873,9 @@ export function pageCount(total, perPage) {
     visible: [
       { args: [20, 7], expected: 3 },
       { args: [21, 7], expected: 3 },
+      { args: [0, 10], expected: 0 },
+      { args: [7, 7], expected: 1 },
+      { args: [1000, 1], expected: 1000 },
     ],
     differential: {
       args: [
@@ -857,6 +926,9 @@ export function sortBy(items, keyName) {
     visible: [
       { args: [[{ v: 10 }, { v: 9 }], 'v'], expected: [{ v: 9 }, { v: 10 }] },
       { args: [[{ v: 'b' }, { v: 'a' }], 'v'], expected: [{ v: 'a' }, { v: 'b' }] },
+      { args: [[{ v: -2 }, { v: 10 }, { v: 1 }], 'v'], expected: [{ v: -2 }, { v: 1 }, { v: 10 }] },
+      { args: [[], 'v'], expected: [] },
+      { args: [[{ v: 0 }], 'v'], expected: [{ v: 0 }] },
     ],
     differential: {
       args: [
@@ -913,6 +985,7 @@ export function chunk(array, size) {
     visible: [
       { args: [[1, 2, 3, 4, 5], 2], expected: [[1, 2], [3, 4], [5]] },
       { args: [[1, 2], 2], expected: [[1, 2]] },
+      { args: [[], 2], expected: [] },
     ],
     differential: {
       args: [
@@ -970,6 +1043,10 @@ export function normalisePath(path) {
     visible: [
       { args: ['docs/../src/x.js'], expected: 'src/x.js' },
       { args: ['./a//b/'], expected: 'a/b/' },
+      { args: ['../x'], expected: 'x' },
+      { args: [''], expected: '.' },
+      { args: ['/'], expected: '/' },
+      { args: ['/../..'], expected: '/' },
     ],
     differential: {
       args: [{ kind: 'text', charset: 'path', maxLength: 40 }],
@@ -1026,6 +1103,9 @@ export function wrap(text, width) {
     visible: [
       { args: ['aa bb', 5], expected: ['aa bb'] },
       { args: ['one two three', 8], expected: ['one two', 'three'] },
+      { args: ['', 5], expected: [] },
+      { args: ['aaaa', 3], expected: ['aaaa'] },
+      { args: ['abc def', 6], expected: ['abc', 'def'] },
     ],
     differential: {
       args: [
@@ -1074,6 +1154,8 @@ export function parseBinary(text) {
     visible: [
       { args: ['1010'], expected: 10 },
       { args: ['11'], expected: 3 },
+      { args: ['0'], expected: 0 },
+      { args: ['1'], expected: 1 },
     ],
     differential: {
       args: [{ kind: 'text', charset: 'binary', maxLength: 20 }],
@@ -1112,6 +1194,9 @@ export function median(values) {
     visible: [
       { args: [[5, 1, 3, 9]], expected: 4 },
       { args: [[7, 1, 3]], expected: 3 },
+      { args: [[1]], expected: 1 },
+      { args: [[2, 2]], expected: 2 },
+      { args: [[3, 3, 3, 3, 3]], expected: 3 },
     ],
     differential: {
       args: [{ kind: 'numbers', minCount: 1, maxCount: 12, min: -100, max: 100 }],
