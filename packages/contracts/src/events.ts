@@ -120,6 +120,18 @@ export const EventPayload = z.discriminatedUnion('type', [
     policyVersion: z.string().min(1),
     modelId: z.string().nullable(),
     certificateSha: z.string(),
+    /**
+     * The corpus this class was measured against, and the null-hypothesis pass rate the
+     * operating point was ratified at.
+     *
+     * Both are optional because every event written before schema v5 omits them, and a ledger
+     * that refuses to parse is worse than a ledger with a hole: an old event validates, and a
+     * reader must read a missing `holdoutRevision` as "unknown — this event predates corpus
+     * attribution", never as "the current corpus". `p0` is the number `alpha` was computed
+     * from; without it a reader can check the counts but not reproduce the risk.
+     */
+    holdoutRevision: z.string().min(1).nullable().optional(),
+    p0: z.number().min(0).max(1).nullable().optional(),
   }),
   z.object({
     // `costUsd` is `null` when the gateway reported tokens but no price: an unpriced call is

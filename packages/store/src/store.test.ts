@@ -941,7 +941,49 @@ describe('verdicts: unknown is not pass', () => {
       policyVersion: 'policy/2026-11-01',
       modelId: 'auto',
       certificateSha: certificate?.certificateSha,
+      // A ledger-only reader must be able to prove which corpus made the judgement true, and
+      // reproduce the risk from the counts: the row carries both, so the event must too.
+      holdoutRevision: 'holdout/7',
+      p0: 0.95,
     });
+  });
+
+  it('recovers the corpus and p0 from the ledger alone, without reading the certificate table', () => {
+    const { receiptSha } = receiptedUnit();
+    const verdict: VerdictType = {
+      ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+      modelId: 'auto',
+      certification: {
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        p0: 0.95,
+        alpha: 0.07548367378849634,
+        samples: 20,
+        passes: 18,
+        outcome: 'certified',
+      },
+    };
+    const before = store.eventCount();
+    store.insertVerdict(verdictRow(verdict, 'R-1'), options('tr-verify'));
+    // Deliberately no call to certificatesOfStore(): the ledger is the only input.
+    const certified = store
+      .eventsSince(before)
+      .filter((event) => event.type === 'wall.class_certified')
+      .at(-1);
+    expect(certified?.payload).toMatchObject({ holdoutRevision: 'holdout/7', p0: 0.95 });
+
+    const payload = certified?.payload as {
+      samples: number;
+      passes: number;
+      m: number;
+      k: number;
+      p0: number;
+    };
+    // The risk is reproducible from the event: alpha = 1 - P(Bin(m, p0) >= k).
+    expect(payload.samples).toBeGreaterThanOrEqual(payload.m);
+    expect(payload.passes).toBeGreaterThanOrEqual(payload.k);
+    expect(payload.p0).toBe(0.95);
   });
 
   it('stores 17 of 20 as not-certified and 3 of 20 as insufficient, never as a certificate', () => {

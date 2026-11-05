@@ -160,6 +160,8 @@ const VALID_PAYLOADS: Readonly<Record<EventType, unknown>> = {
     policyVersion: 'policy/2026-11-01',
     modelId: 'auto',
     certificateSha: 'sha256:1f4c',
+    holdoutRevision: 'h-refactor-real-2026-11-01',
+    p0: 0.95,
   },
   'recovery.completed': {
     type: 'recovery.completed',
@@ -266,6 +268,43 @@ describe('the ledger envelope', () => {
     const ledgerTypes = (LedgerEvent.shape.type as unknown as { options: readonly string[] })
       .options;
     expect([...ledgerTypes].sort()).toEqual(Object.keys(VALID_PAYLOADS).sort());
+  });
+
+  it('parses a pre-v5 class certificate event that names no corpus, and says it is unknown', () => {
+    // Written as a literal, not derived from VALID_PAYLOADS: this is the shape every ledger
+    // written before schema v5 contains, and the compatibility claim is about *those* bytes.
+    const legacy = {
+      seq: 7,
+      eventId: 'E-0007',
+      type: 'wall.class_certified',
+      occurredAt: OCCURRED_AT,
+      actor: 'wall',
+      traceId: 'cert:V-1a2b3c',
+      payload: {
+        type: 'wall.class_certified',
+        certificateId: 'cert:V-1a2b3c',
+        verdictId: 'V-1a2b3c',
+        unitId: 'U-7f3a9c',
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        samples: 20,
+        passes: 18,
+        alpha: 0.07548367378849634,
+        outcome: 'certified',
+        policyVersion: 'policy/2026-11-01',
+        modelId: 'auto',
+        certificateSha: 'sha256:1f4c',
+      },
+    };
+    const parsed = LedgerEvent.safeParse(legacy);
+    expect(parsed.success).toBe(true);
+    // Absent, not null and not fabricated: a reader must see "unknown", never "the current corpus".
+    if (parsed.success) {
+      const payload = parsed.data.payload as { holdoutRevision?: unknown; p0?: unknown };
+      expect(payload.holdoutRevision).toBeUndefined();
+      expect(payload.p0).toBeUndefined();
+    }
   });
 
   it('requires a monotonic seq, not a timestamp, for replay order', () => {

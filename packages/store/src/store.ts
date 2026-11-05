@@ -2010,6 +2010,10 @@ export function openStore(options: OpenStoreOptions): Store {
               policyVersion: row.policyVersion,
               modelId,
               certificateSha,
+              // A ledger-only reader must be able to prove which corpus made this true, not
+              // just that a judgement happened (schema v5 gave the row the same fact).
+              holdoutRevision: certificateCorpus,
+              p0: certificate.p0,
             },
             { actor: 'wall', traceId: certificateId, occurredAt: row.evaluatedAt },
           );

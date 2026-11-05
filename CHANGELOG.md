@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.2 — 2026-11-04
+
+**The ledger alone can now prove which corpus made a certificate true.** v0.9.1 gave the certificate
+_row_ the corpus and left the `wall.class_certified` event as a summary, so a reader who trusts only the
+events could prove a class was certified under a policy and a model but not which holdout made it true.
+The event now carries `holdoutRevision` and `p0` — both optional-and-nullable, because every ledger
+written before schema v5 omits them, and a ledger that refuses to parse is worse than one with a
+documented hole: an old event validates, and a missing corpus means "unknown — predates attribution",
+never "the current corpus". `p0` is included so the risk is reproducible from the event (the counts and
+`alpha` were already there; without `p0` a reader could check the arithmetic but not re-derive it).
+
+Proven by a spec that reads only the ledger — no call to the certificate table — after recording a
+certified verdict, plus a literal old-shaped event that must still parse with both fields _absent_
+rather than fabricated. Mutation: delete the two fields from the write site and both specs redden
+(pasted in the commit).
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.9.1 — 2026-11-04
 
 Three defects that all had the same shape — evidence attributed to something that is not an identity —
@@ -42,8 +60,8 @@ and a correction to a claim v0.9.0 made.
   regenerated spec was refused, leaving an empty `units.txt`), and `plan-units.sh` refused a
   second run without saying which revisions were taken. Both fixed and pinned.
 
-**Known weakness, stated:** the `wall.class_certified` ledger event carries neither the corpus nor `p0`,
-so a ledger-only reader cannot tell which holdout made a certificate true. Costed, not built.
+**Known weakness, stated (closed in v0.9.2):** the `wall.class_certified` ledger event carried neither
+the corpus nor `p0`, so a ledger-only reader could not tell which holdout made a certificate true.
 
 **Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed. Evidence:
 `docs/planning/dark-factory-dsh/evidence/phase-19-test-repair.md` (addendum).

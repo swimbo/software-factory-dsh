@@ -534,3 +534,20 @@ on N inputs" and not "correct".
 **Recorded, not built:** the docs class's corpus id is still a label (fix condition written down);
 `wall.class_certified` carries neither corpus nor `p0`; and the corpus comparison can only see a corpus
 move once something measures under it.
+
+### Round 14 — the ledger carries its own evidence (2026-11-04)
+
+**Closed the gap v0.9.1 named.** `wall.class_certified` now carries `holdoutRevision` and `p0`, so a
+reader who trusts only the event log can prove *which corpus* made a class certificate true, and
+re-derive the risk from the counts rather than take `alpha` on faith. Both fields are optional and
+nullable: every ledger written before schema v5 omits them, and an event that refuses to parse is worse
+than one with a documented hole — a missing corpus must read as "unknown, predates attribution", never
+as "the current corpus".
+
+**Proven the only way that counts:** a spec that records a certified verdict and then reads *only* the
+ledger (no call to the certificate table) recovers `holdout/7` and `p0 = 0.95`; plus a literal
+old-shaped event that still parses with both fields absent rather than fabricated. Mutation: deleting
+the two fields from the write site reddens both specs (2 failed | 60 passed), restored green.
+
+**Still open:** the docs class's corpus id is a label rather than an identity (fix condition recorded),
+and nothing notices a corpus move until something measures under the new one.
