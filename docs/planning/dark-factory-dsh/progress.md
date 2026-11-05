@@ -558,3 +558,20 @@ fields.
 
 **Still open:** the docs class's corpus id is a label rather than an identity (fix condition recorded),
 and nothing notices a corpus move until something measures under the new one.
+
+### Round 15 — an alarm that means something (2026-11-05)
+
+**Found in the log, not in a plan.** The 04:00 job on 2026-11-05 paged Discord with `anchor UNREACHABLE`
+— `ssh: connect to host 100.92.236.42 port 22: Operation timed out` — and by 14:00 the same read was
+fresh. One night in four. The alarm path worked perfectly on evidence that turned out to be nothing,
+which is the failure mode that teaches people to ignore alarms.
+
+**Two fixes, both in `commandTransport`.** Every off-host call is now bounded
+(`ConnectTimeout=10`, `ServerAliveInterval=5`, `ServerAliveCountMax=2` — without them the job sat in
+the kernel's TCP timeout for ~2 minutes), and a transport failure is retried up to 3 times before it is
+reported. Only transport failures: a read that succeeds with unparseable content is a fact about the
+file, so it refuses immediately. A persistent outage still pages at exit 8, and the message now says
+`(retried 3 times)` so a flake and an outage are different lines in the log.
+
+**Proven by three mutations:** no retry → both retry specs red; no `ConnectTimeout` → the timeout spec
+red; retry everything → the garbled-anchor spec red (2/1/1 failed respectively), restored 33/33.

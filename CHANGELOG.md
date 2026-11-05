@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.9.3 — 2026-11-05
+
+**The anchor read survives a flake, and the alarm stops crying wolf.** On 2026-11-05 the 04:00 job
+reported `anchor UNREACHABLE` (`ssh: connect … Operation timed out`) and paged Discord; by 14:00 the
+same read was fresh. One lost route at wake-up is not evidence that the ledger is unwatched, and an
+alarm that fires on one is an alarm people learn to ignore — which is how a real one gets missed.
+
+- **Bounded attempts.** The composed off-host command now carries
+  `-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2` (one place,
+  `sshCommand`, so read and append cannot drift). Before this, a dead route blocked the job in the
+  kernel's TCP timeout for roughly two minutes.
+- **A transport failure is retried up to 3 times** before it is reported, and the refusal says so
+  (`… (retried 3 times)`), so a flake and an outage are distinguishable in the log. Nothing else is
+  retried: a read that _succeeded_ with unparseable content is a fact about the file, and asking again
+  cannot change it.
+- **A persistent failure still pages** at exit 8, exactly as before. The retry bounds how long a
+  transient failure hides; it does not let an unreachable host report `fresh`.
+
+Proven by three mutations, each pasted in the commit: no retry reddens both retry specs, dropping
+`ConnectTimeout` reddens the timeout spec, and retrying _everything_ reddens the spec that says a
+garbled anchor is not retried.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.9.2 — 2026-11-04
 
 **The ledger alone can now prove which corpus made a certificate true.** v0.9.1 gave the certificate

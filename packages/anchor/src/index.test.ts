@@ -26,6 +26,7 @@ import {
   fileTransport,
   lastValidRecord,
   shortHash,
+  sshCommand,
   verifyAnchor,
   type AnchorRecord,
 } from './index.ts';
@@ -375,5 +376,86 @@ describe('anchorTargetFrom', () => {
       FACTORY_ANCHOR_PATH: "/tmp/it's here.jsonl",
     });
     expect(target.transport.kind).toBe('command');
+  });
+});
+
+describe('commandTransport: a flake is retried, a fact is not', () => {
+  /** A read command that fails `failures` times (exit 255, like an unreachable host), then succeeds. */
+  function flakyRead(stateDir: string, failures: number, payload: string): string {
+    const counter = join(stateDir, 'attempts');
+    const body = JSON.stringify({ state: 'ok' });
+    return [
+      `c=$(cat ${counter} 2>/dev/null || echo 0)`,
+      `c=$((c+1))`,
+      `echo "$c" > ${counter}`,
+      `if [ "$c" -le ${String(failures)} ]; then echo 'ssh: connect to host: Operation timed out' >&2; exit 255; fi`,
+      `printf '%s\n' '${payload.replace(/'/gu, "'\\''")}'`,
+      body.length > 0 ? '' : '',
+    ]
+      .filter((line) => line !== '')
+      .join('; ');
+  }
+
+  /** The smallest thing `recordOrRefuse` accepts: a real anchor record on its own line. */
+  const built = computeAnchor([], '2026-11-05T04:00:00.000Z');
+  const record = JSON.stringify(built);
+
+  it('reads through a single flake instead of paging a person at 04:00', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'anchor-flake-'));
+    const transport = commandTransport({
+      read: flakyRead(dir, 1, record),
+      append: 'exit 0',
+      label: 'ssh fake:anchor',
+      retry: { attempts: 3, delayMs: 0 },
+    });
+    const head = await transport.readHead();
+    expect(head?.headHash).toBe(built.headHash);
+    // Two attempts: the failed one and the one that succeeded. No third, because nothing failed.
+    expect(readFileSync(join(dir, 'attempts'), 'utf8').trim()).toBe('2');
+  });
+
+  it('still refuses, and says how hard it tried, when every attempt fails', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'anchor-down-'));
+    const transport = commandTransport({
+      read: flakyRead(dir, 5, record),
+      append: 'exit 0',
+      label: 'ssh fake:anchor',
+      retry: { attempts: 3, delayMs: 0 },
+    });
+    await expect(transport.readHead()).rejects.toThrow(/retried 3 times/u);
+    await expect(
+      commandTransport({
+        read: flakyRead(dir, 9, record),
+        append: 'exit 0',
+        label: 'ssh fake:anchor',
+        retry: { attempts: 2, delayMs: 0 },
+      }).readHead(),
+    ).rejects.toMatchObject({ code: 'ANCHOR_UNAVAILABLE', exitCode: 8, details: { attempts: 2 } });
+  });
+
+  it('does not retry a read that succeeded but holds no parseable record', async () => {
+    // The distinction that makes the retry honest: an unreadable file is a fact about the file, and
+    // asking again cannot change it — only "the check never ran" is worth a second attempt.
+    const dir = mkdtempSync(join(tmpdir(), 'anchor-garbage-'));
+    const counter = join(dir, 'attempts');
+    const transport = commandTransport({
+      read: `c=$(cat ${counter} 2>/dev/null || echo 0); c=$((c+1)); echo "$c" > ${counter}; echo 'not an anchor'`,
+      append: 'exit 0',
+      label: 'ssh fake:anchor',
+      retry: { attempts: 3, delayMs: 0 },
+    });
+    await expect(transport.readHead()).rejects.toMatchObject({ code: 'ANCHOR_UNAVAILABLE' });
+    expect(readFileSync(counter, 'utf8').trim()).toBe('1');
+  });
+
+  it('names the timeouts the anchor read depends on', () => {
+    // Without ConnectTimeout a dead route blocks for a kernel-scale timeout, and a bounded retry
+    // would multiply that wait instead of riding out a blip.
+    const command = sshCommand('hermes-control', 'tail -n 50 -- /srv/anchor.jsonl');
+    expect(command).toContain('-o ConnectTimeout=10');
+    expect(command).toContain('-o ServerAliveInterval=5');
+    expect(command).toContain('-o BatchMode=yes');
+    // The remote command is quoted, so a path with a quote cannot become a second command.
+    expect(sshCommand('host', "cat /tmp/it's here")).toContain("'\\''");
   });
 });

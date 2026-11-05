@@ -32,7 +32,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { canonicalJson, FactoryError, sha256Hex } from '@factory/contracts';
+import { canonicalJson, FactoryError, isFactoryError, sha256Hex } from '@factory/contracts';
 
 /** The record written off-host. Small on purpose: it is read on every `verify`. */
 export interface AnchorRecord {
@@ -240,7 +240,22 @@ export function commandTransport(options: {
   readonly read: string;
   readonly append: string;
   readonly label: string;
+  /**
+   * How many times a **transport** failure is retried before the read is called unavailable.
+   *
+   * The 04:00 job reads the anchor over ssh, and the first attempt after a laptop wakes can lose a
+   * route for a few seconds: observed once in four nights, as `ssh: connect … Operation timed out`.
+   * One flake is not evidence that the ledger is unwatched, and an alarm that fires on one is an
+   * alarm people learn to ignore. A *persistent* failure still refuses — the retry bounds how long a
+   * transient one is allowed to hide, it does not let an unreachable host report `fresh`.
+   *
+   * Only a non-zero exit (ssh's 255, a shell that never started) is retried. A read that succeeded
+   * with unparseable content is a fact about the file and a second attempt cannot change it.
+   */
+  readonly retry?: { readonly attempts: number; readonly delayMs: number } | undefined;
 }): AnchorTransport {
+  const attempts = Math.max(1, Math.trunc(options.retry?.attempts ?? 3));
+  const delayMs = Math.max(0, Math.trunc(options.retry?.delayMs ?? 750));
   return {
     kind: 'command',
     scope: 'off-host',
@@ -285,54 +300,105 @@ export function commandTransport(options: {
      * while ssh's own connection failure still exits 255.
      */
     async readHead() {
-      const { spawn } = await import('node:child_process');
-      return await new Promise<AnchorRecord | null>((resolve, reject) => {
-        const child = spawn('sh', ['-c', options.read], { stdio: ['ignore', 'pipe', 'pipe'] });
-        let stdout = '';
-        let stderr = '';
-        child.stdout.setEncoding('utf8');
-        child.stderr.setEncoding('utf8');
-        child.stdout.on('data', (chunk: string) => (stdout += chunk));
-        child.stderr.on('data', (chunk: string) => (stderr += chunk));
-        child.once('error', (error) => {
+      let last: unknown = null;
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+          return await readOnce();
+        } catch (error) {
+          last = error;
+          const retryable = isFactoryError(error) && error.details['retryable'] === true;
+          if (!retryable || attempt === attempts) break;
+          if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+      // The sentence an operator reads must say how hard the check tried, or a flake and an outage
+      // look the same in the log — which is the defect this retry exists to fix.
+      if (isFactoryError(last) && attempts > 1) {
+        throw new FactoryError(last.code, `${last.message} (retried ${String(attempts)} times)`, {
+          ...last.details,
+          attempts,
+        });
+      }
+      if (last instanceof Error) throw last;
+      throw new FactoryError(
+        'ANCHOR_UNAVAILABLE',
+        `the anchor at ${options.label} could not be read: ${String(last)}. This is an environment ` +
+          'failure, not a verdict about the ledger.',
+        { transport: options.label },
+      );
+    },
+  };
+
+  async function readOnce(): Promise<AnchorRecord | null> {
+    const { spawn } = await import('node:child_process');
+    return await new Promise<AnchorRecord | null>((resolve, reject) => {
+      const child = spawn('sh', ['-c', options.read], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (chunk: string) => (stdout += chunk));
+      child.stderr.on('data', (chunk: string) => (stderr += chunk));
+      child.once('error', (error) => {
+        reject(
+          new FactoryError(
+            'ANCHOR_UNAVAILABLE',
+            `the anchor at ${options.label} could not be read: ${error.message}. ` +
+              'This is an environment failure, not a verdict about the ledger.',
+            { transport: options.label },
+          ),
+        );
+      });
+      child.once('close', (code) => {
+        if (code !== 0) {
+          const last = stderr.trim().split('\n').filter(Boolean).slice(-1)[0] ?? 'no stderr';
+          // ssh's own messages end in a period; the sentence continues, so drop it rather than
+          // print "...failed.." to an operator.
+          const detail = last.replace(/\.+$/u, '');
           reject(
             new FactoryError(
               'ANCHOR_UNAVAILABLE',
-              `the anchor at ${options.label} could not be read: ${error.message}. ` +
-                'This is an environment failure, not a verdict about the ledger.',
-              { transport: options.label },
+              `the anchor at ${options.label} could not be read (exit ${String(code)}): ${detail}. ` +
+                'This is an environment failure, not a verdict about the ledger — nothing was ' +
+                'learned about the ledger, so it is not `missing`.',
+              // `retryable` is the whole distinction: the check never ran. An unparseable anchor
+              // (below) is also ANCHOR_UNAVAILABLE, but asking again cannot change a file.
+              { transport: options.label, exitCode: code, retryable: true },
             ),
           );
-        });
-        child.once('close', (code) => {
-          if (code !== 0) {
-            const last = stderr.trim().split('\n').filter(Boolean).slice(-1)[0] ?? 'no stderr';
-            // ssh's own messages end in a period; the sentence continues, so drop it rather than
-            // print "...failed.." to an operator.
-            const detail = last.replace(/\.+$/u, '');
-            reject(
-              new FactoryError(
-                'ANCHOR_UNAVAILABLE',
-                `the anchor at ${options.label} could not be read (exit ${String(code)}): ${detail}. ` +
-                  'This is an environment failure, not a verdict about the ledger — nothing was ' +
-                  'learned about the ledger, so it is not `missing`.',
-                { transport: options.label, exitCode: code },
-              ),
-            );
-            return;
-          }
-          // `recordOrRefuse` throws for content that exists but cannot be parsed, and a throw inside
-          // an event handler is an uncaught exception rather than a rejection — it would escape the
-          // promise, so it is turned into a rejection here, deliberately.
-          try {
-            resolve(recordOrRefuse(stdout, options.label));
-          } catch (error) {
-            reject(error);
-          }
-        });
+          return;
+        }
+        // `recordOrRefuse` throws for content that exists but cannot be parsed, and a throw inside
+        // an event handler is an uncaught exception rather than a rejection — it would escape the
+        // promise, so it is turned into a rejection here, deliberately.
+        try {
+          resolve(recordOrRefuse(stdout, options.label));
+        } catch (error) {
+          reject(error);
+        }
       });
-    },
-  };
+    });
+  }
+}
+
+/**
+ * How an off-host anchor is reached: one place, so `read` and `append` cannot drift apart.
+ *
+ * `ConnectTimeout` is load-bearing and was missing. Without it a dead route hangs until the kernel
+ * gives up — measured as a ~2-minute wait at 04:00 before the job reported `UNREACHABLE` — so the
+ * bounded retry in `commandTransport` would have multiplied a minute-scale hang by three. With a
+ * 10 s connect timeout each attempt fails fast enough to be worth retrying.
+ *
+ * `ServerAliveInterval`/`ServerAliveCountMax` bound the other half: a connection that establishes and
+ * then goes silent (a laptop sleeping mid-read) is dropped after ~10 s instead of blocking the job.
+ */
+const SSH_OPTIONS =
+  '-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2';
+
+/** The remote command, quoted so configuration cannot become a second shell command. */
+export function sshCommand(host: string, remoteCommand: string): string {
+  const quoted = remoteCommand.replace(/'/gu, "'\\''");
+  return `ssh ${SSH_OPTIONS} -- ${host} '${quoted}'`;
 }
 
 /** What the operator configured, or a refusal that names both variables. */
@@ -369,11 +435,10 @@ export function anchorTargetFrom(
     // `--` and single quotes: the host and path are configuration, and neither may grow into a shell.
     // `|| true` on the read is deliberate: a missing remote *file* is `missing`, an unreachable host
     // is ssh's own non-zero exit, and only the latter should be a transport failure.
-    const safePath = remotePath.replace(/'/gu, "'\\''");
     return {
       transport: commandTransport({
-        read: `ssh -o BatchMode=yes -- ${host} 'tail -n 50 -- ${safePath} 2>/dev/null || true'`,
-        append: `ssh -o BatchMode=yes -- ${host} 'cat >> ${safePath}'`,
+        read: sshCommand(host, `tail -n 50 -- ${remotePath} 2>/dev/null || true`),
+        append: sshCommand(host, `cat >> ${remotePath}`),
         label: `ssh ${host}:${remotePath}`,
       }),
       overridden: false,

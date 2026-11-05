@@ -109,5 +109,30 @@ than an anchor that was already written, before any verdict from it is trusted.
   or POSTs the same `alerts.v1` document to an endpoint you configured with `FACTORY_ALERTS_WEBHOOK_URL`
   — see [evidence-expiry.md](evidence-expiry.md). It does not reach a phone or an inbox, nothing retries
   a lost notification, the log remains the record, and a host asleep at 04:00 stays quiet until it wakes.
+
+### The read path: timeouts, and one retry policy
+
+A read that never ran is not a statement about the ledger, and it is not worth waking anyone over —
+but a read that never ran _for a minute_ and a read that never ran _for a second_ look identical in a
+log. Both are settled in `commandTransport` (`packages/anchor/src/index.ts`):
+
+- **Every off-host call is bounded.** The composed command carries
+  `-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=2`, so a dead
+  route fails in ~10 s and a connection that establishes then goes silent (a laptop sleeping mid-read)
+  is dropped in ~10 s. Before this, the 04:00 job sat in the kernel's TCP timeout for roughly two
+  minutes before reporting `UNREACHABLE`.
+- **A transport failure is retried up to 3 times**, 750 ms apart, and only then reported. This exists
+  because of an observed flake: on 2026-11-05 the 04:00 job reported
+  `ssh: connect to host 100.92.236.42 port 22: Operation timed out`, paged Discord, and by 14:00 the
+  same read was fresh. One lost route is not evidence that the ledger is unwatched, and an alarm that
+  fires on one is an alarm people learn to ignore.
+- **Nothing else is retried.** A read that _succeeded_ and returned content that no longer parses is a
+  fact about the file — asking again cannot change it — so it refuses immediately, and the message says
+  `retried only for transport failures` by omission: it carries no `(retried N times)` suffix.
+- **A persistent failure still pages**, and the message now says how hard it tried:
+  `…could not be read (exit 255): ssh: connect … Operation timed out. (retried 3 times)`. `factory
+alerts` reports it at exit 8 exactly as before; the retry bounds how long a transient failure can
+  hide, it does not let an unreachable host report `fresh`.
+
 - **Still not built:** rotation of the anchor file, and any automatic reconciliation. `verify` remains
   the whole verification mechanism; a human schedules it and a human reads it.
