@@ -16,6 +16,11 @@ certified verdict, plus a literal old-shaped event that must still parse with bo
 rather than fabricated. Mutation: delete the two fields from the write site and both specs redden
 (pasted in the commit).
 
+The live ledger's 84 existing `wall.class_certified` events predate the fields and stay unattributed —
+the ledger is append-only and is not rewritten, so this is forward-looking: the next certificate carries
+both, and a reader of today's ledger attributes the two current certificates from the rows (schema v5),
+not the events.
+
 **Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
 
 ## v0.9.1 — 2026-11-04

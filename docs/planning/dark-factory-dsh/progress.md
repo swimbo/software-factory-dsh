@@ -549,5 +549,12 @@ ledger (no call to the certificate table) recovers `holdout/7` and `p0 = 0.95`; 
 old-shaped event that still parses with both fields absent rather than fabricated. Mutation: deleting
 the two fields from the write site reddens both specs (2 failed | 60 passed), restored green.
 
+**The limitation of the fix, stated plainly:** the live ledger holds 84 `wall.class_certified` events
+written before the field existed, and all 84 still read `corpus=ABSENT, p0=ABSENT`. The ledger is
+append-only, so they will stay that way — this change is forward-looking, not a backfill, and a reader
+of *today's* ledger still cannot attribute those two certificates from events alone (the certificate
+rows can, via the v5 column and its strict backfill). The next certificate written will carry both
+fields.
+
 **Still open:** the docs class's corpus id is a label rather than an identity (fix condition recorded),
 and nothing notices a corpus move until something measures under the new one.
