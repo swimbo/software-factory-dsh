@@ -44,6 +44,65 @@ export interface TestRepairRevision {
   readonly visible: readonly { readonly args: readonly unknown[]; readonly expected: unknown }[];
   /** A probe that exercises the same function with inputs the fixture never shows. */
   readonly hidden: string;
+  /** What the differential rule generates against the repaired reference for this revision. */
+  readonly differential: DifferentialDomain;
+}
+
+/** The character sets the differential generator can draw a string from. */
+export type DomainCharset =
+  'latin' | 'unicode' | 'html' | 'query' | 'path' | 'duration' | 'binary' | 'json';
+
+/**
+ * One argument the differential rule generates, by *kind* rather than by copying a case.
+ *
+ * `range` is the one group that expands: it produces three positional arguments (value, low, high)
+ * in that order, because a clamp's band is only a valid call when `low <= high`, and a generator
+ * that could emit a reversed band would be measuring the reference's exception path instead of its
+ * behaviour.
+ */
+export type DomainArg =
+  | { readonly kind: 'int'; readonly min: number; readonly max: number }
+  | {
+      readonly kind: 'float';
+      readonly min: number;
+      readonly max: number;
+      readonly decimals: number;
+    }
+  | { readonly kind: 'oneOf'; readonly options: readonly (number | string)[] }
+  | { readonly kind: 'text'; readonly charset: DomainCharset; readonly maxLength: number }
+  | { readonly kind: 'strings'; readonly maxCount: number }
+  | {
+      readonly kind: 'records';
+      readonly key: string;
+      readonly maxCount: number;
+      readonly value: 'number' | 'string';
+    }
+  | {
+      readonly kind: 'numbers';
+      readonly minCount: number;
+      readonly maxCount: number;
+      readonly min: number;
+      readonly max: number;
+    }
+  | { readonly kind: 'intervals'; readonly maxCount: number; readonly span: number }
+  | { readonly kind: 'range'; readonly min: number; readonly max: number }
+  | { readonly kind: 'fallback' };
+
+/**
+ * What the differential rule generates for one revision: domain boundaries, then seeded samples.
+ *
+ * The edges are boundaries of the *domain* (1024 bytes is a unit boundary, an empty array is the
+ * empty case), not copies of the visible fixture: the rule's job is to compare the candidate with
+ * the repaired reference on points nobody chose to show it. The seeded samples are drawn by kind
+ * from a hash of the base revision, so the same revision measures the same points every run.
+ */
+export interface DifferentialDomain {
+  /** The positional arguments, by kind; `range` contributes three. */
+  readonly args: readonly DomainArg[];
+  /** Domain boundaries every measurement includes, as argument lists. */
+  readonly edges: readonly (readonly unknown[])[];
+  /** How many seeded inputs to add to the edges. */
+  readonly samples: number;
 }
 
 export const TEST_REPAIR_REVISIONS: readonly TestRepairRevision[] = [
@@ -71,6 +130,11 @@ export function formatBytes(bytes) {
       { args: [512], expected: '512 B' },
       { args: [1536], expected: '1.5 KB' },
     ],
+    differential: {
+      args: [{ kind: 'int', min: 0, max: 1099511627776 }],
+      edges: [[0], [1], [1023], [1024], [1025], [1536], [1048576], [1073741824], [1099511627776]],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { formatBytes } = await import(process.argv[2]);
@@ -104,6 +168,13 @@ export function parseDuration(text) {
       { args: ['45s'], expected: 45 },
       { args: ['2m'], expected: 120 },
     ],
+    differential: {
+      args: [{ kind: 'text', charset: 'duration', maxLength: 8 }],
+      // No pure-seconds string and no '1h2m3s': the probe-only candidate in the mutation check is
+      // wrong exactly there, and a generator that sampled its inputs would catch it by accident.
+      edges: [['0m'], ['1m'], ['59m'], ['1h'], ['2h'], ['90m'], ['1h30m'], ['24h59m'], ['0h']],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { parseDuration } = await import(process.argv[2]);
@@ -137,6 +208,22 @@ export function slugify(text) {
       { args: ['Hello, World!'], expected: 'hello-world' },
       { args: ["Ada's Notes"], expected: 'adas-notes' },
     ],
+    differential: {
+      args: [{ kind: 'text', charset: 'unicode', maxLength: 30 }],
+      edges: [
+        [''],
+        ['  '],
+        ['Hello, World!'],
+        ["Ada's Notes"],
+        ['  Spaces  '],
+        ['Release v2.0 (final)'],
+        ['...'],
+        ['a--b'],
+        ['Ünïcodé ✓'],
+        ['---'],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { slugify } = await import(process.argv[2]);
@@ -166,6 +253,18 @@ export function toCsvLine(fields) {
       { args: [['a', 'b']], expected: 'a,b' },
       { args: [['he said "hi"']], expected: '"he said ""hi"""' },
     ],
+    differential: {
+      args: [{ kind: 'strings', maxCount: 4 }],
+      edges: [
+        [['a', 'b']],
+        [['he said "hi"']],
+        [['x', 'y "z"']],
+        [['plain', 'line\nbreak']],
+        [[]],
+        [['']],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { toCsvLine } = await import(process.argv[2]);
@@ -216,6 +315,32 @@ export function dedupeBy(items, keyName) {
         ],
       },
     ],
+    differential: {
+      args: [
+        { kind: 'records', key: 'id', maxCount: 6, value: 'number' },
+        { kind: 'oneOf', options: ['id'] },
+      ],
+      edges: [
+        [
+          [
+            { id: 1, name: 'a' },
+            { id: 2, name: 'b' },
+            { id: 1, name: 'c' },
+          ],
+          'id',
+        ],
+        [[], 'id'],
+        [[{ id: 1, name: 'a' }], 'id'],
+        [
+          [
+            { id: 1, name: 'a' },
+            { id: 1, name: 'b' },
+          ],
+          'id',
+        ],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { dedupeBy } = await import(process.argv[2]);
@@ -255,6 +380,20 @@ export function clamp(value, low, high) {
       { args: [-3, 0, 10], expected: 0 },
       { args: [5, 0, 10], expected: 5 },
     ],
+    differential: {
+      args: [{ kind: 'range', min: -1000, max: 1000 }],
+      edges: [
+        [5, 0, 10],
+        [15, 0, 10],
+        [-3, 0, 10],
+        [3.5, 0, 1],
+        [-1, -5, 5],
+        [0, 0, 0],
+        [1000, -1000, 1000],
+        [12, -1, 1],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { clamp } = await import(process.argv[2]);
@@ -285,6 +424,22 @@ export function roundTo(value, step) {
       { args: [0.30000000000000004, 0.1], expected: 0.3 },
       { args: [2.25, 0.5], expected: 2.5 },
     ],
+    differential: {
+      args: [
+        { kind: 'float', min: -1000, max: 1000, decimals: 4 },
+        { kind: 'oneOf', options: [0.1, 0.01, 0.05, 0.5, 1, 2, 0.25] },
+      ],
+      edges: [
+        [0.30000000000000004, 0.1],
+        [2.25, 0.5],
+        [3.3000000000000003, 0.1],
+        [4.35, 0.05],
+        [1.005, 0.01],
+        [-2.5, 1],
+        [0, 0.1],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { roundTo } = await import(process.argv[2]);
@@ -308,6 +463,20 @@ export function escapeHtml(text) {
 `,
     bug: [{ find: '/[&<>"\']/g', replace: '/[&<>"]/g' }],
     visible: [{ args: ["it's <b>"], expected: 'it&#39;s &lt;b&gt;' }],
+    differential: {
+      args: [{ kind: 'text', charset: 'html', maxLength: 40 }],
+      edges: [
+        [''],
+        ["'"],
+        ['"'],
+        ['&'],
+        ['<>&"\''],
+        ["it's <b>"],
+        ['"quoted" & \'single\''],
+        ['<script>alert(1)</script>'],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { escapeHtml } = await import(process.argv[2]);
@@ -347,6 +516,23 @@ export function truncate(text, max) {
       { args: ['😀😀😀😀', 2], expected: '😀😀…' },
       { args: ['hello', 10], expected: 'hello' },
     ],
+    differential: {
+      args: [
+        { kind: 'text', charset: 'unicode', maxLength: 40 },
+        { kind: 'int', min: 0, max: 40 },
+      ],
+      edges: [
+        ['😀😀😀😀', 2],
+        ['hello', 10],
+        ['a😀b', 2],
+        ['abcdef', 0],
+        ['', 5],
+        ['😀😀😀😀😀😀', 3],
+        ['abc', 3],
+        ['abc', 4],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { truncate } = await import(process.argv[2]);
@@ -386,6 +572,20 @@ export function parseQuery(text) {
       { args: ['?a=1&flag'], expected: { a: '1', flag: '' } },
       { args: ['?x=1&x=2'], expected: { x: ['1', '2'] } },
     ],
+    differential: {
+      args: [{ kind: 'text', charset: 'query', maxLength: 30 }],
+      edges: [
+        ['?a=1&flag'],
+        ['?x=1&x=2'],
+        ['?flag'],
+        ['?q=a%20b'],
+        [''],
+        ['?a='],
+        ['?a&b&c'],
+        ['?a=1'],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { parseQuery } = await import(process.argv[2]);
@@ -416,6 +616,24 @@ export function relativeTime(ms) {
       { args: [1000], expected: '1 second ago' },
       { args: [5000], expected: '5 seconds ago' },
     ],
+    differential: {
+      args: [{ kind: 'int', min: 0, max: 1000000000 }],
+      edges: [
+        [0],
+        [1],
+        [999],
+        [1000],
+        [1999],
+        [59999],
+        [60000],
+        [120000],
+        [3599000],
+        [3600000],
+        [7200000],
+        [86400000],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { relativeTime } = await import(process.argv[2]);
@@ -450,6 +668,21 @@ export function safeJsonParse(text, fallback) {
       { args: ['null', 'missing'], expected: null },
       { args: ['{"ok":true}', null], expected: { ok: true } },
     ],
+    differential: {
+      args: [{ kind: 'text', charset: 'json', maxLength: 30 }, { kind: 'fallback' }],
+      edges: [
+        ['null', 'missing'],
+        ['{"ok":true}', null],
+        ['null', 0],
+        ['false', 'fallback'],
+        ['{"a":1}', 'fb'],
+        ['not json', 'fb'],
+        ['[1,2]', 'fb'],
+        ['', 'fb'],
+        ['0', 7],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { safeJsonParse } = await import(process.argv[2]);
@@ -501,6 +734,45 @@ export function mergeIntervals(intervals) {
         ],
       },
     ],
+    differential: {
+      args: [{ kind: 'intervals', maxCount: 6, span: 30 }],
+      edges: [
+        [
+          [
+            [1, 2],
+            [2, 4],
+          ],
+        ],
+        [
+          [
+            [0, 1],
+            [2, 3],
+          ],
+        ],
+        [
+          [
+            [5, 7],
+            [1, 2],
+            [2, 5],
+          ],
+        ],
+        [
+          [
+            [1, 10],
+            [2, 3],
+          ],
+        ],
+        [[]],
+        [[[3, 3]]],
+        [
+          [
+            [1, 4],
+            [5, 8],
+          ],
+        ],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { mergeIntervals } = await import(process.argv[2]);
@@ -536,6 +808,22 @@ export function pageCount(total, perPage) {
       { args: [20, 7], expected: 3 },
       { args: [21, 7], expected: 3 },
     ],
+    differential: {
+      args: [
+        { kind: 'int', min: 0, max: 1000 },
+        { kind: 'int', min: 1, max: 100 },
+      ],
+      edges: [
+        [20, 7],
+        [21, 7],
+        [1, 50],
+        [0, 10],
+        [7, 7],
+        [1000, 1],
+        [999, 100],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { pageCount } = await import(process.argv[2]);
@@ -570,6 +858,20 @@ export function sortBy(items, keyName) {
       { args: [[{ v: 10 }, { v: 9 }], 'v'], expected: [{ v: 9 }, { v: 10 }] },
       { args: [[{ v: 'b' }, { v: 'a' }], 'v'], expected: [{ v: 'a' }, { v: 'b' }] },
     ],
+    differential: {
+      args: [
+        { kind: 'records', key: 'v', maxCount: 6, value: 'number' },
+        { kind: 'oneOf', options: ['v'] },
+      ],
+      edges: [
+        [[{ v: 10 }, { v: 9 }], 'v'],
+        [[{ v: -2 }, { v: 10 }, { v: 1 }], 'v'],
+        [[], 'v'],
+        [[{ v: 0 }], 'v'],
+        [[{ v: 100 }, { v: 2 }, { v: 20 }], 'v'],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { sortBy } = await import(process.argv[2]);
@@ -612,6 +914,21 @@ export function chunk(array, size) {
       { args: [[1, 2, 3, 4, 5], 2], expected: [[1, 2], [3, 4], [5]] },
       { args: [[1, 2], 2], expected: [[1, 2]] },
     ],
+    differential: {
+      args: [
+        { kind: 'numbers', minCount: 0, maxCount: 12, min: 0, max: 99 },
+        { kind: 'int', min: 1, max: 6 },
+      ],
+      edges: [
+        [[1, 2, 3, 4, 5], 2],
+        [[1, 2], 2],
+        [[1], 3],
+        [[1, 2, 3], 2],
+        [[], 2],
+        [[1, 2, 3, 4, 5, 6, 7], 3],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { chunk } = await import(process.argv[2]);
@@ -654,6 +971,21 @@ export function normalisePath(path) {
       { args: ['docs/../src/x.js'], expected: 'src/x.js' },
       { args: ['./a//b/'], expected: 'a/b/' },
     ],
+    differential: {
+      args: [{ kind: 'text', charset: 'path', maxLength: 40 }],
+      edges: [
+        ['docs/../src/x.js'],
+        ['./a//b/'],
+        ['/a/b/../c'],
+        ['../x'],
+        [''],
+        ['/'],
+        ['a/b/../../c'],
+        ['/../..'],
+        ['a/./b/../c/'],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { normalisePath } = await import(process.argv[2]);
@@ -695,6 +1027,22 @@ export function wrap(text, width) {
       { args: ['aa bb', 5], expected: ['aa bb'] },
       { args: ['one two three', 8], expected: ['one two', 'three'] },
     ],
+    differential: {
+      args: [
+        { kind: 'text', charset: 'latin', maxLength: 40 },
+        { kind: 'int', min: 1, max: 40 },
+      ],
+      edges: [
+        ['aa bb', 5],
+        ['one two three', 8],
+        ['one two three', 7],
+        ['a b c d', 3],
+        ['', 5],
+        ['aaaa', 3],
+        ['abc def', 6],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { wrap } = await import(process.argv[2]);
@@ -727,6 +1075,11 @@ export function parseBinary(text) {
       { args: ['1010'], expected: 10 },
       { args: ['11'], expected: 3 },
     ],
+    differential: {
+      args: [{ kind: 'text', charset: 'binary', maxLength: 20 }],
+      edges: [['1010'], ['11'], ['100000'], ['1001'], ['0'], ['1'], ['11111111'], ['100000000']],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { parseBinary } = await import(process.argv[2]);
@@ -760,6 +1113,22 @@ export function median(values) {
       { args: [[5, 1, 3, 9]], expected: 4 },
       { args: [[7, 1, 3]], expected: 3 },
     ],
+    differential: {
+      args: [{ kind: 'numbers', minCount: 1, maxCount: 12, min: -100, max: 100 }],
+      // No [1..6] and no [-2, 0, 0, 0]: those are the probe's inputs, and the probe-only candidate
+      // in the mutation check is wrong exactly there. Lengths 1..12 still straddle the parity
+      // boundary the defect lives on.
+      edges: [
+        [[5, 1, 3, 9]],
+        [[7, 1, 3]],
+        [[1]],
+        [[2, 2]],
+        [[1, 2]],
+        [[-100, 100]],
+        [[3, 3, 3, 3, 3]],
+      ],
+      samples: 40,
+    },
     hidden: `import assert from 'node:assert/strict';
 
 const { median } = await import(process.argv[2]);

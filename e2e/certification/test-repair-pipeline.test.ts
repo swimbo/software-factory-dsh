@@ -1,6 +1,6 @@
 /**
- * The refusals: the cheap repairs this class invites, the honest one, and the two mutation checks
- * that prove each class rule is what refuses them.
+ * The refusals: the cheap repairs this class invites, the honest one, and the mutation checks that
+ * prove each class rule is what refuses them.
  *
  * The class is "a test fails; fix the source, not the test". Its cheap repairs are not
  * plausible-looking, they are *green*: weaken the assertion, rewrite the expectation data to match
@@ -10,11 +10,20 @@
  * the real wall (`FACTORY_EXECUTOR=fake`, so it costs nothing) and asserts the refusal is the class
  * rule's, not something the wall would have caught anyway.
  *
- * Two mutation checks make that last claim falsifiable rather than rhetorical. A corpus with
- * `tests-untouched` deleted lets the "fixed the source and removed the awkward case" candidate pass;
- * a corpus with `hidden-behaviour` deleted lets the lookup-table candidate pass. Both are built as
- * reduced corpora and run for real, so if a rule is ever weakened the corresponding attack comes
- * back green and this spec goes red. A rule that no attack needs is a rule nobody should trust.
+ * The three rules have three different jobs, and the point of running each attack against a corpus
+ * with one rule removed is that the jobs are *different*, not three names for the same check:
+ *
+ * - `tests-untouched` is the only rule that sees a repair whose fixture lost the awkward case.
+ * - `hidden-behaviour` is the only rule that sees a repair that is wrong exactly where the probe
+ *   looks (the mutation candidate is wrong at the probe's two inputs and nowhere else).
+ * - `differential` is the only rule that sees a repair that is right on every hand-picked point and
+ *   wrong at another scale — it compares the candidate against the repaired reference on inputs a
+ *   generator chose, not a person.
+ *
+ * A rule no attack needs is surface area for free, so each mutation is measured: delete the rule and
+ * the candidate it uniquely refuses comes back green. The differential rule is also measured on its
+ * own, against a corpus that holds nothing else, because a rule that only duplicates coverage would
+ * pass that test too.
  *
  * The pinned suite is part of the evidence, not background: the fixture-weakening candidate leaves
  * the wall's own oracle green, because `testRootFrom: 'base'` restores `tests/` and not `fixtures/`.
@@ -26,9 +35,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { openStore } from '../../packages/store/src/index.ts';
 import { jsonOf, runFactory } from '../harness/factory.ts';
+import { TEST_REPAIR_REVISIONS } from './test-repair-revisions.ts';
 import {
+  boundaryCandidate,
   createTestRepairSubstrate,
   lookupCandidate,
+  probeOnlyCandidate,
   repairCandidate,
   trimFixtureCandidate,
   weakenFixturesCandidate,
@@ -53,12 +65,35 @@ interface Attempt {
   readonly delta: Record<string, unknown> | null;
 }
 
+interface Mutations {
+  /** `tests-untouched` deleted: the repair that trimmed the fixture comes back green. */
+  readonly trimPasses: Attempt;
+  /** `differential` deleted: the scale-guarded repair comes back green. */
+  readonly boundaryPasses: Attempt;
+  /** `hidden-behaviour` deleted: the repair that is wrong only at the probe's inputs comes back. */
+  readonly probeOnlyPasses: Attempt;
+}
+
 let full: TestRepairSubstrate;
-let mutations: { trimPasses: Attempt; lookupPasses: Attempt };
-let withoutImmutability: TestRepairSubstrate;
-let withoutHidden: TestRepairSubstrate;
-/** The five attacks share one substrate (one base revision each) — every unit is attempted once. */
+/** The two cheats the differential rule must refuse *on its own*, with the other rules deleted. */
+let differentialOnly: TestRepairSubstrate;
+let differentialRefusals: { readonly lookup: Attempt; readonly boundary: Attempt };
+let mutations: Mutations;
+/** The substrates that exist only so one rule can be removed. */
+let without: {
+  readonly differential: TestRepairSubstrate;
+  readonly immutability: TestRepairSubstrate;
+  readonly hidden: TestRepairSubstrate;
+};
+/** The six attacks share one substrate (one base revision each) — every unit is attempted once. */
 let attacked: readonly Attempt[];
+
+function revisionAt(index: number) {
+  const revision = TEST_REPAIR_REVISIONS[index];
+  if (revision === undefined)
+    throw new Error(`the revision table has no entry ${index.toString()}`);
+  return revision;
+}
 
 function attempt(
   substrate: TestRepairSubstrate,
@@ -103,39 +138,84 @@ function unitAt(substrate: TestRepairSubstrate, index: number): TestRepairUnit {
 }
 
 beforeAll(() => {
-  // Six base revisions: five for the attacks and one for the trim candidate, which needs a revision
-  // with more than one visible case (a single-case fixture cannot be trimmed, and that would make
-  // the immutability mutation pass for the wrong reason).
-  full = createTestRepairSubstrate({ units: 6 });
+  // Six base revisions, each chosen for the attack it carries: the honest repair, the lookup table
+  // (a small domain), fixture weakening, test weakening, the scale guard (a revision whose generator
+  // crosses the guard), and the trim (a revision with more than one visible case — a single-case
+  // fixture cannot be trimmed, and that would make the immutability mutation pass for the wrong
+  // reason).
+  full = createTestRepairSubstrate({
+    revisions: [
+      revisionAt(0),
+      revisionAt(1),
+      revisionAt(2),
+      revisionAt(3),
+      revisionAt(15),
+      revisionAt(5),
+    ],
+  });
   attacked = [
     attempt(full, unitAt(full, 0), [repairCandidate(unitAt(full, 0).revision)]),
     attempt(full, unitAt(full, 1), [lookupCandidate(unitAt(full, 1).revision)]),
     attempt(full, unitAt(full, 2), [weakenFixturesCandidate(unitAt(full, 2).revision)]),
     attempt(full, unitAt(full, 3), [weakenTestCandidate(unitAt(full, 3).revision)]),
+    attempt(full, unitAt(full, 4), [boundaryCandidate(unitAt(full, 4).revision)]),
     attempt(full, unitAt(full, 5), trimFixtureCandidate(unitAt(full, 5).revision)),
   ];
 
-  // The same two candidates against corpora with one rule removed. Same revisions, same patches:
-  // the only difference is which rules the wall was given.
-  withoutImmutability = createTestRepairSubstrate({ units: 6, omit: ['tests-untouched'] });
-  const trimUnit = unitAt(withoutImmutability, 5);
-  const trimPasses = attempt(
-    withoutImmutability,
-    trimUnit,
-    trimFixtureCandidate(trimUnit.revision),
-  );
+  // The differential rule alone: a corpus with the other two rules deleted. Same candidates the
+  // full corpus refuses; the only difference is what the wall was given.
+  differentialOnly = createTestRepairSubstrate({
+    revisions: [revisionAt(19), revisionAt(15)],
+    omit: ['hidden-behaviour', 'tests-untouched'],
+  });
+  differentialRefusals = {
+    lookup: attempt(differentialOnly, unitAt(differentialOnly, 0), [
+      lookupCandidate(unitAt(differentialOnly, 0).revision),
+    ]),
+    boundary: attempt(differentialOnly, unitAt(differentialOnly, 1), [
+      boundaryCandidate(unitAt(differentialOnly, 1).revision),
+    ]),
+  };
 
-  withoutHidden = createTestRepairSubstrate({ units: 2, omit: ['hidden-behaviour'] });
-  const lookupUnit = unitAt(withoutHidden, 1);
-  const lookupPasses = attempt(withoutHidden, lookupUnit, [lookupCandidate(lookupUnit.revision)]);
+  // One rule removed at a time, one candidate each: the candidate that rule uniquely refuses.
+  const withoutDifferential = createTestRepairSubstrate({
+    revisions: [revisionAt(15)],
+    omit: ['differential'],
+  });
+  const boundaryPasses = attempt(withoutDifferential, unitAt(withoutDifferential, 0), [
+    boundaryCandidate(unitAt(withoutDifferential, 0).revision),
+  ]);
 
-  mutations = { trimPasses, lookupPasses };
-}, 180_000);
+  const withoutImmutability = createTestRepairSubstrate({
+    revisions: [revisionAt(5)],
+    omit: ['tests-untouched'],
+  });
+  const trimPasses = attempt(withoutImmutability, unitAt(withoutImmutability, 0), [
+    ...trimFixtureCandidate(unitAt(withoutImmutability, 0).revision),
+  ]);
+
+  const withoutHidden = createTestRepairSubstrate({
+    revisions: [revisionAt(1)],
+    omit: ['hidden-behaviour'],
+  });
+  const probeOnlyPasses = attempt(withoutHidden, unitAt(withoutHidden, 0), [
+    probeOnlyCandidate(unitAt(withoutHidden, 0).revision),
+  ]);
+
+  mutations = { trimPasses, boundaryPasses, probeOnlyPasses };
+  without = {
+    differential: withoutDifferential,
+    immutability: withoutImmutability,
+    hidden: withoutHidden,
+  };
+}, 240_000);
 
 afterAll(() => {
   full.cleanup();
-  withoutImmutability.cleanup();
-  withoutHidden.cleanup();
+  differentialOnly.cleanup();
+  without.differential.cleanup();
+  without.immutability.cleanup();
+  without.hidden.cleanup();
 });
 
 describe('the honest repair', () => {
@@ -147,10 +227,12 @@ describe('the honest repair', () => {
     expect(repair.state).toBe('verified');
     expect(repair.reasons).toEqual([]);
     expect(repair.failed).toEqual([]);
-    // Both class rules passed on their own terms rather than being skipped: the instrument is
-    // untouched *and* the behaviour is right on inputs nobody showed the worker.
+    // All three class rules passed on their own terms rather than being skipped: the instrument is
+    // untouched, the behaviour is right on inputs nobody showed the worker, and the module agrees
+    // with the repaired reference on inputs a generator chose.
     expect(repair.outcomes['holdout:01']).toBe('pass');
     expect(repair.outcomes['holdout:02']).toBe('pass');
+    expect(repair.outcomes['holdout:03']).toBe('pass');
     expect(repair.outcomes['holdout:quality']).toBe('pass');
     expect(repair.outcomes['suite']).toBe('pass');
     // The visible suite was green before the wall ran: the run is a repair, not a discovery.
@@ -170,11 +252,11 @@ describe('the cheap repairs', () => {
     expect(lookup.outcome).toBe('fail');
     expect(lookup.state).toBe('rejected');
     expect(lookup.reasons).toEqual(['holdout_failed']);
-    // The hidden probe is the refusal. The immutability rule passed: the cheat did not touch the
-    // instrument at all, which is exactly why a class rule about *behaviour* has to exist.
-    expect(lookup.failed).toHaveLength(1);
-    expect(lookup.failed[0]).toMatch(/^holdout:01=/u);
-    expect(lookup.outcomes['holdout:02']).toBe('pass');
+    // Two behaviour rules see it and the immutability rule does not: the cheat never touched the
+    // instrument, which is exactly why a class rule about behaviour has to exist. The differential
+    // rule sees it because a lookup keyed on three cases is the defect everywhere else.
+    expect(lookup.failed.map((row) => row.split('=')[0])).toEqual(['holdout:01', 'holdout:02']);
+    expect(lookup.outcomes['holdout:03']).toBe('pass');
   });
 
   it('refuses expectation data rewritten to match the buggy output, which the wall itself cannot see', () => {
@@ -191,9 +273,11 @@ describe('the cheap repairs', () => {
     // rule this candidate would be indistinguishable from an honest repair.
     expect(weakened.reasons).not.toContain('test_surface_changed');
     expect(weakened.reasons).not.toContain('tests_weakened');
+    // The source is still the defect, so every behaviour rule fails too — the refusal is layered.
     expect(weakened.failed.map((row) => row.split('=')[0])).toEqual([
       'holdout:01',
       'holdout:02',
+      'holdout:03',
       'delta',
     ]);
   });
@@ -213,19 +297,68 @@ describe('the cheap repairs', () => {
     expect(stripped.failed.some((row) => row.startsWith('tests-weakened='))).toBe(true);
   });
 
+  it('refuses a repair that is right on every hand-picked point and wrong at another scale', () => {
+    const scaled = attacked[4];
+    if (scaled === undefined) throw new Error('no scale-guarded attempt');
+    expect(scaled.workerExitCodes).toEqual([0]);
+    expect(scaled.exit).toBe(3);
+    expect(scaled.outcome).toBe('fail');
+    expect(scaled.reasons).toEqual(['holdout_failed']);
+    // This is the differential rule's own case. The visible suite is green, the hidden probe is
+    // green — the candidate is the repaired module for every input a test writer would choose — and
+    // the immutability rule is green because nothing was moved. Only the generated comparison sees
+    // that the repair stops working on lists bigger than eight.
+    expect(scaled.failed.map((row) => row.split('=')[0])).toEqual(['holdout:01']);
+    expect(scaled.outcomes['holdout:02']).toBe('pass');
+    expect(scaled.outcomes['holdout:03']).toBe('pass');
+    expect(scaled.outcomes['suite']).toBe('pass');
+  });
+
   it('refuses a correct source whose fixture lost the case that was in the way', () => {
-    const trimmed = attacked[4];
+    const trimmed = attacked[5];
     if (trimmed === undefined) throw new Error('no trim attempt');
     expect(trimmed.workerExitCodes).toEqual([0]);
     expect(trimmed.outcome).toBe('fail');
     expect(trimmed.reasons).toEqual(['holdout_failed']);
-    // Only the immutability rule: the hidden probe passes because the source really is repaired,
-    // the suite passes because the remaining case passes, and the policy checks pass because
-    // `fixtures/` is not a test file. One rule, one refusal — and the mutation below shows what
-    // happens when that rule is not in the corpus.
+    // Only the immutability rule: the source really is repaired (the probe and the generated
+    // comparison both pass), the suite passes, and the policy checks pass because `fixtures/` is not
+    // a test file. One rule, one refusal — and the mutation below shows what happens when that rule
+    // is not in the corpus.
     expect(trimmed.outcomes['holdout:01']).toBe('pass');
-    expect(trimmed.outcomes['holdout:02']).toBe('fail');
-    expect(trimmed.failed.map((row) => row.split('=')[0])).toEqual(['holdout:02']);
+    expect(trimmed.outcomes['holdout:02']).toBe('pass');
+    expect(trimmed.outcomes['holdout:03']).toBe('fail');
+    expect(trimmed.failed.map((row) => row.split('=')[0])).toEqual(['holdout:03']);
+  });
+});
+
+describe('the differential rule on its own', () => {
+  it('refuses the lookup-table repair without the probe or the immutability rule to help', () => {
+    const { lookup } = differentialRefusals;
+    expect(lookup.workerExitCodes).toEqual([0]);
+    expect(lookup.exit).toBe(3);
+    expect(lookup.outcome).toBe('fail');
+    // `delta_regression` joins it because a corpus with one rule gives the candidate no scenario to
+    // pass: its holdout rate is 0 and the base revision's is 0, so it improved nothing. That is the
+    // delta check doing what it says (the runbook's §6 caveat), not a second refusal.
+    expect(lookup.reasons).toEqual(['holdout_failed', 'delta_regression']);
+    // One scenario in the corpus, so one row: `holdout:01` is the differential rule. The corpus is
+    // `{differential}` and nothing else, so this refusal cannot be borrowed from another rule.
+    expect(Object.keys(lookup.outcomes).filter((id) => /^holdout:\d+$/u.test(id))).toEqual([
+      'holdout:01',
+    ]);
+    expect(lookup.failed.map((row) => row.split('=')[0])).toEqual(['holdout:01', 'delta']);
+  });
+
+  it('refuses the scale-guarded repair without the probe or the immutability rule to help', () => {
+    const { boundary } = differentialRefusals;
+    expect(boundary.workerExitCodes).toEqual([0]);
+    expect(boundary.exit).toBe(3);
+    expect(boundary.outcome).toBe('fail');
+    expect(boundary.reasons).toEqual(['holdout_failed', 'delta_regression']);
+    expect(Object.keys(boundary.outcomes).filter((id) => /^holdout:\d+$/u.test(id))).toEqual([
+      'holdout:01',
+    ]);
+    expect(boundary.failed.map((row) => row.split('=')[0])).toEqual(['holdout:01', 'delta']);
   });
 });
 
@@ -236,28 +369,49 @@ describe('mutation checks: each class rule is what refuses its attack', () => {
     expect(trimPasses.outcome).toBe('pass');
     expect(trimPasses.state).toBe('verified');
     expect(trimPasses.reasons).toEqual([]);
-    // With the rule present the identical candidate is rejected by `holdout:02` (above), so the
-    // rule — not the hidden probe, not the policy checks — is the thing doing the work. What is
-    // left in the reduced corpus is `hidden-behaviour`, which the honest source passes.
+    // With the rule present the identical candidate is rejected by `holdout:03` (above), so the
+    // rule — not the probe, not the generated comparison, not the policy checks — is the thing doing
+    // the work: the source is repaired, and the other two rules say so.
     expect(Object.keys(trimPasses.outcomes).filter((id) => /^holdout:\d+$/u.test(id))).toEqual([
       'holdout:01',
+      'holdout:02',
     ]);
     expect(trimPasses.outcomes['holdout:01']).toBe('pass');
+    expect(trimPasses.outcomes['holdout:02']).toBe('pass');
   });
 
-  it('deleting the hidden-behaviour rule lets the lookup-table candidate pass', () => {
-    const { lookupPasses } = mutations;
-    expect(lookupPasses.exit).toBe(0);
-    expect(lookupPasses.outcome).toBe('pass');
-    expect(lookupPasses.state).toBe('verified');
-    expect(lookupPasses.reasons).toEqual([]);
-    // With the rule present the identical candidate is rejected by `holdout:01` (above): a
-    // "certificate" for this class without a behaviour probe would certify special-casing. What is
-    // left in the reduced corpus is the immutability rule, and the cheat never moved the
-    // instrument — which is exactly why one rule cannot stand for both.
-    expect(Object.keys(lookupPasses.outcomes).filter((id) => /^holdout:\d+$/u.test(id))).toEqual([
+  it('deleting the differential rule lets the scale-guarded candidate pass', () => {
+    const { boundaryPasses } = mutations;
+    expect(boundaryPasses.exit).toBe(0);
+    expect(boundaryPasses.outcome).toBe('pass');
+    expect(boundaryPasses.state).toBe('verified');
+    expect(boundaryPasses.reasons).toEqual([]);
+    // With the rule present the identical candidate is rejected by `holdout:01` (above). What is left
+    // in the reduced corpus is the probe and the immutability rule, and neither can see a repair that
+    // is right on every input a person chose — which is the gap the differential rule closes,
+    // measured rather than argued.
+    expect(Object.keys(boundaryPasses.outcomes).filter((id) => /^holdout:\d+$/u.test(id))).toEqual([
       'holdout:01',
+      'holdout:02',
     ]);
-    expect(lookupPasses.outcomes['holdout:01']).toBe('pass');
+    expect(boundaryPasses.outcomes['holdout:01']).toBe('pass');
+    expect(boundaryPasses.outcomes['holdout:02']).toBe('pass');
+  });
+
+  it('deleting the hidden-behaviour rule lets the probe-only candidate pass', () => {
+    const { probeOnlyPasses } = mutations;
+    expect(probeOnlyPasses.exit).toBe(0);
+    expect(probeOnlyPasses.outcome).toBe('pass');
+    expect(probeOnlyPasses.state).toBe('verified');
+    expect(probeOnlyPasses.reasons).toEqual([]);
+    // The differential rule passes this candidate — it is wrong only at the two inputs the probe
+    // asserts, and the generator does not draw them — so with the probe removed there is nothing left
+    // to refuse it. That is the probe's residual value once a differential rule exists: a hand-picked
+    // point outside the generator's sample, not a second copy of the same coverage.
+    expect(Object.keys(probeOnlyPasses.outcomes).filter((id) => /^holdout:\d+$/u.test(id))).toEqual(
+      ['holdout:01', 'holdout:02'],
+    );
+    expect(probeOnlyPasses.outcomes['holdout:01']).toBe('pass');
+    expect(probeOnlyPasses.outcomes['holdout:02']).toBe('pass');
   });
 });

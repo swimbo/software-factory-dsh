@@ -3,7 +3,7 @@
  * corpus and the planner a live loop runs against, built at a path the operator chooses.
  *
  * `test-repair.ts` builds the same thing at test scale in a `mkdtemp` fixture: twenty commits, the
- * two-rule corpus, scripted candidates. A live loop cannot use it. Twenty *paid* attempts have to be
+ * three-rule corpus, scripted candidates. A live loop cannot use it. Twenty *paid* attempts have to be
  * measured against a tree the operator can find a week later, with a mirror the wall can clone and a
  * corpus that outlives the shell that built it. This module materialises that:
  *
@@ -12,10 +12,11 @@
  *      that test reads. The base revisions are the fixture's twenty, so the tree a paid loop measures
  *      is the same tree the offline proof measured, at a distinct corpus token;
  *   2. `<root>/repo.git` — the bare mirror the wall clones as `FACTORY_PRISTINE_REPO`;
- *   3. `<root>/holdout/test-repair/<revision>/` — the class corpus: the hidden-behaviour probe and
- *      the instrument-immutability rule, plus `manifest.json`. Written *after* the commits because
- *      the probe is selected by base commit, and the corpus must be outside the repository the
- *      worker can write;
+ *   3. `<root>/holdout/test-repair/<revision>/` — the class corpus: the differential rule with its
+ *      repaired reference module per base commit, the hidden-behaviour probe, and the
+ *      instrument-immutability rule, plus `manifest.json`. Written *after* the commits because the
+ *      probe and the reference are selected by base commit, and the corpus must be outside the
+ *      repository the worker can write;
  *   4. `<root>/spec-1.json … spec-N.json`, `<root>/restate.md` and `<root>/plan-units.sh` — the
  *      planner, emitted rather than executed: submitting a unit writes the store, and materialising
  *      artefacts must stay a free, idempotent, store-free operation;
@@ -26,9 +27,10 @@
  *
  * - a root inside the checkout it was built from (the worker could reach the corpus);
  * - a non-empty directory that is not previous artefacts (the build rebuilds by deleting);
- * - any revision whose hidden probe passes on the defect, whose repair fails its own visible test, or
- *   whose base revision passes it — the wall's discrimination criterion is `maxNonDiscriminating = 0`,
- *   so one such revision would make every attempt `unknown` and the class uncertifiable.
+ * - any revision whose hidden probe or differential rule passes on the defect, whose repair fails its
+ *   own visible test or the differential comparison, or whose base revision passes the visible test —
+ *   the wall's discrimination criterion is `maxNonDiscriminating = 0`, so one such revision would
+ *   make every attempt `unknown` and the class uncertifiable.
  *
  * This module is imported by `e2e/certification/test-repair-artifacts.test.ts` and by
  * `e2e/certification/test-repair-artifacts-main.ts`, which `scripts/test-repair-artifacts.sh` runs.
@@ -82,11 +84,16 @@ export const ARTEFACT_REPO_ID = 'test-repair-certification';
 /**
  * The corpus token recorded on every verdict measured against the persistent tree.
  *
- * Deliberately different from the fixture's `h-test-repair-2026-11-03`: the rules are the same, the
+ * Deliberately different from the fixture's `h-test-repair-2026-11-04`: the rules are the same, the
  * stores are not, and a verdict that cannot say which corpus it was measured against is a verdict
  * about nothing.
+ *
+ * The token also moved with the rulebook: `…-2026-11-03` named a two-rule corpus, this one names the
+ * three-rule corpus that adds the differential comparison. Certificates measured against the old token
+ * are not evidence about this one, and re-measuring is how that gets fixed — the store's recency
+ * judgement compares policy and model, not the corpus, so an old row does not expire on its own.
  */
-export const ARTEFACT_HOLDOUT_REVISION = 'h-test-repair-real-2026-11-03';
+export const ARTEFACT_HOLDOUT_REVISION = 'h-test-repair-real-2026-11-04';
 
 /** How many distinct bases a certificate needs: the ratified `m`. */
 export const DEFAULT_REVISIONS = 20;
@@ -445,7 +452,7 @@ export function materializeTestRepairArtifacts(options: ArtefactsOptions): Artef
   }
   git(repo, ['checkout', '--quiet', 'main']);
   progress(
-    `artifacts: ${built.length.toString()} revision(s) each violate both class rules; every ` +
+    `artifacts: ${built.length.toString()} revision(s) each violate every class rule; every ` +
       'repaired tree passes them and the visible check',
   );
 
@@ -659,7 +666,7 @@ holds no live store — ${code('FACTORY_HOME')} points at ${code('home/')}, whic
 | ---- | ---------- |
 | ${code('repo/')} | The repository the worker edits: one commit per base revision, each a small ES module with one genuine defect, the test that fails because of it, and the expectation data that test reads. |
 | ${code('repo.git/')} | The bare mirror the wall clones. ${code('FACTORY_PRISTINE_REPO')} points here; it is the only repository the wall trusts. |
-| ${code(`holdout/${artefacts.taskClass}/${artefacts.holdoutRevision}/`)} | The class corpus: two rule scripts plus ${code('manifest.json')}, read by ${code('loadHoldout')} from outside every worktree. |
+| ${code(`holdout/${artefacts.taskClass}/${artefacts.holdoutRevision}/`)} | The class corpus: three rule scripts, one repaired reference module per base commit, plus ${code('manifest.json')}, read by ${code('loadHoldout')} from outside every worktree. |
 | ${code(`spec-1.json … spec-${artefacts.revisions.length.toString()}.json`)} | One unit spec per base revision: ${code('slug')}, ${code('repo')}, ${code('baseRev')}, the acceptance oracle, the budget estimate. |
 | ${code('restate.md')} | The restate-back sentence every spec binds. ${code('factory intent --restate')} hashes it into the mandate. |
 | ${code('plan-units.sh')} | Submits and qualifies the specs against ${code('$FACTORY_HOME')} and writes ${code('units.txt')}. |
@@ -670,10 +677,10 @@ holds no live store — ${code('FACTORY_HOME')} points at ${code('home/')}, whic
 
 The rule scripts live under ${code('holdout/')}, which is outside ${code('repo/')} and appears in no prompt, no
 launch record and no attempt clone; the verdict anonymises the scenario ids as ${code('holdout:01')} … so a
-worker cannot learn which rules it missed. The hidden-behaviour probe is selected by *base commit*, so
-the worker cannot tell which probe it will get either. ${code('materializeTestRepairArtifacts')} refuses to
-build a holdout inside the repository and refuses to finish if the repository's history mentions the
-holdout path.
+worker cannot learn which rules it missed. The hidden-behaviour probe and the differential rule's
+repaired reference are both selected by *base commit*, so the worker cannot tell which one it will be
+measured against. ${code('materializeTestRepairArtifacts')} refuses to build a holdout inside the repository
+and refuses to finish if the repository's history mentions the holdout path.
 
 The visible check the worker *can* read (${code('repo/tools/visible-check.mjs')}) runs the test and prints
 counts: making it green is necessary, not sufficient.
@@ -708,12 +715,15 @@ twenty samples rather than one defect measured twenty times.
 
 ## What a certificate measured here means
 
-It means the class's two rules — the public behaviour on inputs the fixture never shows, and the
-instrument left exactly as the base revision had it — were measured twenty times against this tree. It
-does **not** mean a model can repair code in general: the corpus was written by the same side that is
-being certified, so it can only measure what its author thought of. Two rules is a floor on class
-quality, not a proof. Nothing here was measured against a model unless ${code('FACTORY_MODEL_ID')} is set and
-the loop actually ran.
+It means the class's three rules were measured twenty times against this tree: the public behaviour on
+inputs the fixture never shows, the instrument left exactly as the base revision had it, and the
+candidate's agreement with the repaired reference on generated inputs. The third is the strongest and
+the one to quote precisely — a passing attempt **agrees with the known repair on the generated inputs**,
+which is a claim about a finite set (44–52 points per revision), not a proof of correctness. It does
+**not** mean a model can repair code in general: the corpus, its domains and its reference were
+written by the same side that is being certified, so it can only measure what its author thought of.
+Three rules is a floor on class quality, not a proof. Nothing here was measured against a model unless
+${code('FACTORY_MODEL_ID')} is set and the loop actually ran.
 `;
 }
 

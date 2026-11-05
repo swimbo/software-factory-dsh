@@ -30,8 +30,9 @@ import { TEST_REPAIR_REVISIONS } from './test-repair-revisions.ts';
 let checks: readonly RevisionCheck[];
 
 beforeAll(() => {
-  // Four real subprocesses per revision (base and repair, visible test and hidden probe). Twenty
-  // revisions is ~6 s; the timeout is the measured cost with room for a slow machine.
+  // Six real subprocesses per revision (base and repair, for each of the visible test, the hidden
+  // probe and the differential rule). Twenty revisions is ~5 s; the timeout is the measured cost
+  // with room for a slow machine.
   checks = TEST_REPAIR_REVISIONS.map((revision) => checkRevision(revision));
 }, 180_000);
 
@@ -107,6 +108,28 @@ describe('the test-repair fixture', () => {
     expect(checks.filter((check) => !check.repairPassesVisible).map((check) => check.id)).toEqual(
       [],
     );
+  });
+
+  it('has a differential rule that discriminates on seeded inputs and says how many it compared', () => {
+    // Both halves matter for the same reason the probe's do: a rule that passes on the defect is
+    // not discriminating, and one that fails on the repair would refuse the honest answer.
+    expect(
+      checks.filter((check) => !check.differentialFailsOnBase).map((check) => check.id),
+    ).toEqual([]);
+    expect(
+      checks.filter((check) => !check.differentialPassesOnRepair).map((check) => check.id),
+    ).toEqual([]);
+    // The rule compared exactly the points the domain declares: the count it prints is not a
+    // side-channel, it is the corpus's own arithmetic. 44–52 points per revision, and the samples
+    // (the seeded half) are at least thirty of them.
+    for (const revision of TEST_REPAIR_REVISIONS) {
+      const check = checks.find((entry) => entry.id === revision.id);
+      const declared = revision.differential.edges.length + revision.differential.samples;
+      expect(revision.differential.samples, revision.id).toBeGreaterThanOrEqual(30);
+      expect(check?.differentialPoints, revision.id).toBe(declared);
+    }
+    const points = checks.map((check) => check.differentialPoints);
+    expect(Math.min(...points)).toBeGreaterThanOrEqual(40);
   });
 
   it('has a hidden probe that discriminates: it fails on every base revision and passes on every repair', () => {

@@ -224,10 +224,13 @@ describe('twenty measured attempts of test-repair', () => {
         ).toBe(true);
       }
 
-      // The accumulator on disk: 20 revisions × 2 rules × 2 sides, every line parseable.
+      // The accumulator on disk: 20 revisions × 3 rules × 2 sides, every line parseable. The
+      // differential rule runs in both directions like the others: the base side is what says the
+      // rule discriminates, and a corpus line that cannot say which side it measured is not
+      // evidence.
       const log = readCriteriaLog(criteriaLogPath(substrate.holdoutRoot));
       expect(log.corruptLines).toBe(0);
-      expect(log.entries).toHaveLength(80);
+      expect(log.entries).toHaveLength(120);
       expect(new Set(log.entries.map((entry) => entry.revision)).size).toBe(20);
       expect(new Set(log.entries.map((entry) => entry.holdoutRevision))).toEqual(
         new Set([TEST_REPAIR_HOLDOUT_REVISION]),

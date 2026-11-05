@@ -7,8 +7,8 @@
  * verifies independently of the build's own report:
  *
  *   1. the artefacts repository is a git history of one small module per base revision with a test
- *      that fails on it; a clone of each planted base fails both class rules and its visible check,
- *      while the same clone with the source repaired passes both rules and the check;
+ *      that fails on it; a clone of each planted base fails every class rule and its visible check,
+ *      while the same clone with the source repaired passes every rule and the check;
  *   2. the corpus is outside the repository, absent from its history, loads through `loadHoldout`,
  *      and its hidden probe index names the module each base revision actually ships — a probe that
  *      named the wrong module would measure the wrong tree;
@@ -160,22 +160,25 @@ describe('the persistent test-repair artefacts', () => {
       expect(run(['git', 'cat-file', '-e', `${baseRev}^{commit}`], mirror).code).toBe(0);
     }
 
-    // The corpus: the layout `loadHoldout` reads, with the real two rules in the manifest's argv.
+    // The corpus: the layout `loadHoldout` reads, with the real three rules in the manifest's argv.
     const holdoutRoot = join(root, 'holdout');
     const corpus = loadHoldout(holdoutRoot, TEST_REPAIR_TASK_CLASS);
     expect(corpus, 'the corpus must load or every verdict would be unknown').not.toBeNull();
     if (corpus === null) throw new Error('unreachable: asserted above');
     expect(corpus.taskClass).toBe(TEST_REPAIR_TASK_CLASS);
     expect(corpus.revision).toBe(ARTEFACT_HOLDOUT_REVISION);
-    expect(corpus.scenarios).toHaveLength(2);
+    expect(corpus.scenarios).toHaveLength(3);
     const ids = corpus.scenarios.map((scenario) => scenario.id);
     expect(ids).toEqual([...ids].sort());
-    expect(ids).toEqual(['hidden-behaviour', 'tests-untouched']);
+    expect(ids).toEqual(['differential', 'hidden-behaviour', 'tests-untouched']);
     for (const scenario of corpus.scenarios) {
       expect(scenario.expectExit).toEqual([0]);
       expect(scenario.argv[0]).toBe('node');
       const script = scenario.argv[1] ?? '';
       expect(existsSync(script), `the corpus script ${script} exists`).toBe(true);
+      // Every scenario argv names a rule script in this corpus, and the differential rule's own
+      // file is there rather than borrowed from the fixture build.
+      expect(readFileSync(script, 'utf8')).toContain('holdout:');
       expect(
         script.startsWith(join(holdoutRoot, TEST_REPAIR_TASK_CLASS, ARTEFACT_HOLDOUT_REVISION)),
       ).toBe(true);
@@ -227,7 +230,7 @@ describe('the persistent test-repair artefacts', () => {
   });
 
   it(
-    'plants a real defect per revision: every base fails both rules, its repaired tree passes them',
+    'plants a real defect per revision: every base fails every rule, its repaired tree passes them',
     () => {
       const corpus = loadHoldout(join(build.root, 'holdout'), TEST_REPAIR_TASK_CLASS);
       if (corpus === null) throw new Error('the corpus did not load');
@@ -242,7 +245,7 @@ describe('the persistent test-repair artefacts', () => {
           `base-${label}`,
         );
 
-        // The base revision: both rules refuse it, and the rule that refused it is the class rule —
+        // The base revision: every rule refuses it, and the rule that refused it is the class rule —
         // not "this tree has no git state" or "this base is not in the corpus".
         for (const argv of rules) {
           const rule = run([process.execPath, ...argv.slice(1)], tree);
@@ -292,19 +295,38 @@ describe('the persistent test-repair artefacts', () => {
       .filter((path) => path.endsWith('.mjs'));
     expect(moduleFiles).toEqual(['tools/visible-check.mjs']);
 
-    // The probe index is keyed by base commit and names the module that commit ships. A probe map
-    // that pointed every base at the same module would measure a tree the candidate did not get.
+    // The corpus index is keyed by base commit and names the module that commit ships, the repaired
+    // reference the differential rule compares against, and the domain it generates from. An index
+    // that pointed every base at the same module — or at a reference that was not the repair — would
+    // measure a tree the candidate did not get.
     const corpus = loadHoldout(holdoutRoot, TEST_REPAIR_TASK_CLASS);
     if (corpus === null) throw new Error('the corpus did not load');
     const revisionDir = join(holdoutRoot, TEST_REPAIR_TASK_CLASS, ARTEFACT_HOLDOUT_REVISION);
     const index = JSON.parse(
       readFileSync(join(revisionDir, 'hidden', 'index.json'), 'utf8'),
-    ) as Record<string, string>;
+    ) as Record<
+      string,
+      {
+        module: string;
+        reference: string;
+        fn: string;
+        domain: { edges: unknown[]; samples: number };
+      }
+    >;
     expect(Object.keys(index).sort()).toEqual([...baseRevs].sort());
     for (const [offset, spec] of specs.entries()) {
       const baseRev = baseRevs[offset];
       if (baseRev === undefined) throw new Error('no base revision');
-      expect(index[baseRev]).toBe(modulePath(revisionForSpec(spec['revision'])));
+      const entry = index[baseRev];
+      if (entry === undefined) throw new Error(`no index entry for ${baseRev}`);
+      const revision = revisionForSpec(spec['revision']);
+      expect(entry.module).toBe(modulePath(revision));
+      expect(entry.fn).toBe(revision.fn);
+      // The reference is the repair, verbatim, and it lives in the corpus rather than the tree.
+      expect(entry.reference).toBe(`hidden/${baseRev}.reference.mjs`);
+      expect(readFileSync(join(revisionDir, entry.reference), 'utf8')).toBe(revision.fixed);
+      // The domain is the same one the revision declares, so the claim's N is derivable here.
+      expect(entry.domain.edges.length + entry.domain.samples).toBeGreaterThanOrEqual(40);
       expect(existsSync(join(revisionDir, 'hidden', `${baseRev}.probe.mjs`))).toBe(true);
     }
   });
