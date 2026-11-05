@@ -395,7 +395,8 @@ export function openStore(options: OpenStoreOptions): Store {
         );
       }
       for (const step of path) {
-        for (const statement of step.statements) stmt(statement).run();
+        // Columns first: a step may add one and then fill it (v4 → v5 backfills the certificate
+        // corpus from the verdict each row names), and the fill cannot run before the column exists.
         for (const addition of step.addColumns ?? []) {
           // SQLite has no `ADD COLUMN IF NOT EXISTS`, so presence is inspected rather than assumed.
           // The case this exists for: an old store whose table `SCHEMA_SQL` has already recreated in
@@ -406,6 +407,7 @@ export function openStore(options: OpenStoreOptions): Store {
             .some((column) => column.name === addition.column);
           if (!present) stmt(addition.statement).run();
         }
+        for (const statement of step.statements) stmt(statement).run();
         stmt('INSERT INTO schema_migration (version, applied_at, checksum) VALUES (?, ?, ?)').run(
           step.to,
           now(),

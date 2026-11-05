@@ -412,6 +412,41 @@ describe('factory audit --certifications', () => {
     expect(result.stderr).toContain('expired evidence, not a warning');
   });
 
+  it('attributes a pre-v5 certificate from its own verdict, so the column does not expire evidence', () => {
+    // The false staleness the backfill exists to prevent: an operator's v4 store holds certificates
+    // whose verdicts already name their corpus. Declaring those stale because a column was added would
+    // commit them to re-measuring evidence that has not changed, which is the surest way to teach an
+    // operator to ignore `CERT_STALE`. The migration fills each row from the verdict it names, and the
+    // audit on the next open says `current`.
+    const home = tempHome();
+    seedCertificate(
+      home,
+      { taskClass: 'docs-typo-fix', outcome: 'certified', passes: 19, samples: 20 },
+      1,
+    );
+    const raw = openSqlite({ path: join(home, 'state', 'factory.db') });
+    raw.prepare('ALTER TABLE class_certificates DROP COLUMN holdout_revision').run();
+    raw.prepare('DELETE FROM schema_migration WHERE version = 5').run();
+    raw
+      .prepare(
+        "INSERT INTO schema_migration (version, applied_at, checksum) VALUES (4, '2026-11-01T00:00:00.000Z', 'v4')",
+      )
+      .run();
+    raw.close();
+
+    const result = audit(home, { FACTORY_MODEL_ID: 'auto' });
+    expect(result.status).toBe(EXIT.ok);
+    expect(jsonOf(result)['classes']).toEqual([
+      expect.objectContaining({
+        taskClass: 'docs-typo-fix',
+        state: 'current',
+        holdoutRevision: 'holdout/1',
+        latestHoldoutRevision: 'holdout/1',
+      }),
+    ]);
+    expect(result.stderr).not.toContain('re-certify');
+  });
+
   it('never lets an unattributed certificate borrow the corpus of a newer measurement', () => {
     // The two facts a pre-v5 store holds after one new attempt: the certificate names no corpus, the
     // attempt does. A `NULL` that matched the reference would print `current` and attribute the old

@@ -1007,11 +1007,21 @@ describe('verdicts: unknown is not pass', () => {
     expect(certificate).toMatchObject({ outcome: 'certified', holdoutRevision: 'holdout/7' });
   });
 
-  it('opens a v4 store by adding the corpus column, and the old row stays readable with NULL', () => {
-    // The state every operator's store is in: `class_certificates` without `holdout_revision` and a
-    // recorded schema version of 4. `ALTER TABLE … ADD COLUMN` is the migration; SQLite refuses it
-    // twice, so this spec is also the proof that the store inspects before it alters — the column is
-    // already there on the v1 → v5 path, where SCHEMA_SQL recreates the table first.
+  it('backfills a v4 store from the verdict each certificate names, and leaves the rest NULL', () => {
+    // The state every operator's store is in: `class_certificates` without `holdout_revision`, schema
+    // version 4. The column was missing, not the fact — a certificate is derived from exactly one
+    // verdict (`verdict_id` is a foreign key), and that verdict records the corpus — so the migration
+    // fills each row from *its own* verdict. Three rows, three answers:
+    //
+    //   cert:V-1       its verdict names a corpus      -> filled
+    //   cert:V-legacy  its verdict names none          -> stays NULL, even though another certificate
+    //                                                     of the same class names a corpus
+    //   cert:dangling  no such verdict at all          -> stays NULL
+    //
+    // The second and third rows are what make this a backfill and not an attribution: the store copies
+    // a fact that was already recorded next to the row, and invents nothing. Both are written by hand
+    // because the store's own write path cannot produce them (the insert resolves a non-empty corpus,
+    // and the foreign key forbids a dangling certificate); they are the shapes a pre-v5 store can hold.
     const { receiptSha } = receiptedUnit();
     const verdict: VerdictType = {
       ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
@@ -1031,10 +1041,43 @@ describe('verdicts: unknown is not pass', () => {
     expect(certificatesOfStore()[0]?.holdoutRevision).toBe('holdout/7');
     store.close();
 
-    // Rewind to v4: the row loses the column's value (as a pre-v5 row did — it never had one) and the
-    // recorded version is the old one.
     const raw = openSqlite({ path: dbPath });
+    // Rewind to v4: the column goes away, with the values it holds — a pre-v5 row never had one.
     raw.prepare('ALTER TABLE class_certificates DROP COLUMN holdout_revision').run();
+    // A verdict written before attribution: the column is null, which the DDL has always allowed for
+    // a non-pass outcome, and which the current insert path no longer produces.
+    raw
+      .prepare(
+        `INSERT INTO verdicts (verdict_id, unit_id, attempt_id, receipt_id, receipt_sha,
+           holdout_revision, policy_version, wall_version, outcome, delta_checked, delta_observed,
+           reasons_json, scenarios_json, delta_json, evaluated_at)
+           VALUES ('V-legacy', 'U-7f3a9c', 'A-1', 'R-1', ?, NULL, 'policy/2026-11-01',
+             ?, 'unknown', 0, NULL, '["holdout_unavailable"]', '[]',
+             '{"checked":false,"baseRate":0,"candidateRate":0,"threshold":0,"observed":null,"holdoutRevision":""}',
+             ?)`,
+      )
+      .run(receiptSha, WALL_VERSION, AT);
+    raw
+      .prepare(
+        `INSERT INTO class_certificates (certificate_id, verdict_id, unit_id, task_class, m, k, p0,
+           alpha, samples, passes, outcome, policy_version, model_id, recorded_at, certificate_sha)
+           VALUES ('cert:V-legacy', 'V-legacy', 'U-7f3a9c', 'refactor-extract-helper', 20, 18, 0.95,
+             0.07548367378849634, 3, 1, 'insufficient', 'policy/2026-11-01', 'auto', ?, ?)`,
+      )
+      .run(AT, SHA);
+    // A certificate whose verdict is not in the table at all. `PRAGMA foreign_keys = OFF` is the only
+    // way to build a row the store's own path refuses to write; the point of the row is that the
+    // backfill's join must not fill it — a "use the class's newest verdict" implementation would.
+    raw.exec('PRAGMA foreign_keys = OFF');
+    raw
+      .prepare(
+        `INSERT INTO class_certificates (certificate_id, verdict_id, unit_id, task_class, m, k, p0,
+           alpha, samples, passes, outcome, policy_version, model_id, recorded_at, certificate_sha)
+           VALUES ('cert:dangling', 'V-missing', 'U-7f3a9c', 'refactor-extract-helper', 20, 18, 0.95,
+             0.07548367378849634, 20, 19, 'certified', 'policy/2026-11-01', 'auto', ?, ?)`,
+      )
+      .run(AT, SHA);
+    raw.exec('PRAGMA foreign_keys = ON');
     raw.prepare('DELETE FROM schema_migration WHERE version = 5').run();
     raw
       .prepare(
@@ -1046,11 +1089,15 @@ describe('verdicts: unknown is not pass', () => {
     const migrated = openStore({ dir, now: clock });
     store = migrated;
     expect(migrated.migrationsApplied()).toEqual([expect.objectContaining({ from: 4, to: 5 })]);
-    // The old row is readable — not dropped, not rewritten — and it names no corpus, which is the
-    // honest value: the certificate's verdict did name one, but the certificate itself never did, and
-    // inventing it here would be the attribution the wall is supposed to judge.
-    const [certificate] = certificatesOfStore();
-    expect(certificate).toMatchObject({ outcome: 'certified', samples: 20, holdoutRevision: null });
+    const byId = new Map(certificatesOfStore().map((row) => [row.certificateId, row]));
+    // Filled from its own verdict: the fact was always there, the column was not.
+    expect(byId.get('cert:V-1')?.holdoutRevision).toBe('holdout/7');
+    // Its verdict names nothing, so the row stays NULL — and stays NULL even though the class's other
+    // certificate names a corpus. Filling it from the class would be the silent attribution the wall
+    // exists to judge.
+    expect(byId.get('cert:V-legacy')?.holdoutRevision).toBeNull();
+    // No verdict at all: nothing to copy, nothing invented.
+    expect(byId.get('cert:dangling')?.holdoutRevision).toBeNull();
 
     // Reopening does not re-run the step, and the column is still there for new rows.
     migrated.close();

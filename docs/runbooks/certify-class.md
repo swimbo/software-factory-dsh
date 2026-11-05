@@ -33,13 +33,13 @@ operating point (`m`, `k`, `p0`, α), under this policy version, this model id a
 met k of m". The identity is stored (`policy_version`, `model_id`, `holdout_revision`) and all three
 world-state inputs are re-checked by `certificateRecency`:
 
-| The reason line says | What changed                                                                                                                                                         |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `policy changed`     | the wall's rules or operating point moved — the digest of the policy the certificate was minted under is not the running one                                         |
-| `model changed`      | `FACTORY_MODEL_ID` moved; the certificate describes one model's behaviour                                                                                            |
-| `model unknown`      | the row never recorded a model id (offline, or before the wiring); `null` is unknown, never "unchanged"                                                              |
-| `corpus changed`     | the class was re-measured under a different holdout corpus: the certificate is compared with the newest measurement of the class that names one                      |
-| `corpus unknown`     | the certificate names no corpus at all — it predates schema v5. It cannot prove which evidence it describes, so it is stale by definition, never current by wildcard |
+| The reason line says | What changed                                                                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `policy changed`     | the wall's rules or operating point moved — the digest of the policy the certificate was minted under is not the running one                                                                                                          |
+| `model changed`      | `FACTORY_MODEL_ID` moved; the certificate describes one model's behaviour                                                                                                                                                             |
+| `model unknown`      | the row never recorded a model id (offline, or before the wiring); `null` is unknown, never "unchanged"                                                                                                                               |
+| `corpus changed`     | the class was re-measured under a different holdout corpus: the certificate is compared with the newest measurement of the class that names one                                                                                       |
+| `corpus unknown`     | the certificate names no corpus and its verdict names none either — it predates schema v5 and the migration had nothing to copy. It cannot prove which evidence it describes, so it is stale by definition, never current by wildcard |
 
 `audit --certifications` prints the two facts a corpus reason is drawn from, for every stale class:
 
@@ -53,6 +53,17 @@ world-state inputs are re-checked by `certificateRecency`:
 latest measurement under no named corpus` when nothing of the class has ever named one. The store
 never infers the corpus: a `NULL` is not a wildcard, and the row — not the verdict it points at — is
 what the audit judges, because the row is what the certificate claims.
+
+**Where a pre-v5 row's corpus comes from.** The column was added in schema v5 and **backfilled from
+the verdict each certificate names** (`cert.verdict_id → verdicts.holdout_revision`, an exact join
+onto the row that produced the certificate — the same bounded bridge as `legacyPolicyVersions()` for
+pre-split policy digests). So a certificate written before the column existed is attributed when its
+verdict names a corpus, and is **not** declared stale merely because a column was added. The bound is
+strict: the fill reads that verdict and nothing else — never the class's newest verdict, never a
+default — and a certificate whose verdict names no corpus, or is not in the table at all, stays
+`NULL` and reads stale. **Delete the backfill statement** (`CLASS_CERTIFICATES_CORPUS_BACKFILL` in
+`packages/store/src/schema.ts`) once no readable row predates v5; it is a bridge, not part of the
+schema's steady state.
 
 The offline proof below was run with a **scripted executor**: no model call, no network, no spend.
 Nothing in this runbook was executed against a paid model in this tree's history, and the numbers

@@ -39,6 +39,8 @@ export interface Migration {
    * `ALTER TABLE … ADD COLUMN` statements, with the table and column each one adds. Idempotent by
    * inspection instead of by swallowing a duplicate-column error: the store skips one whose column
    * is already there.
+   *
+   * Applied **before** `statements`, because a step may add a column and then fill it.
    */
   readonly addColumns?: readonly AddColumn[];
 }
@@ -128,21 +130,52 @@ BEGIN SELECT RAISE(ABORT, 'privileged_decisions is append-only'); END;`;
  * v4 → v5 (corpus attribution): `class_certificates.holdout_revision`, the corpus the certificate's
  * verdict was measured against.
  *
- * Additive and nullable. Every row that already exists keeps `NULL`, which the wall reads as
- * "this certificate predates corpus attribution" — **never** as "matches any corpus". A null that
- * matched would recreate, for every historical row, the silent attribution this column exists to
- * stop: a class re-measured under a stricter corpus would keep showing the old certificate as
- * current.
+ * Additive and nullable, then **backfilled from the verdict each certificate names**. The column was
+ * missing, not the fact: every certificate was derived from exactly one verdict (`certificate_id` is
+ * `cert:` + that verdict's id, and `verdict_id` is a foreign key), and that verdict records the corpus
+ * it was measured under. So the backfill is an exact, deterministic join onto the row that produced
+ * the certificate — the same category as re-deriving a legacy policy digest: a bounded bridge to
+ * evidence that already exists, not a claim invented now.
  *
- * Why a column and not a join to `verdicts.holdout_revision`: the certificate is the thing the audit
- * prints, and a display that has to join to name its own evidence is a display that can be pointed at
- * the wrong row. The verdict stays the deeper record; this is the projection saying what it measured.
+ * The bound matters more than the fill. It reads the corpus of **the verdict the certificate names**,
+ * never of the class's newest verdict, and never a default: if that verdict is missing, or names no
+ * corpus, the row stays `NULL` and the wall reads it as stale ("this certificate predates corpus
+ * attribution"). Filling from anything else would be the store attributing evidence it was never
+ * given — the silent-attribution defect this column exists to stop.
+ *
+ * **Delete this statement** once no readable row predates v5 (the column is then either written at
+ * insert time or genuinely unknown); it is a bridge for evidence written before the column existed,
+ * exactly like `legacyPolicyVersions()` in the qualifier.
+ *
+ * Why a column at all, rather than a join at read time: the certificate is the thing the audit prints,
+ * and a display that has to join to name its own evidence is a display that can be pointed at the
+ * wrong row. The verdict stays the deeper record; this is the projection saying what it measured.
  */
 const CLASS_CERTIFICATES_CORPUS_DDL: AddColumn = {
   table: 'class_certificates',
   column: 'holdout_revision',
   statement: 'ALTER TABLE class_certificates ADD COLUMN holdout_revision TEXT;',
 };
+
+/**
+ * The v4 → v5 backfill. Runs *after* the column exists (the store applies a step's `addColumns` before
+ * its `statements`), and is idempotent: it only touches rows whose corpus is still `NULL`.
+ *
+ * `EXISTS` rather than a bare scalar subquery so that a certificate whose verdict is missing, or whose
+ * verdict names an empty corpus, is left alone instead of being "filled" with `NULL` — the same value,
+ * but a different claim, and one this statement refuses to make.
+ */
+const CLASS_CERTIFICATES_CORPUS_BACKFILL = `UPDATE class_certificates
+   SET holdout_revision = (
+     SELECT v.holdout_revision FROM verdicts v WHERE v.verdict_id = class_certificates.verdict_id
+   )
+ WHERE holdout_revision IS NULL
+   AND EXISTS (
+     SELECT 1 FROM verdicts v
+      WHERE v.verdict_id = class_certificates.verdict_id
+        AND v.holdout_revision IS NOT NULL
+        AND trim(v.holdout_revision) <> ''
+   );`;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -166,8 +199,8 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     from: 4,
     to: 5,
-    note: 'corpus attribution: class_certificates.holdout_revision, so a certificate names the corpus it measured',
-    statements: [],
+    note: 'corpus attribution: class_certificates.holdout_revision, backfilled from the verdict each certificate names',
+    statements: [CLASS_CERTIFICATES_CORPUS_BACKFILL],
     addColumns: [CLASS_CERTIFICATES_CORPUS_DDL],
   },
 ];

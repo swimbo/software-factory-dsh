@@ -162,20 +162,24 @@ corpus. So the corpus is a fourth identity input beside the policy version and t
 expires the claim the same way:
 
 - the live `test-repair` certificate (`cert:V-921a457ae54e`, verdict
-  `h-test-repair-real-2026-11-03`) was written **before** the column existed, so after the v4 → v5
-  migration its `holdout_revision` is `NULL`. `NULL` is "this certificate predates corpus
-  attribution", which is **stale**, never a wildcard that matches whatever corpus is running. Its
-  verdict still names `h-test-repair-real-2026-11-03`, one join away, but the certificate itself does
-  not claim a corpus and the store does not invent one for it.
+  `h-test-repair-real-2026-11-03`) was written **before** the column existed. The v4 → v5 migration
+  backfills it from the verdict it names — an exact join on the row that produced the certificate — so
+  it records `h-test-repair-real-2026-11-03` and stays `current` until a measurement under the new
+  corpus lands. That is deliberate: the fact was always there and only the column was missing, so
+  declaring the class expired would be false staleness (and re-spending on evidence that has not
+  moved). What the migration will **not** do is copy a corpus from anywhere else: a certificate whose
+  verdict names none, or is missing, stays `NULL` — "this certificate predates corpus attribution" —
+  which is **stale**, never a wildcard that matches whatever corpus is running.
 - the first attempt of §5 writes a row under `h-test-repair-real-2026-11-04`; from that row on the
   class reads `stale` for a second reason — `re-certify: corpus changed (certified under
 h-test-repair-real-2026-11-03, latest measurement under h-test-repair-real-2026-11-04)` — and the
   twentieth attempt, if the class earns it, writes the `certified` row under the new corpus that makes
   it `current` again.
 
-The consequence to plan for: a class certified before v5 has to be re-measured once (twenty fresh
-attempts, §5) before it can be claimed as current again. That is the cost of not letting the store
-attribute a corpus it never recorded.
+The consequence to plan for: a class whose _corpus did not move_ is not re-measured at all — the
+backfilled row is current, and the first attempt of §5 is what makes it stale. A class certified
+before v5 **whose verdict names no corpus** has to be re-measured once (twenty fresh attempts) before
+it can be claimed current again; both live classes name one, so neither is in that position.
 
 ## 5. Run the loop
 

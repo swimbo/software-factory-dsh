@@ -47,16 +47,16 @@ factory audit --certifications --json |
 #             "reasons":["re-certify: policy changed (certified under policy/2026-10-01, running sha256:6ce54b93…)"]}
 ```
 
-Three cases, three different answers:
+Each reason line has its own answer:
 
-| The reason line says             | What changed                                               | What to do                                                                                             |
-| -------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `policy changed`                 | the wall's policy version moved                            | re-run the class (§ below), or revert the policy — a policy change is a measurement change             |
-| `model changed`                  | `FACTORY_MODEL_ID` moved                                   | re-run the class against the new model; a certificate is about a model's behaviour, not a model family |
-| `model unknown`                  | the certificate has no model id                            | the attempt ran before the model id was wired, or offline; re-run with `FACTORY_MODEL_ID` set          |
-| `corpus changed`                 | the class was re-measured under a different holdout corpus | re-run the class against the corpus you intend to claim; the old pass describes a weaker test          |
-| `corpus unknown`                 | the certificate predates corpus attribution (schema v5)    | re-run the class: the store cannot prove which corpus that pass was measured against                   |
-| `nothing has ever been measured` | this task class was never certified                        | run the class to m attempts before treating it as certifiable                                          |
+| The reason line says             | What changed                                                                                                         | What to do                                                                                             |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `policy changed`                 | the wall's policy version moved                                                                                      | re-run the class (§ below), or revert the policy — a policy change is a measurement change             |
+| `model changed`                  | `FACTORY_MODEL_ID` moved                                                                                             | re-run the class against the new model; a certificate is about a model's behaviour, not a model family |
+| `model unknown`                  | the certificate has no model id                                                                                      | the attempt ran before the model id was wired, or offline; re-run with `FACTORY_MODEL_ID` set          |
+| `corpus changed`                 | the class was re-measured under a different holdout corpus                                                           | re-run the class against the corpus you intend to claim; the old pass describes a weaker test          |
+| `corpus unknown`                 | the certificate predates corpus attribution (schema v5) and the verdict it names no longer says which corpus it used | re-run the class: the store cannot prove which corpus that pass was measured against                   |
+| `nothing has ever been measured` | this task class was never certified                                                                                  | run the class to m attempts before treating it as certifiable                                          |
 
 **Re-certify a class** (this is the measurement, and it costs money when the model is live). The
 certificate is written by the wall on every verdict, so re-certifying is just running `m` units of
