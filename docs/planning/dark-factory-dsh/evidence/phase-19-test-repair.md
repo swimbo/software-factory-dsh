@@ -100,3 +100,70 @@ wrong repair among twenty was refused by a probe** — not "the repairs were cor
   numbers are right; the sentence around them is a constant. Recorded here rather than fixed, because
   changing a rendered string is a release decision, not a defect fix — the field is `holdout.passed`
   and `holdout.total`.
+
+## Addendum (round 13): the refusal was the class's defect, not the model's
+
+The section above calls attempt 8 "a plausible wrong repair", caught by a probe. Re-measured, that
+reading was wrong, and the correction matters more than the certificate.
+
+**What actually happened.** The candidate preserved a *leading* `..` (`'../x' → '../x'`), which is what
+POSIX `path.normalize` does. The fixture's reference drops it, because this class's docs-path space has
+no parent. Nothing the worker could see said which convention was intended: both visible cases ran with
+a non-empty segment stack, where the two conventions agree. So the class refused a **defensible**
+repair for disagreeing with an undiscoverable choice of its author — and then did it a second time,
+with the same patch, on the same module, in the re-certification under the stricter corpus. A failure
+that reproduces identically across independent runs is a property of the class, not of the model.
+
+**The fix, and what it cost.** `e2e/certification/test-repair.ts` now audits every declared differential
+edge: if the **base** revision already answers it correctly, a refusal there cannot be about the defect,
+so that edge *must* appear as a visible case, and the build refuses to finish if it does not. Sixty-one
+such "safe" edges were invisible across 19 of the 20 revisions — rounding-mode boundaries, fallbacks,
+empty inputs, even/odd, page edges, parse shapes, HTML entities. The rule is deliberately narrow: making
+*all* 118 declared edges visible let the `bytes` lookup-table cheat pass the corpus and **certify**
+(measured, `test-repair-certification.test.ts` red), so the fixture may show what the base gets right
+and must not show where the base is wrong.
+
+**The third measurement.** After the fix, with the corpus content-addressed
+(`h-test-repair-real-2026-11-04-ffa87379`, see below), the live loop returned **20 of 20 passes**:
+`samples=20, passes=20, certified`, 186,787 tokens across the twenty attempts (median 8,895). Both
+classes read `current`, `alerts` is empty, the anchor is fresh.
+
+That result is *easier* than the previous 19/20 and it is the honest direction: the class became fairer,
+not the model better. A certificate earned against a corpus that refuses defensible work measures the
+author's taste; the previous round's certificate should be read as evidence of that defect, which is
+why it was re-measured rather than kept.
+
+**Second defect found on the same path: a corpus id is not an identity.** The corpus id was
+date-based, so rebuilding the fixture under the same date minted different rules under the same name —
+and `certificatesRecency` compares names, so the certificate would have read `current` while naming
+evidence it was never measured against. This is the same defect the project fixed for policy digests,
+one level down. The test-repair id is now content-addressed (`…-2026-11-04-<8hex>`, a sha256 over every
+rule, probe, reference module, suite wrapper, index and manifest scenario, with the manifest's own id
+fields masked), the fixture commits carry a fixed date so unchanged content cannot mint a new id, and
+the build re-derives the digest from the final directory and refuses to finish if it disagrees. Proven
+both ways in the gate: same content a year and a directory apart → same id; one changed probe → new id
+with identical commits.
+
+The docs class's corpus id is still a fixed label. That is recorded as a known weakness in
+`docs/runbooks/certify-class.md` §4 with the fix and the condition ("before that corpus is next rebuilt
+or the class next re-measured") — applying it now would expire 6.4 M tokens of evidence whose corpus
+has not changed, which is the false staleness this project refuses to trade for tidiness.
+
+**Third and fourth defects, both in the generator.** `scripts/test-repair-artifacts.sh` emitted specs
+whose restatement scored `restateOverlap=0.357` against a `0.500` floor, so every regenerated spec was
+refused by `qualify` and `plan-units.sh` wrote an empty `units.txt` — a generator producing artifacts its
+own gate refuses. And `plan-units.sh` refused a second run without naming which revisions were taken;
+it now prints the next free revision. Both are pinned by the artefacts gate spec.
+
+**What the certificate now names.** Class, operating point, model, policy **and corpus** — schema v5
+adds `class_certificates.holdout_revision`, written from the verdict that produced each certificate, and
+the `4 → 5` migration backfills existing rows from the verdict each one names (an exact join, never the
+class's newest corpus, never a wildcard: a row whose verdict names nothing, or no longer exists, stays
+`NULL` and reads stale with the reason "predates corpus attribution"). Without the backfill both live
+certificates would have flipped stale on a schema change alone — false staleness that would have
+committed the project to re-spending 6.4 M tokens re-measuring an unchanged corpus. The backfill is a
+bridge with a deletion condition, recorded in the migration comment and in the runbook.
+
+Still open, named rather than hidden: the `wall.class_certified` ledger event does **not** carry the
+corpus (or `p0`), so a reader that trusts only the events can prove a class was certified under a policy
+and a model but not which holdout made it true. ~3 files, ~15 lines, one contract decision.

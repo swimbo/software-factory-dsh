@@ -506,3 +506,31 @@ time — one rule, one file per revision, no model cost, not built.
 
 **Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1596 passed | 8 skipped (1604)** across
 115 files.
+
+### Round 13 — identities, not names (2026-11-04)
+
+**A correction first.** Round 12 called the refused `test-repair` attempt "a plausible wrong repair
+caught by a probe". Re-measured, it was the opposite: the candidate preserved a leading `..` (what POSIX
+`path.normalize` does), the reference drops it, and no visible case told the two apart. The class refused
+a defensible repair for disagreeing with an undiscoverable convention — twice, with the same patch. A
+gate the worker cannot satisfy from visible evidence measures the author's taste, so the fixture now
+refuses to build unless every edge the base revision already answers correctly is a visible case (61
+were invisible); and it is narrow on purpose, because making all 118 edges visible let the `bytes`
+lookup-table cheat certify.
+
+**Three identity defects, all the same shape.** (1) The corpus id was a date, so a rebuild minted
+different rules under the same name while recency compared names — a certificate could read `current`
+while naming evidence it never measured. (2) The certificate itself named no corpus at all (schema v5
+now writes it from the verdict, with a strict backfill from each certificate's own verdict and `NULL`
+reading as stale, never as a wildcard). (3) The generator emitted specs its own qualifier refused
+(`restateOverlap=0.357` vs a `0.500` floor).
+
+**Re-measured: 20 of 20**, `samples=20 passes=20 certified` under
+`h-test-repair-real-2026-11-04-ffa87379`, 186,787 tokens for the loop. Both classes `current`, `alerts`
+empty, anchor fresh. The differential rule compares candidate against the shipped repaired module on
+44–52 seeded inputs per revision and reports them, which is why the claim is "agrees with the reference
+on N inputs" and not "correct".
+
+**Recorded, not built:** the docs class's corpus id is still a label (fix condition written down);
+`wall.class_certified` carries neither corpus nor `p0`; and the corpus comparison can only see a corpus
+move once something measures under it.

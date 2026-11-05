@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.9.1 — 2026-11-04
+
+Three defects that all had the same shape — evidence attributed to something that is not an identity —
+and a correction to a claim v0.9.0 made.
+
+- **A differential rule, so a `test-repair` certificate means "agrees with the known-good repair".**
+  The corpus now ships the repaired module for every base revision, and a rule compares candidate
+  against reference on 44–52 inputs per revision generated at measurement time from a seed derived
+  from the base commit — so the inputs are fixed for that revision forever, unknown to the worker, and
+  chosen by the measurement rather than by the class's author. The claim a pass supports is exactly
+  "agrees with the reference on N generated inputs"; N is printed by the rule and pinned by a spec.
+- **The v0.9.0 refusal was the class's defect, not the model's.** The one attempt refused in each of
+  the first two loops was the _same_ patch: a repair that preserved a leading `..` — POSIX
+  `path.normalize` behaviour — refused because the reference drops it, while every visible case agreed
+  under both conventions. A hidden rule that cannot be discovered from visible evidence measures the
+  author's taste. The fixture now refuses to build if any declared edge the base revision already
+  answers correctly is not a visible case (61 such edges were invisible across 19 of 20 revisions), and
+  is deliberately narrow: making all 118 edges visible let the `bytes` lookup-table cheat certify
+  (measured).
+- **Re-measured against the fair corpus: 20 of 20 passes**, `samples=20 passes=20 certified`,
+  186,787 tokens for the loop. Both classes `current`, `alerts` empty.
+- **A certificate names the corpus it measured** (schema v5): `class_certificates.holdout_revision` is
+  written from the verdict that produced the certificate, and the `4 → 5` migration backfills existing
+  rows from the verdict each certificate names — an exact join, never the class's newest corpus and
+  never a wildcard. A row whose verdict names no corpus (or no longer exists) stays `NULL` and reads
+  stale, reason "predates corpus attribution". Without the backfill both live certificates would have
+  expired on a schema change alone, which would have meant re-spending 6.4 M tokens re-measuring an
+  unchanged corpus. The backfill is a bridge with a deletion condition, recorded in the migration and
+  the runbook.
+- **A corpus id is now an identity, not a date.** The date-based id let a rebuild mint different rules
+  under the same name, and recency compares names — so a certificate could read `current` while naming
+  evidence it was never measured against. The `test-repair` id is content-addressed
+  (`h-test-repair-real-2026-11-04-ffa87379`: sha256 over every rule, probe, reference module, suite
+  wrapper, index and manifest scenario), fixture commits carry a fixed date so unchanged content cannot
+  mint a new id, and the build re-derives the digest from the final directory. The docs class's id is
+  still a label; that is recorded as a known weakness with its fix condition, because expiring valid
+  evidence for a naming improvement is the trade this project refuses.
+- **Two generator defects, both the "artifacts its own gate refuses" class:** `test-repair-artifacts.sh`
+  emitted specs whose restatement scored `restateOverlap=0.357` against a `0.500` floor (every
+  regenerated spec was refused, leaving an empty `units.txt`), and `plan-units.sh` refused a
+  second run without saying which revisions were taken. Both fixed and pinned.
+
+**Known weakness, stated:** the `wall.class_certified` ledger event carries neither the corpus nor `p0`,
+so a ledger-only reader cannot tell which holdout made a certificate true. Costed, not built.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed. Evidence:
+`docs/planning/dark-factory-dsh/evidence/phase-19-test-repair.md` (addendum).
+
 ## v0.9.0 — 2026-11-03
 
 A second task class is certified, and it is the opposite of the first one: `test-repair` is a class
