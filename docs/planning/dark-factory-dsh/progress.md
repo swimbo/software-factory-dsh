@@ -575,3 +575,30 @@ file, so it refuses immediately. A persistent outage still pages at exit 8, and 
 
 **Proven by three mutations:** no retry → both retry specs red; no `ConnectTimeout` → the timeout spec
 red; retry everything → the garbled-anchor spec red (2/1/1 failed respectively), restored 33/33.
+
+### Round 16 — the third class, and the honest answer (2026-11-06)
+
+**Built `type-repair` and certified it 19 of 20.** Base revisions fail `tsc --noEmit` under strict while
+behaving correctly; the cheap repair (cast/`any`/ignore/loosen) is green on the visible signal, which is
+why the class looked like it could finally make the gate refuse a class. It did not: the model fixed
+every measurable revision, at 10× the token cost (1,907,300 vs 186,787; median 59,046/unit vs 8,895).
+The single non-pass was a 2 h 23 min worker hang, recorded `unknown` — infrastructure, not a wrong
+answer.
+
+**So the interesting number did not arrive.** Three classes certified, zero merit-based class refusals,
+and `k = 18` still uncalibrated: β(0.9) = 0.6769 says a truly-90%-reliable class fails to certify about
+a third of the time. Recorded in `evidence/phase-20-type-repair.md` rather than smoothed over.
+
+**Three defects found by running it, not by reading it:** the generator's planner printed the loop
+without submitting (so `units.txt` could not exist — fixed); `env.sh` carries the offline
+`FACTORY_EXECUTOR=fake`, which a live loop must unset; and a missing worker profile leaves a live
+45-minute lease on an attempt that never started, which `recover` will not touch and which stops a
+re-run with `UNIT_ALREADY_TERMINAL`. Also: an `unknown` verdict from a transport failure cannot be
+re-measured after the attempt directory is gone, and `samples` counts that unknown as a sample.
+
+**One flake, recorded:** the first v0.10.0 gate run failed `apps/panel/src/dsh-version.test.ts` on two
+specs that took exactly `PROBE_TIMEOUT_MS` (1,505 ms and 1,502 ms — the timeout, not a wrong answer):
+the probe spawns a real `/bin/sh` script and under full-suite load on this machine it can miss a 1.5 s
+budget. Re-run on an idle machine: 9/9 green, and the whole gate 7 passed / 1 skipped / 0 failed. The
+flake is written down rather than smoothed: the probe cannot distinguish "timed out" from "no version"
+and both are `null` by design, so a loaded machine makes two specs read as the wrong answer.

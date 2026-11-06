@@ -39,7 +39,8 @@ green.**
 
 ```bash
 export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"   # 26.12.1, or preflight refuses
-source "$HOME/.factory/certification-type-repair/env.sh"          # FACTORY_* for the wall
+source "$HOME/.factory/certification-type-repair/env.sh"          # the wall's variables…
+unset FACTORY_EXECUTOR FACTORY_MODEL_ID                             # …minus the two that are offline-only
 export FACTORY_HOME="$HOME/.factory/certification-type-repair/home"
 export FACTORY_HOLDOUT_ROOT="$HOME/.factory/certification-type-repair/holdout"
 export FACTORY_HOLDOUT_TASK_CLASS="type-repair"
@@ -56,6 +57,25 @@ export DSH_BIN="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cl
 
 `FACTORY_HOME` must be empty or hold no store: a unit's identity is `(repo, slug, revision)`, so a
 second planning run is a collision, not a re-measurement.
+
+The artefacts' `env.sh` is the **offline** environment: it sets `FACTORY_EXECUTOR=fake` (a scripted
+worker, no model) and `FACTORY_MODEL_ID=fixture/offline-scripted-worker`. Sourced unmodified, a live
+loop stops at the first unit with `EXECUTOR_UNAVAILABLE … needs a scenario` — nothing is dispatched and
+no budget is reserved, so it costs a run and tells you why.
+
+**Provision the DSH homes first**, or the first dispatch fails with
+`no provisioned factory-worker profile at …/dsh-home/worker/profiles/factory-worker`:
+
+```bash
+FACTORY_HOME="$HOME/.factory/certification-type-repair/home" bash scripts/provision-dsh-home.sh
+```
+
+**That failure leaves a live lease for 45 minutes** (`LEASE_TTL_MS` in `packages/core/src/engine.ts`)
+on an attempt that never started: `factory recover` will defer the retry until the lease expires, and
+re-running the loop stops immediately with `UNIT_ALREADY_TERMINAL … is dispatched`. Nothing was spent.
+Wait out the TTL (`factory recover` and `factory status <unitId>` say so), or plan against a fresh
+store — do not abort the unit and re-plan it under a new revision, because `samples` counts distinct
+base revisions and an aborted unit would quietly cost you one of the twenty.
 
 The credential is read per run and never stored:
 
@@ -197,19 +217,37 @@ faithfulness replay, three holdout scenarios on both sides, the visible check, a
 
 ## 9. The proof that this works, as measured
 
-Offline, against the real wall and throwaway stores, before any spend:
+**Offline, before any spend** (26 specs; the fixture table, the rules on both sides, the scripted
+cheats, the AST scan, six measured attempts with `samples` 1→6 and the certificate staying
+`insufficient`, and all six cheats refused through the real wall). Mutations: deleting the
+`no-escape-hatches` rule lets the `as`-cast candidate pass and certify; deleting the differential rule
+lets a behaviour-changing cast through.
 
-- **26 specs** across `type-repair.test.ts`, `type-repair-artifacts.test.ts`,
-  `type-repair-pipeline.test.ts`, `type-repair-certification.test.ts` — the fixture table (20 revisions,
-  each failing the strict check and none failing at runtime), the class rules on both sides, the
-  scripted cheats, the AST scan, six measured attempts with `samples` 1→6 and the certificate staying
-  `insufficient`, and the through-the-wall refusals of all six cheats.
-- **Mutations:** deleting the `no-escape-hatches` rule lets the `as`-cast candidate pass and certify;
-  deleting the differential rule lets a behaviour-changing cast through. Both were run and are recorded
-  in the commit message.
-- **Not yet measured: the live loop.** No paid attempt has been made for this class. Until one is, the
-  honest status of this runbook is "the offline path is proven, the live path is unproven" — the §9
-  numbers above are offline only.
+**Live, once** (2026-11-05/06, `FACTORY_MODEL_ID=auto`, corpus `h-type-repair-2026-11-05-027a32e2`):
+
+```
+19 pass, 1 unknown → certificate cert:V-27c814c2ac68
+samples=20  passes=19  m=20  k=18  alpha=0.07548367378849634  outcome=certified
+tokens 1,907,300 (in 1,838,904 / out 68,396); median 59,046/unit; max 396,456
+```
+
+The unknown is **not** a wrong answer: one worker hung for 2 h 23 min, produced no readable receipt,
+and the wall recorded `unknown` (`receipt_unavailable, acceptance_unmeasured, suite_unknown,
+holdout_unavailable, delta_unmeasured, no_change`). `factory run <unit> --verify-only` could not
+re-measure it either, because the attempt directory no longer existed — that is recorded as a defect,
+not as a class property.
+
+**What that means for the question this class was built to answer: it did not answer it.** The gate has
+still never refused a class on merit. Difficulty showed up as _cost_ (10× the `test-repair` loop), not
+as _failure rate_. Two things follow, and both are stated in
+[phase-20-type-repair.md](../planning/dark-factory-dsh/evidence/phase-20-type-repair.md):
+
+- **The certificate is real but sits in a dedicated store** (`~/.factory/certification-type-repair/home`),
+  not in `~/.factory`, so the live `audit --certifications` still reports two classes. Making it the
+  third means spending another ~1.9 M tokens against the live store — not done.
+- **`k = 18` remains uncalibrated.** β(0.9) = 0.6769, β(0.8) = 0.2061: a truly-90%-reliable class still
+  fails to certify about a third of the time. No class has ever landed near that boundary, so the
+  operating point is strict on paper and untested in practice.
 
 ## Related
 

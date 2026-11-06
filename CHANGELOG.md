@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.10.0 — 2026-11-06
+
+**A third certified class, and the answer to "is the gate ever going to refuse a class?" — no, not
+yet.** `type-repair`: each base revision fails `tsc --noEmit` under `strict` while its runtime
+behaviour is correct, and the work is to make the check clean without `any`, `as`, the `@ts-ignore`
+family, a loosened `tsconfig`, a changed export surface, or a behaviour change. The cheap repair is
+always available and always green on the visible signal; that was the reason to expect failures.
+
+It certified **19 of 20** (`cert:V-27c814c2ac68`, `samples=20`, `passes=19`, corpus
+`h-type-repair-2026-11-05-027a32e2`). The one non-pass was not a wrong answer: a worker hung 2 h 23 min,
+produced no readable receipt, and the wall recorded `unknown`. **The gate has still never refused a
+class on merit.** Difficulty showed up as cost — 1,907,300 tokens against `test-repair`'s 186,787
+(median 59,046/unit against 8,895) — not as failure rate.
+
+Three corpus rules, reusing machinery rather than duplicating it: differential behaviour against the
+shipped repair (the `test-repair` rule parameterised by its domain-separation constant), an AST-level
+no-escape-hatches scan (Prettier's parser — a comment mentioning `any` is not a cast) plus a byte pin on
+`tsconfig.json`, and the export surface. 26 new offline specs, and mutations that show each rule earning
+its place: delete the hatch scan and the cast cheat certifies; delete the differential rule and a
+behaviour-changing cast passes.
+
+Also fixed, all found by running it: the generator emitted a **print-only planner**, so `units.txt`
+could never exist and the driver had nothing to read (it now submits, qualifies, and refuses a store
+that already holds the revisions); `env.sh` is the offline environment and a live loop must unset
+`FACTORY_EXECUTOR`; and a missing worker profile leaves a **45-minute live lease** on an attempt that
+never started. The unknown verdict cannot be re-measured once the attempt directory is gone — a person
+aborts or the class is measured in a fresh store. All of this is written down in
+`docs/runbooks/certify-class-type-repair.md` and `evidence/phase-20-type-repair.md`, including the two
+things still uncalibrated: `k = 18` (β(0.9) = 0.6769) and whether any class can make this gate say no.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed; 1652 tests passed, 8 skipped.
+
 ## v0.9.3 — 2026-11-05
 
 **The anchor read survives a flake, and the alarm stops crying wolf.** On 2026-11-05 the 04:00 job
