@@ -337,37 +337,63 @@ payload change next round would make "which certificate authorised this attempt"
 an inference. And this gate has never fired on real evidence: no class has ever been measured
 `not-certified`, so its first true firing is still ahead.
 
-## 12. Scheduled re-certification (item 4b): the detector already ships, the spender is the decision
+## 12. Scheduled re-certification (item 4b): built, and fenced on a per-class budget
 
 The round list asks for "scheduled re-certification (needs your call on auto-spend, since it spends
-without a person)". What exists today, verified rather than assumed:
+without a person)". Built in full, with the spend fenced on the number that was missing:
 
 | half | state | where |
 | --- | --- | --- |
-| detects a stale or never-certified class | **built** | `factory alerts` → `CERT_STALE` / `CERT_NEVER`, severity `integrity`, one alert per class |
-| runs on a schedule | **built** | launchd `ai.factory.alerts` at 04:00 → the alert job → `#dsH` |
-| says what to do about it | **built** | each alert's `investigation` line names the class and `scripts/certify-class.sh` |
-| runs the attempts **itself** | **not built, on purpose** | it spends money with nobody in the loop |
+| detects a stale or never-certified class | **built** (earlier) | `factory alerts` → `CERT_STALE` / `CERT_NEVER`, severity `integrity`, one alert per class |
+| runs on a schedule | **built** (earlier) | launchd `ai.factory.alerts` at 04:00 |
+| projects what re-certifying would cost | **built this round** | `factory audit --certifications`: measured usage facts → median per attempt × attempts still needed |
+| decides whether a spend is permitted | **built this round** | `apps/cli/src/recertify-plan.ts`, six named decisions |
+| runs the attempts itself, on a schedule | **built this round, off by default** | `scripts/recertify-due.sh --spend` + launchd `ai.factory.recertify` at 05:00 |
 
-The nightly job already tells the operator which class has expired and what would clear it. That is the
-free half of item 4b, and it was already in place — worth saying plainly rather than "building" it twice.
+**The plan, on the live store (2026-11-07):**
 
-**What auto-spend would actually cost**, from measurements this store recorded (not estimates):
+```
+$ factory audit --certifications
+  docs-hygiene  never-certified
+  docs-typo-fix  current
+  test-repair  current
+  type-repair  current
+  RE-CERTIFY docs-hygiene  19 attempt(s) to m=20  1453386 tokens projected
+    (19 attempts × median 76494 over 2 measured)  refused-no-budget:
+    no budget for docs-hygiene; set FACTORY_RECERTIFY_BUDGET_TOKENS=docs-hygiene=<tokens> to allow a spend
+```
 
-| class | state | attempts to reach m | measured cost of a full certificate |
-| --- | --- | --- | --- |
-| `docs-hygiene` | never-certified (1 of 20) | 19 | unknown for this class; the same-shaped classes ran 186,787 tokens (docs-typo-fix) and 1.94 M (type-repair) for 20 attempts |
-| `docs-typo-fix` | current | 0 | 186,787 tokens per full loop, median 8,895/unit |
-| `test-repair` | current | 0 | 186,787 tokens per full loop, median 8,895/unit |
-| `type-repair` | current | 0 | 1,944,675 tokens, median 95,775/unit |
+`1,453,386 tokens projected` is a *measurement*, not an extrapolation from another class: the certificate
+names its verdicts, the verdicts name their attempts, and those attempts' metered usage facts give the
+median. `refused-no-budget` is the shipped state.
 
-So a scheduled re-certification of one class is a five-figure to seven-figure token spend depending on the
-class, and the variance between classes is 10× — a single global cap would either starve the cheap class
-or let the expensive one run unbounded. **The number the operator has to supply is not one cap but a
-per-class budget**, and the alert already names the class, so the decision can be made class by class.
+**The six decisions**, each with a spec in `apps/cli/src/recertify-plan.test.ts`:
 
-**Recommendation (unchanged, now with the numbers):** keep the spender unbuilt until (a) a class exists
-whose re-certification is worth automating, and (b) the operator sets a per-class token budget it must
-respect. Until then the nightly alert is the scheduler: it wakes a person, and the person spends — which
-is the same rule the promotion gate follows. The alternative, a job that decides by itself, would be the
-first component in this system that spends without a human, and it should not be the last thing built.
+| decision | when | spends |
+| --- | --- | --- |
+| `not-due` | newest certificate current under the running policy and model | no |
+| `would-spend` | due, measured projection within the class budget, units file present | **yes** |
+| `refused-no-budget` | due, no budget for this class (default) | no |
+| `refused-unknown-estimate` | due, no measured attempt behind the class | no |
+| `refused-over-budget` | projection exceeds the class budget | no |
+| `refused-no-units` | budget fits, no `<class>.txt` of pre-submitted units | no |
+
+`refused-unknown-estimate` is L3 applied to money: an estimate that cannot be measured never authorises
+a spend, so a class with no measured attempts is refused rather than spent against a guess — the same
+rule as every other gate here, which is what makes it a rule and not a mood.
+
+**Why the budget is per class and not one number.** Measured certificates in this store cost 186,787
+tokens (`docs-typo-fix`, `test-repair`) and 1,944,675 (`type-repair`) — a 10× spread. One global cap
+either starves the cheap class or lets the expensive one run unbounded, so the operator's control is a
+map (`FACTORY_RECERTIFY_BUDGET_TOKENS="<class>=<tokens>,…"`), and a malformed entry is a usage error
+rather than a silently dropped cap.
+
+**What is deliberately not automated:** enabling the spend. The plist ships with the variable absent, so
+the job reports and refuses nightly; turning it on is one line in
+`deploy/launchd/ai.factory.recertify.plist` (documented in `docs/runbooks/certify-class.md` §10). The
+specs that matter are the refusals: a refused class never reaches the driver, a plan that cannot be read
+exits 9 without spending, and a failing driver stops the run instead of grinding through the next class.
+
+**Not yet true:** this job has never spent anything — no class has ever had a budget set, and the live
+plan is `refused-no-budget`. Its first real spend is an operator decision, and its first *successful*
+spend is a fact nobody has observed yet.

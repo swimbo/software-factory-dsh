@@ -508,6 +508,58 @@ per run with `samples: 1` — the criteria log was created and discarded per eva
 the audit's projection join described in §7: both were found by running the loop, and both now have a
 spec that goes red when the fix is reverted.
 
+## 10. Doing it on a schedule (and the one number that permits a spend)
+
+A certificate expires: the corpus moves, the policy digest changes, or the model changes under it. The
+nightly `factory alerts` job already says so (`CERT_STALE` / `CERT_NEVER`), but it can only tell a person,
+and the runbook above is a person-shaped loop. `deploy/launchd/ai.factory.recertify.plist` is the
+scheduled half: at 05:00 (after the anchor at 03:00 and the alerts at 04:00) it runs
+
+```bash
+FACTORY_HOME=~/.factory bash scripts/recertify-due.sh --spend
+```
+
+which asks `factory audit --certifications --json` for a plan, and runs `scripts/certify-class.sh` for a
+class **only** when the plan's decision is `would-spend`.
+
+**The plan, per class** (`factory audit --certifications`, human and JSON):
+
+| decision                   | when                                                                      | spends? |
+| -------------------------- | ------------------------------------------------------------------------- | ------- |
+| `not-due`                  | the newest certificate is current under the running policy and model      | no      |
+| `would-spend`              | due, a measured projection fits the class budget, and a units file exists | **yes** |
+| `refused-no-budget`        | due, and no budget was set for this class (the default)                   | no      |
+| `refused-unknown-estimate` | due, and no measured attempt behind the class — the cost is `unknown`     | no      |
+| `refused-over-budget`      | the measured projection exceeds the class budget                          | no      |
+| `refused-no-units`         | a budget fits, but no `<class>.txt` of pre-submitted units exists         | no      |
+
+The projection is this store's own measurement: a certificate names its verdict, the verdict its
+attempt, the attempt's metered usage is the cost, and the class median × attempts still needed is the
+projection. On 2026-11-07 the live store reported `docs-hygiene`: 19 attempts to `m=20`, median 76,494
+tokens over 2 measured attempts, **1,453,386 tokens projected**, `refused-no-budget`.
+
+**The one number that permits a spend** is the class budget, and it is per class on purpose:
+
+```bash
+# ~/.factory/recertify.env, or the EnvironmentVariables block in the plist
+FACTORY_RECERTIFY_BUDGET_TOKENS="docs-hygiene=2000000,type-repair=2500000"
+FACTORY_RECERTIFY_UNITS_DIR="$HOME/.factory/recertify-units"
+```
+
+Unset is the shipped state and means **no class may spend** — a job can exist before a spender does, and
+turning auto-spend on is one line rather than a code change. It is per class because a full certificate
+costs 186,787 tokens for `docs-typo-fix` and 1,944,675 for `type-repair`: a single global cap would either
+starve the cheap class or let the expensive one run unbounded. A malformed entry is a usage error (exit
+`2`), because a typo that silently drops a cap is a budget that lets a class spend.
+
+**What the job will not do:** retry a failed driver run (the next night is the retry), invent units
+(`refused-no-units`), or spend on an unmeasurable class (`refused-unknown-estimate` — an unknown estimate
+never authorises a spend). After a spend it raises the same notification path every other alert uses, so
+there is one transport and one log: `~/.factory/recertify.log`.
+
+**Dry run, always safe:** `bash scripts/recertify-due.sh` without `--spend` prints the plan and spends
+nothing.
+
 ## Related
 
 - [certify-class-test-repair.md](certify-class-test-repair.md) — the second class (`test-repair`):

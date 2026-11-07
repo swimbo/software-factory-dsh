@@ -12,6 +12,7 @@
  * The audit is read-only and works on a quarantined store, so everything here goes through the same
  * store the CLI opens — no fake, no `--force`.
  */
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -170,6 +171,102 @@ describe('factory audit --certifications', () => {
     expect(result.stderr).toContain('OPERATING POINT  m=20 k=18 p0=0.95');
     expect(result.stderr).toContain('is a screen, not a test');
     expect(result.stderr).toContain('0.67692680518946603571');
+  });
+
+  it('publishes a re-certification plan per class, and the plan spends nothing', () => {
+    const home = tempHome();
+    seedCertificate(
+      home,
+      { taskClass: 'docs-hygiene', outcome: 'insufficient', passes: 0, samples: 1 },
+      1,
+    );
+    seedCertificate(
+      home,
+      { taskClass: 'docs-hygiene', outcome: 'insufficient', passes: 0, samples: 2, slug: 'other' },
+      2,
+    );
+    const result = audit(home, { FACTORY_MODEL_ID: 'auto' });
+    expect(result.status).toBe(EXIT.integrity);
+    const payload = jsonOf(result);
+    const plan = payload['recertification'] as {
+      budgetVariable: string;
+      entries: Array<Record<string, unknown>>;
+    };
+    expect(plan.budgetVariable).toBe('FACTORY_RECERTIFY_BUDGET_TOKENS');
+    const entries = plan.entries;
+    expect(entries).toHaveLength(1);
+    // 2 judged attempts → 18 more to reach m=20. No usage facts were seeded, so the cost is
+    // `unknown` — and an unknown estimate is a refusal, never "0 tokens, under budget". It is the
+    // *first* refusal: a budget cannot make an unmeasurable spend safe, so the plan does not even
+    // reach the budget question.
+    expect(entries[0]).toMatchObject({
+      taskClass: 'docs-hygiene',
+      samples: 2,
+      m: 20,
+      remaining: 18,
+      decision: 'refused-unknown-estimate',
+    });
+    expect((entries[0]?.['estimate'] as Record<string, unknown>)['basis']).toBe('unknown');
+    // The human surface says the same thing in a sentence an operator can act on, and it names the
+    // variable that would change the answer.
+    expect(result.stderr).toContain('RE-CERTIFY docs-hygiene  18 attempt(s) to m=20');
+    expect(result.stderr).toContain('refused-unknown-estimate');
+    expect(result.stderr).toContain('an unknown estimate never authorises a spend');
+  });
+
+  it('would spend only when a class budget covers a measured projection', () => {
+    const home = tempHome();
+    const unitId = seedCertificate(
+      home,
+      { taskClass: 'docs-hygiene', outcome: 'insufficient', passes: 0, samples: 1 },
+      1,
+    );
+    // A measured attempt: the usage fact is what turns `unknown` into a projection.
+    const store = openStore({ dir: join(home, 'state') });
+    const verdict = store.latestVerdictForUnit(unitId);
+    if (verdict === null) throw new Error('seeded verdict is missing');
+    store.recordUsage({
+      usageId: `usg-${verdict.attemptId}`,
+      unitId,
+      attemptId: verdict.attemptId,
+      tokensIn: 70_000,
+      tokensOut: 6_494,
+      costUsd: null,
+      gatewayRequestId: null,
+      signedAt: FIXED_NOW,
+      ceilingCrossed: false,
+    });
+    store.close();
+
+    const unitsDir = join(home, 'units');
+    mkdirSync(unitsDir, { recursive: true });
+    writeFileSync(join(unitsDir, 'docs-hygiene.txt'), 'U-placeholder\n');
+
+    const withBudget = audit(home, {
+      FACTORY_MODEL_ID: 'auto',
+      FACTORY_RECERTIFY_UNITS_DIR: unitsDir,
+      FACTORY_RECERTIFY_BUDGET_TOKENS: 'docs-hygiene=2000000',
+    });
+    const entries = (jsonOf(withBudget)['recertification'] as { entries: unknown[] }).entries;
+    const entry = entries[0] as Record<string, unknown>;
+    expect(entry['decision']).toBe('would-spend');
+    expect(entry['estimate']).toEqual({
+      basis: 'measured',
+      medianTokensPerAttempt: 76_494,
+      measuredAttempts: 1,
+      projectedTokens: 76_494 * 19,
+    });
+
+    // The same store with a cap below the projection refuses the spend and says by how much.
+    const tooTight = audit(home, {
+      FACTORY_MODEL_ID: 'auto',
+      FACTORY_RECERTIFY_UNITS_DIR: unitsDir,
+      FACTORY_RECERTIFY_BUDGET_TOKENS: 'docs-hygiene=100000',
+    });
+    const refused = ((jsonOf(tooTight)['recertification'] as { entries: unknown[] }).entries[0] ??
+      {}) as Record<string, unknown>;
+    expect(refused['decision']).toBe('refused-over-budget');
+    expect(String(refused['reason'])).toContain('exceeds the 100000-token budget');
   });
 
   it('exits 9 when the policy version changed, and says which versions', () => {

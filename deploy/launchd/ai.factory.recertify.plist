@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ai.factory.recertify: the scheduled re-certification, with the spend fenced per class.
+
+  Copy to ~/Library/LaunchAgents/ and load it. Replace @REPO@, @NODE_BIN@ and @NODE_BIN_DIR@ before you
+  do; all three are absolute on purpose, because launchd does not read your shell profile and a relative
+  path here would fail at 05:00 and nowhere else.
+
+  What it does: scripts/recertify-due.sh runs in spend mode. It asks the audit verb for its JSON plan
+  (what re-certifying each class would cost, from this store's own usage facts) and runs the class
+  certification driver for a class ONLY when the plan's decision is "would-spend". Every other decision
+  is printed and skipped: no budget, an unknown estimate, a projection over the class budget, or no
+  pre-submitted units file.
+
+  The budget is per class and is the operator's control. It is set as
+  FACTORY_RECERTIFY_BUDGET_TOKENS="<class>=<tokens>,<class>=<tokens>" (see the runbook for the exact
+  spelling). It is deliberately NOT set below. Unset means no class may spend, which is the state this
+  job ships in: a job can exist before a spender does, and enabling auto-spend is one line here rather
+  than a code change. The per-class shape is the decision, not a detail: a full certificate costs
+  186,787 tokens for docs-typo-fix and 1,944,675 for type-repair, so one global cap would either starve
+  the cheap class or let the expensive one run unbounded.
+
+  Why 05:00: the anchor job runs at 03:00 and the alerts job at 04:00. A re-certification that ran
+  before the alert that explains it would spend against a state nobody was told about.
+
+  What it does not do: retry a failed driver run (the next night is the retry), invent units (a class
+  with no units file is refused by the plan), or notify twice. After a spend it raises the same
+  notification delivery every other alert uses, so there is one transport and one log worth reading.
+
+  Sleep and wake: StartCalendarInterval runs a missed occurrence on the next wake and coalesces several
+  into one (launchd.plist(5)); a host that is off for a week spends nothing and says nothing. That limit
+  is in docs/runbooks/certify-class.md rather than papered over here.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.factory.recertify</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd @REPO@ &amp;&amp; bash scripts/recertify-due.sh --spend</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@NODE_BIN_DIR@:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- The store being acted on: the operator's real factory home, not a throwaway. -->
+    <key>FACTORY_HOME</key>
+    <string>/Users/bo/.factory</string>
+    <!-- One `<task-class>.txt` per class, each line a pre-submitted dark unit id. Missing file means
+         the plan refuses that class (`refused-no-units`) — the driver will not invent specs. -->
+    <key>FACTORY_RECERTIFY_UNITS_DIR</key>
+    <string>/Users/bo/.factory/recertify-units</string>
+    <!-- Deliberately absent: FACTORY_RECERTIFY_BUDGET_TOKENS. No budget, no spend. -->
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>5</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/bo/.factory/recertify.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/bo/.factory/recertify.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

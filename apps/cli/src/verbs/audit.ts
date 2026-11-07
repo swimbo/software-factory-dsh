@@ -11,6 +11,9 @@
  * verdict: the honest-claim discipline is not a footnote, and a CLI that omits it
  * is claiming more than the wall measured.
  */
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { contentHash, FactoryError } from '@factory/contracts';
 import type { LedgerEvent } from '@factory/contracts';
 import { legacyPolicyVersions } from '@factory/qualifier';
@@ -24,6 +27,12 @@ import {
 } from '@factory/wall';
 
 import { EXIT, UsageError } from '../exit.ts';
+import {
+  parseRecertifyBudgets,
+  planRecertification,
+  type RecertifyDueClass,
+  type RecertifyPlanEntry,
+} from '../recertify-plan.ts';
 import { field } from '../render/format.ts';
 import { boolOption, numberOption, textOption, type VerbInput, type VerbSpec } from './types.ts';
 
@@ -89,13 +98,15 @@ interface StoredCertificateView {
  *    judgement behind it. Reporting only the rows that exist would make that absence invisible,
  *    which is the exact failure L3 names.
  */
-function certificateReport(ctx: VerbInput['ctx']): {
+interface CertificationsReport {
   readonly judgements: readonly CertificateRecency[];
   readonly uncertifiedUnits: readonly string[];
   readonly basis: { readonly policyVersion: string; readonly modelId: string | null };
   readonly projectionPresent: boolean;
   readonly certificatesByClass: ReadonlyMap<string, readonly StoredCertificateView[]>;
-} {
+}
+
+function certificateReport(ctx: VerbInput['ctx']): CertificationsReport {
   const rows = ctx.store.classCertificates?.();
   const groups = new Map<string, StoredCertificateView[]>();
   for (const row of rows ?? []) {
@@ -164,6 +175,73 @@ function describeCorpus(corpus: string | null, side: 'certificate' | 'measuremen
 }
 
 /**
+ * What re-certifying each due class would cost, and whether a spend is permitted.
+ *
+ * The cost comes from the usage facts this store already holds: a certificate names its verdict, the
+ * verdict names its attempt, and the attempt's metered usage is the measured number — not an estimate
+ * from another class. A class with one judged attempt therefore has a real median (however thin) and a
+ * class with none has `unknown`, which never authorises a spend.
+ *
+ * The budget is per class and comes from the environment (`FACTORY_RECERTIFY_BUDGET_TOKENS`), read
+ * here because the audit is the surface the operator already looks at. Reading it does not spend
+ * anything: a spend needs `scripts/recertify-due.sh --spend`, and even that only runs classes whose
+ * decision is `would-spend`.
+ */
+function recertificationPlan(
+  ctx: VerbInput['ctx'],
+  report: CertificationsReport,
+  unitsDir: string | null,
+): readonly RecertifyPlanEntry[] {
+  const tokensByTaskClass = new Map<string, number[]>();
+  const certificates = ctx.store.classCertificates?.() ?? [];
+  for (const certificate of certificates) {
+    const verdict = ctx.store.getVerdict(certificate.verdictId);
+    if (verdict === null) continue;
+    const usage = ctx.store.usageForAttempt(verdict.attemptId);
+    if (usage.length === 0) continue;
+    let total = 0;
+    for (const row of usage) total += row.tokensIn + row.tokensOut;
+    const bucket = tokensByTaskClass.get(certificate.taskClass) ?? [];
+    bucket.push(total);
+    tokensByTaskClass.set(certificate.taskClass, bucket);
+  }
+
+  const classes: RecertifyDueClass[] = report.judgements.map((judgement) => {
+    // The counts come from the same row the *judgement* came from, exactly as the JSON block does:
+    // a class can hold an older `certified` row and a newer `insufficient` one, and the plan's
+    // "attempts still needed" must describe the row the state describes.
+    const certificate = judgedCertificate(
+      report.certificatesByClass.get(judgement.taskClass) ?? [],
+    );
+    return {
+      taskClass: judgement.taskClass,
+      state: judgement.state === 'current' ? 'current' : judgement.state,
+      samples: certificate?.samples ?? 0,
+      m: certificate?.m ?? DEFAULT_OPERATING_POINT.m,
+    };
+  });
+
+  const unitsFiles = new Map<string, string | null>();
+  for (const entry of classes) {
+    unitsFiles.set(
+      entry.taskClass,
+      unitsDir === null ? null : join(unitsDir, `${entry.taskClass}.txt`),
+    );
+  }
+  // A units file that does not exist is `null`, not a path that fails later: the plan's job is to say
+  // whether the spend can happen, and "the file is missing" is exactly the kind of no it exists for.
+  for (const [taskClass, file] of unitsFiles) {
+    unitsFiles.set(taskClass, file !== null && existsSync(file) ? file : null);
+  }
+
+  const budgets = parseRecertifyBudgets(ctx.env['FACTORY_RECERTIFY_BUDGET_TOKENS'], (message) => {
+    throw new UsageError(`USAGE: ${message}`);
+  });
+
+  return planRecertification({ classes, budgets, tokensByTaskClass, unitsFiles });
+}
+
+/**
  * The operating point with both halves of its risk, in the shape the certifications JSON carries.
  *
  * `alphaExact` is the ratified published number — P(a class that truly passes p0 fails certification).
@@ -210,6 +288,10 @@ export function runAudit(input: VerbInput): number {
       throw new UsageError('USAGE: --certifications audits classes; drop the unit id');
     }
     const report = certificateReport(ctx);
+    // The units directory is where the scheduled job keeps one `<class>.txt` per class. Read as a
+    // fact about the filesystem, never created here: an audit is read-only.
+    const unitsDir = (ctx.env['FACTORY_RECERTIFY_UNITS_DIR'] ?? '').trim();
+    const plan = recertificationPlan(ctx, report, unitsDir === '' ? null : unitsDir);
     const stale = report.judgements.filter((judgement) => judgement.state !== 'current');
     input.emit({
       kind: 'certifications',
@@ -249,6 +331,14 @@ export function runAudit(input: VerbInput): number {
       // of the second one. α alone was quotable as a strength; the 2026-11-07 ruling says the screen
       // half ships wherever α does (`findings.md` § DECIDED 2026-11-07).
       operatingPoint: operatingPointBlock(),
+      // What re-certifying each due class would cost, from this store's own usage facts, and whether a
+      // budget permits the spend. `no-budget` is the default state: the scheduled job reports and
+      // spends nothing, which is why a job exists before a spender does.
+      recertification: {
+        budgetVariable: 'FACTORY_RECERTIFY_BUDGET_TOKENS',
+        unitsVariable: 'FACTORY_RECERTIFY_UNITS_DIR',
+        entries: plan,
+      },
     });
     ctx.ui.err(
       `CLASS CERTIFICATIONS  under ${report.basis.policyVersion} (model ${report.basis.modelId ?? 'offline'})`,
@@ -281,6 +371,21 @@ export function runAudit(input: VerbInput): number {
         `${String(point.acceptanceAt.p)} is certified anyway with probability ` +
         `${String(point.acceptanceAt.exact)}`,
     );
+    for (const entry of plan) {
+      if (entry.state === 'current') continue;
+      const cost =
+        entry.estimate.projectedTokens === null
+          ? 'cost unknown (no measured attempt behind this class)'
+          : `${entry.estimate.projectedTokens.toString()} tokens projected (` +
+            `${entry.remaining.toString()} attempts × median ` +
+            `${String(entry.estimate.medianTokensPerAttempt)} over ` +
+            `${entry.estimate.measuredAttempts.toString()} measured)`;
+      ctx.ui.err(
+        `  RE-CERTIFY ${entry.taskClass}  ${entry.remaining.toString()} attempt(s) to m=${String(
+          entry.m,
+        )}  ${cost}  ${entry.decision}: ${entry.reason}`,
+      );
+    }
     for (const unitId of report.uncertifiedUnits) {
       ctx.ui.err(`  ${unitId}  unit verified with no class certificate: never certified`);
     }

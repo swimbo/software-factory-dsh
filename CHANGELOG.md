@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.13.0 — 2026-11-07
+
+**Scheduled re-certification, with the spend fenced on a per-class budget.** The nightly alert job could
+already tell a person that a class certificate had expired; nothing could act on it. Now
+`deploy/launchd/ai.factory.recertify.plist` runs `scripts/recertify-due.sh --spend` at 05:00, and the
+script spends only where `factory audit --certifications` says `would-spend`.
+
+The plan is per class and measured, not extrapolated: a certificate names its verdicts, the verdicts name
+their attempts, and those attempts' metered usage facts give the median. On the live store `docs-hygiene`
+projects **1,453,386 tokens** for the 19 attempts it still needs (median 76,494 over 2 measured) and is
+refused for want of a budget. Six decisions, each with a spec: `not-due`, `would-spend`,
+`refused-no-budget`, `refused-unknown-estimate`, `refused-over-budget`, `refused-no-units`. An unknown
+estimate never authorises a spend — L3 applied to money.
+
+The budget is per class (`FACTORY_RECERTIFY_BUDGET_TOKENS="<class>=<tokens>,…"`) because measured
+certificates cost 186,787 tokens for `docs-typo-fix` and 1,944,675 for `type-repair`: a 10× spread that no
+single cap fits. Unset is the shipped state and means no class may spend; turning auto-spend on is one
+line in the plist, documented in `docs/runbooks/certify-class.md` §10. A malformed budget entry is a usage
+error rather than a silently dropped cap.
+
+The specs that matter are the refusals: a refused class never reaches the driver, an unreadable plan exits
+9 without spending, and a failing driver stops the run instead of grinding through the next class
+(`scripts/recertify-due.test.ts`, `apps/cli/src/recertify-plan.test.ts`, and the audit's plan block in
+`apps/cli/src/audit.test.ts`).
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.12.0 — 2026-11-07
 
 **A class certificate now refuses work.** Until today a certificate was a row nothing read: the wall

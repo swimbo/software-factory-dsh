@@ -715,3 +715,36 @@ on a committed tree: 7 passed, 1 skipped, 0 failed, 1660 passed | 8 skipped test
 event field, next round); no class has ever been `not-certified`, so the new gate's first true firing is
 ahead; the paid item (a class hard for a different reason) is eligible now that (1) shipped, and the
 honest way to spend it is m≈150 re-certification, which needs a per-class budget decision first.
+
+### Round 21 — scheduled re-certification, fenced on a number the operator owns (2026-11-07)
+
+**Item 4b is built.** The detection half has shipped since phase 18 (`factory alerts` → `CERT_STALE` /
+`CERT_NEVER` every night); what was missing was any component that could *act*. Now
+`factory audit --certifications` projects, per due class, what re-certifying it would cost — measured from
+this store's own usage facts: certificate → verdict → attempt → metered tokens → median × attempts still
+needed — and names whether a spend is permitted. On the live store: `docs-hygiene`, 19 attempts to `m=20`,
+median 76,494 tokens over 2 measured, **1,453,386 tokens projected**, `refused-no-budget`.
+
+`scripts/recertify-due.sh` is the scheduled half (`deploy/launchd/ai.factory.recertify.plist`, 05:00 after
+the anchor and the alerts): plan-only by default, `--spend` runs the driver for classes whose decision is
+`would-spend` and nothing else. Six decisions, six specs: `not-due`, `would-spend`, `refused-no-budget`,
+`refused-unknown-estimate`, `refused-over-budget`, `refused-no-units`. L3 applies to money: an unknown
+estimate never authorises a spend, so an unmeasured class is refused rather than spent against a guess.
+
+**The number is per class, because the spread is 10×.** Measured full certificates: 186,787 tokens
+(`docs-typo-fix`, `test-repair`) against 1,944,675 (`type-repair`). A single global cap would starve the
+cheap class or let the expensive one run unbounded, so the control is
+`FACTORY_RECERTIFY_BUDGET_TOKENS="<class>=<tokens>,…"`, and a malformed entry is a usage error rather than
+a silently dropped cap. The plist ships with the variable **absent**: the job refuses nightly, and
+turning auto-spend on is one documented line. A job can exist before a spender does; that ordering is the
+point, not a compromise.
+
+**Recorded as untrue:** this job has never spent anything. No class has ever had a budget, the live plan is
+`refused-no-budget`, and no successful scheduled spend has ever been observed. The refusals are what the
+specs pin: a refused class never reaches the driver, an unreadable plan exits 9 without spending, and a
+failing driver stops the run instead of moving to the next class.
+
+**Still open from the round list:** the paid item (a class hard for a different reason). It is eligible
+now — (1) shipped — and the shape the evidence supports is `m≈150, k≈142` re-certification (the only
+operating point where a certificate accepts a truly-0.90 class only ~3 % of the time), whose cost the new
+plan now projects instead of guessing.
