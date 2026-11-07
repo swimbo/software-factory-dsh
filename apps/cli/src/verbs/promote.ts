@@ -123,6 +123,18 @@ export function runPromote(input: VerbInput): number {
   const signaturePem = resolveSignature(textOption(input.options, 'signature'));
   const phrase = promotionPhrase(unitId);
 
+  // The payload an operator has to sign, computed once: `sha256(unitId, verdictSha, approvedBy)`.
+  // `contentHash(verdict.verdict)` is the verdict hash, not the payload, and printing that one would
+  // be a different kind of lie.
+  const payloadToSign =
+    verdictRow === null
+      ? null
+      : promotionSignaturePayload({
+          unitId,
+          verdict: verdictRow.verdict,
+          approvedBy: textOption(input.options, 'signedBy') ?? 'operator',
+        });
+
   if (signaturePem === undefined) {
     // One renderer for the gate: the refusal and the prompt must be the same
     // block, or the operator has to compare two layouts to find the difference.
@@ -143,12 +155,18 @@ export function runPromote(input: VerbInput): number {
     for (const line of gateBlock.trimEnd().split('\n')) ctx.ui.err(line);
     throw new FactoryError(
       'PROMOTION_UNSIGNED',
-      'promotion requires a human signature; none was provided and none can be synthesized. ' +
+      // The payload hash belongs in the refusal: it is the *only* thing the operator has to sign, and
+      // the gates layer prints it (`packages/gates/src/promotion.ts`). This path used to say just "a
+      // human signature" while the runbook promised the hash, so an operator following the runbook
+      // looked for a value that was not printed (found 2026-11-07, the first live promotion).
+      'promotion requires a human signature' +
+        (payloadToSign === null ? '' : ` over ${payloadToSign.payload}`) +
+        '; none was provided and none can be synthesized. ' +
         `No artifact was written${verdictRow === null ? ', and there is no verdict to sign against either' : ''}.`,
       {
         unitId,
         gate: 'initial-production-deploy',
-        signaturePayload: verdictRow === null ? null : contentHash(verdictRow.verdict),
+        signaturePayload: payloadToSign?.payload ?? null,
       },
     );
   }

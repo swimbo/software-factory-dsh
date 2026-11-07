@@ -17,6 +17,14 @@ and fixed there: `apps/cli/src/render/status.ts` gates both the prompts and the 
 `isTerminal()`, and two e2e specs assert the pair — one ends a verified unit, one ends a unit whose
 verdict is `unknown` — after proving each fails without the guard.
 
+**And the refusal that was supposed to hand the operator a value never printed it.** `factory promote`
+with no `--signature` said "promotion requires a human signature" — without the payload hash, which is
+the one thing that has to be signed; the gates layer prints it, the CLI path did not, so the runbook's
+sample message was describing code that existed one layer down. The CLI now computes the payload once
+(`sha256(unitId, verdictSha, approvedBy)`) and names it in both the message and the error details.
+Verified against the live store: the printed value equals an independently computed
+`sha256:a8d31900d5fa8a78…`.
+
 **Also recorded, not shipped:** the first real intent against this repository was measured and passed
 (`U-052939402fae`, corpus `h-docs-hygiene-2026-11-07-b3f9c2e1`), and its promotion is waiting for the
 operator's signature. The corpus took two revisions to accept: the wall refused the first one for a

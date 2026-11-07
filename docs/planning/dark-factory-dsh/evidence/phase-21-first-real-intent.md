@@ -145,7 +145,7 @@ today $0.00/$20.00 default estimated · dispatch 0/1 attempt(s) default, 0/1 wal
 ```
 
 The gate on this tree: `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed
-(`docs/verification/2026-11-07T03-00-07Z/`, `117 passed | 2 skipped` test files, `1656 passed | 8 skipped`
+(`docs/verification/2026-11-07T03-05-36Z/`, `117 passed | 2 skipped` test files, `1656 passed | 8 skipped`
 tests). Two e2e specs assert the pair, and both were checked against the unfixed renderer: the promotion spec
 fails (the gate is still there), the unknown-verdict spec fails with
 `AssertionError: expected 'unknown' to be 'aborted'`. The panel already had both guards; only the CLI had
@@ -171,6 +171,20 @@ factory promote U-052939402fae --signature <sig> --signed-by operator --confirm 
 The typed phrase is the gate. **No machine ran this**: a signature that an agent can mint is not a human
 gate, and the runbook says so (`docs/runbooks/rotate-operator-key.md`, "The signature cannot be
 synthesized"). Until it runs, the honest status of this phase is: measured and verified, not promoted.
+
+What was checked about that step, because an operator should not discover a broken handoff at the last
+moment: the refusal path runs and writes nothing (`PROMOTION_UNSIGNED`, and
+`~/.factory/artifacts/U-052939402fae/` still does not exist), and the payload it names is the payload an
+independent computation produces — `sha256:a8d31900d5fa8a7866fdaea52150b03d9ceb645046eaa03fb6428a5c47b8aefc`,
+i.e. `contentHash({unitId, verdictSha, approvedBy})`. That message needed a fix to be true: the CLI path
+printed "requires a human signature" with no hash at all, while the runbook quoted the gates layer's
+message (which does print one). The CLI now computes the payload once and names it in the message and in
+the error details, so the runbook's transcript is the transcript the CLI actually prints.
+
+The keypair was also exercised end to end *without* signing a promotion: a self-test payload
+(`sha256:d7649b1787528d0e…`, not a verdict) was signed with the private half and verified against the
+published public half — `true` — so the handoff cannot fail on an unreadable key or a mismatched pair.
+The signature over the promotion payload itself is the one thing this document does not contain.
 
 What follows after the signature, in the order to do it: the promotion writes
 `$FACTORY_HOME/artifacts/<unit>/…/promotion.yaml` and `change.patch`; apply the patch to a clone of
