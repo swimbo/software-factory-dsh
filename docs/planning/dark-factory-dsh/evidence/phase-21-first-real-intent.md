@@ -397,3 +397,45 @@ exits 9 without spending, and a failing driver stops the run instead of grinding
 **Not yet true:** this job has never spent anything — no class has ever had a budget set, and the live
 plan is `refused-no-budget`. Its first real spend is an operator decision, and its first *successful*
 spend is a fact nobody has observed yet.
+
+## 13. Item 5, scoped: the next class is a whole-repo invariant, and the plan can now price it
+
+The round list's paid item asks for "the next class, hard for a different reason: a hidden convention or a
+whole-repo invariant, not more compiler errors". Item (1) shipped, so the gate on it is satisfied, and the
+choice below is made on evidence rather than taste.
+
+**The class: `import-hygiene`.** The invariant is the one this repository actually lives by and states in
+`AGENTS.md`: *every relative import carries its `.ts` extension*, because the tree is `module: nodest` +
+`verbatimModuleSyntax` + `erasableSyntaxOnly` and an extensionless import fails at runtime. It is a
+whole-repo invariant, not a per-file compile error: a change can add an extensionless import in a file
+that TypeScript accepts (a `.ts` sibling resolves) while `node file.ts` fails, or can import a type-only
+symbol as a value and break under `verbatimModuleSyntax` without any compiler error in the changed file.
+That is "hard for a different reason" by construction: the visible signal (tsc) is green exactly when the
+hidden convention is violated.
+
+**Why this one and not a cleverer one:** the corpus can be written as rules over the repo's own source
+(the same shape as `readme-no-doubled-words`), the repair is mechanical enough for a worker, and the
+failure mode is falsifiable — `node` either resolves the import or it does not. A class whose oracle were
+a style preference would be a class that measures taste, which this system explicitly refuses to do.
+
+**What building it costs, in the shape the earlier classes used:**
+
+| piece | what it is | cost |
+| --- | --- | --- |
+| corpus | rules (extension present; type-only symbols imported with `import type`; no `enum`/`export =`) + a guard suite, filed under `holdout/import-hygiene/<rev>/` | free, ~half a day |
+| fixtures | 20 base/repair revision pairs where the base violates the rule and the repair is the minimal fix (the test-repair shape: a temp-root farm, three revisions built by `e2e/certification/artifacts.test.ts`) | free, ~a day |
+| units | 20 pre-submitted dark specs, one per fixture revision | free |
+| certification | 20 measured attempts, `k=18` needed to certify | **paid**, and now projected rather than guessed |
+
+**The projection is the new part.** `factory audit --certifications` reports, per class, median
+tokens/attempt × attempts still needed. On today's live store that is 76,494 tokens/attempt for
+`docs-hygiene`; an `import-hygiene` attempt should land in the same range as `type-repair` (59,046 median)
+because the work is source edits with a compile-free oracle, giving a certificate in the 1.2–1.9 M token
+range. That is the round list's "~2 M tokens", and it is now a number the plan computes for the class
+before a token is spent — the same fence item 4b just built.
+
+**What is deliberately not started:** the fixtures. Building 20 base/repair pairs is the expensive *time*
+part and there is no way to certify a class without them, so the next round opens with the fixture farm
+(the corpus and the farm are free; only the certification loop spends). Until a class is certified at
+`m=20`, every unit in it is `insufficient` by construction and the dispatch gate lets it through — which
+is correct, and is why this class cannot be "half certified".
