@@ -666,8 +666,9 @@ still pass the wall. Both are in the evidence file's §9.
 **Housekeeping:** `main` fast-forwarded to the PR merge (`1fc3ab8`) and pushed; `feat/dark-factory-dsh`
 moved to the same commit, so all four refs agree and the launchd jobs run the merge line.
 
-**Still open:** the signature (above); `k = 18` uncalibrated (β(0.9) = 0.6769, no class near the
-boundary); no class certificate for any real repository; a corpus that consumes the repo's own gates; a
+**Still open:** the signature (above); `k = 18` uncalibrated — at m=20 it certifies a class whose true pass rate is 0.90 about two times in
+three (`accept@0.90 = 0.677`), and raising `k` only refuses good classes; the numbers and the three
+options are in the evidence file's §10, and the ruling is the operator's; no class certificate for any real repository; a corpus that consumes the repo's own gates; a
 `worker_timeout` wall reason; a re-dispatch path for transport `unknown`. Next in line and not started:
 a dispatch path that *consumes* a class certificate, and scheduled re-certification (both need the
 operator's call on auto-spend).

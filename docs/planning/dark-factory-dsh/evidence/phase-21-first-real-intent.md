@@ -228,3 +228,39 @@ waiting to happen.
   in the corpus; a docs patch that breaks the formatter would pass the wall. Recorded, not fixed.
 - **`samples` for the class.** One unit that passed does not certify anything, which the
   `class-certification` row says in words.
+
+## 10. The `k = 18` ruling, with the numbers it needs
+
+ND1 ratified `m = 20, k = 18, p0 = 0.95` before any class existed. The number that was published
+alongside it is α = `0.07548367378849634297` — P(a class that truly passes 95% **fails** certification).
+What was never published by a decision is the other half: how often the gate accepts a class that is
+*worse* than 95%. `certificationRisk` computes it exactly, and re-run for this phase:
+
+| operating point | accepts a truly-0.99 class | accepts 0.97 | accepts 0.95 | accepts 0.90 | accepts 0.85 | refuses a truly-0.95 class (α) |
+| --- | --- | --- | --- | --- | --- | --- |
+| **m=20, k=18 (shipped)** | 0.999 | 0.979 | 0.925 | **0.677** | 0.405 | 0.0755 |
+| m=20, k=19 | 0.983 | 0.880 | 0.736 | 0.392 | 0.176 | 0.2642 |
+| m=20, k=20 | 0.996 | — | 0.358 | 0.122 | 0.012 | 0.6415 |
+| m=150, k=142 | 1.000 | 0.962 | 0.664 | **0.031** | 0.000 | 0.3362 |
+
+Read the third row of the shipped line: **a class whose true pass rate is 90% is certified about two
+times in three.** Raising `k` at m=20 does not fix that — it buys discrimination by refusing good
+classes (k=19 rejects a truly-95% class 26% of the time). The reason is arithmetic, not taste: separating
+p0=0.95 from p1=0.90 at α=0.05 and β=0.20 needs roughly 150 samples per class, so m=20 supports a
+*screen* and cannot support a *test*.
+
+The ruling this phase puts in front of the operator, in order of honesty:
+
+1. **Say what the shipped certificate means.** At m=20/k=18 a certificate is evidence that no run has
+   yet shown the class below ~0.90; it is not evidence that the class is at 0.95. That sentence belongs
+   next to α in whatever surface quotes α, and it is the cheapest correct fix: no code changes, one
+   sentence, and it stops the number from being read as stronger than it is.
+2. **If a certificate must mean "not a 90% class", the sample has to grow** — m≈150, k≈142 does that
+   (refuses a 0.90 class 97% of the time while still certifying a 0.97 class 96% of the time). It costs
+   ~1.4 M tokens per class at the `docs-typo-fix` price (186,787 tokens for 20 units), which is the
+   paid item in the plan's next slot and the only version of "the gate refused a class on merit" that
+   could ever be true.
+3. **Raising k alone does not help** (rows 2–3): it is all producer risk and no discrimination.
+
+Nothing here was changed in code: the operating point is a ratified decision and the ruling is the
+operator's. `packages/wall/src/operating-point.ts` is the code half of whichever answer is chosen.
