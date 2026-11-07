@@ -834,3 +834,34 @@ A probe unit filed against `docs-hygiene` expecting `CLASS_NOT_CERTIFIED` was di
 (~64k tokens) — the gate refuses `not-certified` only, by design (`packages/core/src/engine.ts:655`). The
 probe unit was aborted with that reasoning as its reason.
 
+### Round 25 — `factory class new` + `factory class doctor`, and import-hygiene re-created through them (2026-11-07)
+
+**Step (2) of the approved sequence.** The class authoring path is built, and its definition of done is met.
+
+- **`factory class new`** (`apps/cli/src/classes/scaffold.ts`) writes a revision that fails every rule by
+  construction: stub rules that exit 1, a visible check that prints a failing `FACTORY_SUMMARY`, a descriptor
+  with no visible rules and no mutation matrix. It generates no rules and touches no repository, and it refuses a
+  revision name that would lose to an existing one — the loader reads the greatest name, so a class that quietly
+  loses that comparison is a class nobody is measuring.
+- **`factory class doctor`** (`apps/cli/src/classes/doctor.ts`) answers twelve questions about a class and turns
+  each into a finding: the corpus loads and is the revision under test, the descriptor matches the manifest, the
+  visible check is a strict and non-empty subset (a mirror measures whether the worker ran the linter), every rule
+  is reddened by a named defect, every base revision fails every rule, the repaired tree passes all of them and
+  the visible check. It extracts bases with `git archive`, so a rule cannot see history, and it never repairs.
+  Exit 0 authored · 3 contract wrong · 8 a check could not run · 9 the corpus lies about itself; `FAIL` and
+  `CANNOT` are counted separately.
+
+**Evidence.** 14 doctor specs, each refusal a spec of its own, plus the acceptance spec: a repository with two
+defective revisions and one repaired revision, `class new`, rules and descriptor authored by hand, doctor exit 0 —
+and the same class refused when the repaired tree is offered as a base
+(`apps/cli/src/classes/class-acceptance.test.ts`, 1119 ms). Nothing is imported from
+`e2e/certification/import-substrate.ts`; the corpus is written from the repository up.
+
+**Two refusals that are about existing work, not new work.** The doctor refuses the real-intent `docs-hygiene`
+corpus for want of a `class.json`, and the reason is substantive: a one-rule class whose visible check enforces
+that rule is a mirror. That class is a real intent's measurement, not a certification candidate. And re-created
+`import-hygiene` in a fresh root is *not* the certified revision — the live certificate `cert:V-09f28117f026` stays
+bound to the corpus it measured, which is what a certificate is for.
+
+Runbook: `docs/runbooks/author-a-task-class.md`; evidence §15.
+

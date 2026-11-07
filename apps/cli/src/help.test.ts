@@ -47,13 +47,16 @@ describe('every verb', () => {
     // in the evidence-expiry task: the two controls that exit 9 on expired evidence had a log entry
     // and nothing that wrote it, so the surface existed only in prose. `gate` joined it in R5:
     // the broker could refuse a privileged operation but there was no command that turned "I
-    // approve this" into a record it would accept, which made every refusal a dead end.
+    // approve this" into a record it would accept, which made every refusal a dead end. `class` joined it
+    // when the authoring path was built: a corpus was previously written by a script inside the e2e suite,
+    // so "how do I add a class" had an answer only an agent reading that script could find.
     expect(VERB_SPECS.map((spec) => spec.name).sort()).toEqual(
       [
         'abort',
         'alerts',
         'audit',
         'budget',
+        'class',
         'credential',
         'gate',
         'intent',
