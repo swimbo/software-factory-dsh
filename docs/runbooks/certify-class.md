@@ -538,6 +538,16 @@ attempt, the attempt's metered usage is the cost, and the class median × attemp
 projection. On 2026-11-07 the live store reported `docs-hygiene`: 19 attempts to `m=20`, median 76,494
 tokens over 2 measured attempts, **1,453,386 tokens projected**, `refused-no-budget`.
 
+**A night that runs out of units is incomplete, not failed.** The driver exits `2` when its units file
+ends before the operating point is reached; the script reports that as `incomplete, not failed`, counts
+the class as spent, raises the alert, and exits `4` — unknown, never a pass — because the class did not
+reach a certificate and "nothing was left undone" would be a lie. Other non-zero driver exits (`6`
+budget, `8` environment, `5` an unmeasured attempt, `1` terminal) remain `driver FAILED`, exit `1`, with
+no alert: those are the ones a person has to look at, and the next run is the retry. Until 2026-11-08
+the script had no such distinction, and the composition spec in `e2e/certification/recertify-spend.test.ts`
+is what found it: the first night that ever spent reached `units-exhausted` and exited before the alert,
+so the only night that made progress was the only night nobody heard about.
+
 **The one number that permits a spend** is the class budget, and it is per class on purpose:
 
 ```bash

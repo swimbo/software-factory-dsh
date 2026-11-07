@@ -199,6 +199,32 @@ describe('scripts/recertify-due.sh', () => {
     expect(box.driverCalls()).toHaveLength(1);
   });
 
+  it('calls a night that ran out of units incomplete, not failed, and still raises the alert', () => {
+    // The driver's exit 2 is `units-exhausted`: it measured what the operator's units file held and the
+    // class is still short of m. Before this spec existed, the script took that branch to `driver FAILED`
+    // and exited before the alert — so the one night that made progress was the night nobody heard about.
+    const box = sandbox(
+      planJson([
+        {
+          decision: 'would-spend',
+          taskClass: 'docs-hygiene',
+          projectedTokens: 1_000,
+          budgetTokens: 2_000,
+          unitsFile: '/tmp/a.txt',
+        },
+      ]),
+    );
+    box.setDriverExit(2);
+    const result = run(['--spend'], box.env);
+    // 4 is "unknown, not a pass": the class did not reach a certificate tonight, and saying "nothing was
+    // left undone" would be a lie. It is not 1, because nothing went wrong and a retry is not the fix.
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain('incomplete, not failed');
+    expect(result.stdout).toContain('spent on');
+    expect(result.stderr).toContain('did not reach a certificate tonight');
+    expect(box.driverCalls()).toHaveLength(1);
+  });
+
   it('refuses to act on a plan it cannot read', () => {
     const box = sandbox('');
     const result = run(['--spend'], box.env);

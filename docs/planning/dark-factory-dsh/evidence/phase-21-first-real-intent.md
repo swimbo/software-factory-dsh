@@ -731,3 +731,71 @@ It cannot check that the rules are the right rules — that is a judgement about
 and it belongs in the class's `README.md` and in evidence prose, in a person's words. It also cannot certify: that
 is 20 attempts, a certificate and money, in `docs/runbooks/certify-class.md`.
 
+## 16. The two controls that had never fired, now fired (with the numbers they actually fired on)
+
+The round list named two controls whose code existed and whose evidence did not: the engine's
+`CLASS_NOT_CERTIFIED` refusal, and the scheduled re-certification actually spending under a per-class budget.
+Both are now measured, and the second one was wrong.
+
+### 16.1 `CLASS_NOT_CERTIFIED` fires, and nothing is dispatched
+
+`packages/core/src/engine.ts` refuses to dispatch a unit whose class has been *measured* to `not-certified` —
+`m` samples in, fewer than `k` passes. That state had never existed in any store, so the refusal had never run.
+`e2e/certification/certificate-refusal.test.ts` reaches it the slow way with the scripted worker: twenty
+distinct base revisions, each attempt measured and failed, then a twenty-first unit.
+
+```
+$ npx vitest run e2e/certification/certificate-refusal.test.ts
+ ✓ e2e/certification/certificate-refusal.test.ts (1 test) 127537ms
+   ✓ measures twenty failed attempts, then refuses the twenty-first unit before dispatch (119886ms)
+```
+
+What the spec reads, in order:
+
+| step | evidence |
+| --- | --- |
+| twenty measured failures | every `factory run` exits 3 with `outcome: 'fail'`; the certificate row is `samples: 20, passes: 0, outcome: not-certified` |
+| the audit agrees | `{ state: 'never-certified', outcome: 'not-certified', samples: 20, m: 20 }` — the *state* answers "was a certificate ever issued", the *outcome* is the measurement |
+| the refusal | exit 3, `code: CLASS_NOT_CERTIFIED`, message: *"class import-hygiene is not certified: its latest certificate cert:V-d5227d62692c records 0 of 20 attempts passing, below k=18 at m=20. Dispatch of U-cbf216b63dfe is refused — the refusal is about the class, not this unit."* |
+| nothing dispatched | `latestVerdictForUnit` is `null`, the unit is still `qualified`, and the certificate row is unchanged at 20 samples — a refused unit is not a sample |
+
+The candidate matters: a *measurable* failure is `almostFixedTree` (the visible suite passes, the holdout
+refuses). Handing the executor the bare broken tree instead deletes the tools the wall runs, and the verdict is
+`unknown`, not `fail` — an unmeasurable attempt is not a sample, and the first version of this spec learned that
+by asserting `3` and getting `5`.
+
+### 16.2 The scheduled spend runs — and the first night that spent was silent
+
+`scripts/recertify-due.sh --spend` had unit tests with a stubbed plan and a stubbed runner: they proved the
+script reacts correctly, never that a real plan, a real budget and the real driver compose into attempts the
+store counts. `e2e/certification/recertify-spend.test.ts` composes them in a disposable store:
+
+- one measured attempt so the projection has a measured basis — **its usage row is a fixture** (30k in / 2k
+  out), because the scripted worker has no gateway. That is the one invented number, and it feeds only the
+  budget arithmetic, never a verdict;
+- `FACTORY_RECERTIFY_BUDGET_TOKENS=import-hygiene=100000` against a 608,000-token projection →
+  `refused-over-budget`, "not spending", the driver is never invoked, samples unchanged;
+- `…=5000000` → `would spend`, the real `scripts/certify-class.sh` runs, two pre-submitted units are measured,
+  the class goes from 1 to 3 samples.
+
+```
+$ npx vitest run e2e/certification/recertify-spend.test.ts
+ ✓ e2e/certification/recertify-spend.test.ts (2 tests) 18369ms
+   ✓ refuses to spend when the measured projection exceeds the class budget, and dispatches nothing 334ms
+   ✓ spends when the budget covers the projection … 10932ms
+```
+
+**The composition found a defect, which is what a control is for.** The driver exits `2` for
+`units-exhausted`: the units file ran out before `m` was reached. The script took every non-zero exit to
+`driver FAILED`, printed it on stderr, and `exit 1` — before the `spent on …` line and before `alerts --notify`.
+So the first night that ever spent was the one night nobody was told, and the night's progress was recorded as a
+failure. Fixed in the same commit: exit `2` is now `incomplete, not failed`, the class is counted as spent, the
+alert is raised, and the script exits `4` — unknown, never a pass. Other non-zero exits keep the old meaning. A
+new spec in `scripts/recertify-due.test.ts` pins the branch, and `docs/runbooks/certify-class.md` §10 says why.
+
+**What this does not claim.** Zero tokens were metered in either run — the worker was the scripted executor, so
+there is no gateway response and `usageForAttempt` returns nothing. The claim is that the *spend path* executes
+end to end and stops where the budget says: plan → decision → credential read → per-unit run → verdict →
+certificate row → alert. The economics of a live class remain the operator's decision, and §10 of the runbook is
+where those numbers live.
+

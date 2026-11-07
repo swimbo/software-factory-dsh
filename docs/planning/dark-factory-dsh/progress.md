@@ -865,3 +865,29 @@ bound to the corpus it measured, which is what a certificate is for.
 
 Runbook: `docs/runbooks/author-a-task-class.md`; evidence §15.
 
+### Round 26 — the two controls that had never fired, fired; one of them was broken (2026-11-07)
+
+**Step (3) of the approved sequence.** Both controls now have evidence, and the second one turned out to be
+misfiring.
+
+**`CLASS_NOT_CERTIFIED`** (`e2e/certification/certificate-refusal.test.ts`, 127 s): twenty distinct base
+revisions, each attempt measured and failed with the scripted worker → certificate `samples: 20, passes: 0,
+outcome: not-certified`; then a twenty-first unit, submitted and qualified, refused at `factory run` with exit 3
+and `code: CLASS_NOT_CERTIFIED` — *"its latest certificate cert:V-d5227d62692c records 0 of 20 attempts passing,
+below k=18 at m=20 … the refusal is about the class, not this unit"*. Nothing was dispatched (`latestVerdictForUnit`
+null, unit still `qualified`, the certificate row unchanged): a refused unit is not a sample. A candidate that
+fails *unmeasurably* is not a sample either — the first version handed the executor the bare broken tree, got
+exit 5 and `unknown`, and learned the difference.
+
+**Scheduled re-certification** (`e2e/certification/recertify-spend.test.ts`, 18 s): a real plan, a real budget and
+the real driver, composed. Over-budget (`100,000` against a `608,000` projection) → `refused-over-budget`, driver
+never invoked. Within budget (`5,000,000`) → `would spend`, `scripts/certify-class.sh` runs, two pre-submitted
+units are measured, 1 → 3 samples. The projection's usage row is a fixture and is labelled as one; zero tokens
+were metered because the worker is scripted. The claim is the *spend path*, not the economics.
+
+**The defect the control found.** The driver exits `2` for `units-exhausted`; `recertify-due.sh` treated every
+non-zero exit as `driver FAILED` and exited before `spent on …` and before `alerts --notify`. The first night that
+ever spent would therefore have been the one night nobody was told, its progress recorded as a failure. Now exit
+`2` is `incomplete, not failed`: counted as spent, alerted, and the script exits `4` (unknown, never a pass). A new
+spec pins it; `certify-class.md` §10 documents it; evidence §16.1–16.2 quote the runs.
+

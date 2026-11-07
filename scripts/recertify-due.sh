@@ -14,6 +14,16 @@
 #               budget, an unknown estimate, an over-budget projection and a missing units file are
 #               all refusals, and a refusal here costs nothing.
 #
+# ## An incomplete night is not a failed night
+#
+# The driver exits 2 when its units file ran out before the operating point was reached — the class is
+# still short of m attempts, and the next night is expected to continue it. Treating that as `FAILED`
+# (which this script did until a composition test spent two units and watched it) meant the operator
+# was told nothing: the failure branch exits before the alert, so the one night that did make progress
+# was the one night nobody heard about. Now exit 2 is `incomplete`: counted, reported, and the alert is
+# still raised. The script's own exit code is then 4 (unknown, not a pass) rather than 0, because the
+# class did not reach a certificate and "nothing was left undone" would be a lie.
+#
 # ## Why the budget is per class
 #
 # The measured cost of a full certificate is not one number: `docs-typo-fix` ran 186,787 tokens and
@@ -118,6 +128,7 @@ SPENDABLE=0
 REFUSED=0
 CURRENT=0
 spent_classes=()
+incomplete_classes=()
 
 while IFS=$'\t' read -r decision task_class remaining projected budget units_file; do
   [ -n "${decision:-}" ] || continue
@@ -131,13 +142,25 @@ while IFS=$'\t' read -r decision task_class remaining projected budget units_fil
         # The class is named per run, exactly as the driver expects it: a certificate is filed under
         # the class the wall is configured with, and this export is that configuration for this run.
         # shellcheck disable=SC2086 # RUNNER is a command line, intentionally word-split
-        if FACTORY_HOLDOUT_TASK_CLASS="$task_class" $RUNNER --units-file "$units_file"; then
-          spent_classes+=("$task_class")
-          echo "recertify-due: ${task_class}: driver finished"
-        else
-          echo "recertify-due: ${task_class}: driver FAILED; not retrying (the next run is the retry)" >&2
-          exit 1
-        fi
+        FACTORY_HOLDOUT_TASK_CLASS="$task_class" $RUNNER --units-file "$units_file"
+        driver_code=$?
+        case "$driver_code" in
+          0)
+            spent_classes+=("$task_class")
+            echo "recertify-due: ${task_class}: driver finished"
+            ;;
+          2)
+            # `units-exhausted`: the plan ran out, the class is still short of m. The next night is the
+            # continuation, so this is not a failure to retry — but it is not success either.
+            spent_classes+=("$task_class")
+            incomplete_classes+=("$task_class")
+            echo "recertify-due: ${task_class}: driver stopped at the end of its units file; the class is still short of m (incomplete, not failed)"
+            ;;
+          *)
+            echo "recertify-due: ${task_class}: driver FAILED (exit ${driver_code}); not retrying (the next run is the retry)" >&2
+            exit 1
+            ;;
+        esac
       fi
       ;;
     refused-*)
@@ -164,5 +187,11 @@ if [ "${#spent_classes[@]}" -gt 0 ]; then
 fi
 
 # Exit 0 means "nothing was left undone by this script": a refusal is the plan's answer, and the
-# nightly `factory alerts` job is what tells a person about it (one alarm, not two).
+# nightly `factory alerts` job is what tells a person about it (one alarm, not two). A night that ran
+# the driver and left a class short of m is exit 4 — unknown, never a pass — and the alert is raised
+# first, because that is the night a person needs to hear about.
+if [ "${#incomplete_classes[@]}" -gt 0 ]; then
+  echo "recertify-due: ${incomplete_classes[*]} did not reach a certificate tonight; continuing is the next run's job" >&2
+  exit 4
+fi
 exit 0
