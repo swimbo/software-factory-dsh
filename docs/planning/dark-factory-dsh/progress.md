@@ -672,3 +672,46 @@ options are in the evidence file's §10, and the ruling is the operator's; no cl
 `worker_timeout` wall reason; a re-dispatch path for transport `unknown`. Next in line and not started:
 a dispatch path that *consumes* a class certificate, and scheduled re-certification (both need the
 operator's call on auto-spend).
+
+### Round 20 — the first promotion, and a certificate that finally refuses something (2026-11-07)
+
+**The first real change shipped through the factory.** The operator delegated the one signing step; the
+promotion `P-e968069a` was written over verdict `V-c40f24ed88ac` (`U-052939402fae`, pass, 20 scenarios,
+10,151 tokens), the emitted patch applied cleanly to a fresh clone of the mirror at `d310644`, passed the
+corpus rules and the guard suite, and `prettier --check` was clean — then it landed in this repository as
+`f6f581a`. `promotions` went from 0 rows (since the first day of the store) to 1, and `status` fell from
+`2 need you` to `1`: the difference between a chore and a fact.
+
+**The k = 18 ruling is decided, recorded and published.** The round list assumed 17/16 would be stricter;
+they are more permissive — a class that truly passes 0.90 is certified 95.7 % (k=16) / 86.7 % (k=17) /
+67.7 % (k=18) of the time, while α *falls* when k falls because α is the risk of refusing a *good* class.
+Kept 18 (the least permissive), recorded in `findings.md` § DECIDED 2026-11-07, and the 67.7 % now prints
+beside α in every verdict's `class-certification` text and in `audit --certifications` — human line and a
+JSON `operatingPoint` block — so a certificate reads as what it is: a screen at m=20, not a test. Three
+specs pin it, including the direction that makes "lowering k is stricter" falsifiable.
+
+**A class certificate refuses work (item 4a).** `runUnit` reads the newest certificate for the class the
+wall will measure under; `not-certified` refuses the dispatch with `CLASS_NOT_CERTIFIED` (exit 3) *before*
+the lease and the reservation, so a refused dispatch spends nothing and leaves nothing to reconcile.
+`insufficient` never refuses — every first-of-class unit is insufficient by construction, and a gate that
+refused it would have blocked this session's own first real intent. `EngineDeps` gained a required
+`taskClass(spec)` wired to `taskClassFrom`, the same derivation the wall uses, so a verdict and the gate
+cannot disagree about which class it belongs to. Six specs, including "nothing left behind" and "a bad
+certificate for a different class refuses nothing". It has never fired on real evidence: no class has ever
+been measured `not-certified`.
+
+**Item 4b, honestly:** the *detector* already ships (nightly `factory alerts` → `CERT_STALE`/`CERT_NEVER`
+with the driver named in each alert). The spender is the decision, and the numbers say why it is not one
+cap: a full certificate costs 186,787 tokens for `docs-typo-fix` and 1.94 M for `type-repair` — a 10×
+spread, so a global cap either starves one class or lets the other run unbounded. Recommend a per-class
+budget supplied by the operator, per class, which the alert already names.
+
+**One self-inflicted red, recorded:** the first v0.12.0 gate failed a tripwire spec
+(`test-repair-artifacts.test.ts`, "never writes into the checkout it was built from") because this session
+edited a doc while the gate was running; the spec diffs `git status --porcelain` before and after. Re-run
+on a committed tree: 7 passed, 1 skipped, 0 failed, 1660 passed | 8 skipped tests.
+
+**Still open:** the consumed certificate id is not yet recorded on a *successful* dispatch (an engine
+event field, next round); no class has ever been `not-certified`, so the new gate's first true firing is
+ahead; the paid item (a class hard for a different reason) is eligible now that (1) shipped, and the
+honest way to spend it is m≈150 re-certification, which needs a per-class budget decision first.

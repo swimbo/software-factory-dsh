@@ -336,3 +336,38 @@ event), but the *consumed certificate id* is not yet recorded on a successful di
 payload change next round would make "which certificate authorised this attempt" a ledger fact rather than
 an inference. And this gate has never fired on real evidence: no class has ever been measured
 `not-certified`, so its first true firing is still ahead.
+
+## 12. Scheduled re-certification (item 4b): the detector already ships, the spender is the decision
+
+The round list asks for "scheduled re-certification (needs your call on auto-spend, since it spends
+without a person)". What exists today, verified rather than assumed:
+
+| half | state | where |
+| --- | --- | --- |
+| detects a stale or never-certified class | **built** | `factory alerts` → `CERT_STALE` / `CERT_NEVER`, severity `integrity`, one alert per class |
+| runs on a schedule | **built** | launchd `ai.factory.alerts` at 04:00 → the alert job → `#dsH` |
+| says what to do about it | **built** | each alert's `investigation` line names the class and `scripts/certify-class.sh` |
+| runs the attempts **itself** | **not built, on purpose** | it spends money with nobody in the loop |
+
+The nightly job already tells the operator which class has expired and what would clear it. That is the
+free half of item 4b, and it was already in place — worth saying plainly rather than "building" it twice.
+
+**What auto-spend would actually cost**, from measurements this store recorded (not estimates):
+
+| class | state | attempts to reach m | measured cost of a full certificate |
+| --- | --- | --- | --- |
+| `docs-hygiene` | never-certified (1 of 20) | 19 | unknown for this class; the same-shaped classes ran 186,787 tokens (docs-typo-fix) and 1.94 M (type-repair) for 20 attempts |
+| `docs-typo-fix` | current | 0 | 186,787 tokens per full loop, median 8,895/unit |
+| `test-repair` | current | 0 | 186,787 tokens per full loop, median 8,895/unit |
+| `type-repair` | current | 0 | 1,944,675 tokens, median 95,775/unit |
+
+So a scheduled re-certification of one class is a five-figure to seven-figure token spend depending on the
+class, and the variance between classes is 10× — a single global cap would either starve the cheap class
+or let the expensive one run unbounded. **The number the operator has to supply is not one cap but a
+per-class budget**, and the alert already names the class, so the decision can be made class by class.
+
+**Recommendation (unchanged, now with the numbers):** keep the spender unbuilt until (a) a class exists
+whose re-certification is worth automating, and (b) the operator sets a per-class token budget it must
+respect. Until then the nightly alert is the scheduler: it wakes a person, and the person spends — which
+is the same rule the promotion gate follows. The alternative, a job that decides by itself, would be the
+first component in this system that spends without a human, and it should not be the last thing built.
