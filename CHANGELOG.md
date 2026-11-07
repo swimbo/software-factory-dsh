@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.10.1 — 2026-11-06
+
+**The ceiling that tripped and then waited 2 hours for a process that was already dead.** One live
+attempt in the `type-repair` loop ran 2 h 23 min and produced nothing the wall could measure. Its
+receipt says what happened: `ceilings.wallClockMs = 8572243` with `ceilings.hit = ['wall-clock']` — the
+15-minute ceiling fired and the process group was killed, and then the adapter blocked on
+`child.once('close')`, which never arrived because something the killed group spawned outlived the kill
+and kept the pipes open. The verdict was `unknown`, the class lost a sample, and the driver stopped
+waiting for a person.
+
+Now a ceiling trip starts a bounded grace period (`DEFAULT_KILL_GRACE_MS = 10 s`): `close` still wins
+when it arrives, and when it does not the receipt is written anyway with
+`ceilings.reapTimedOut: true` — a fact about the _host_ (something escaped the kill), never a claim
+about the worker's answer. The field is optional and additive, so every receipt written before it
+existed still parses, and its absence means "the process was reaped normally", which is what those
+receipts observed.
+
+Proven by a fixture whose grandchild really does escape the process group (`detached: true`, inheriting
+stdout), and two mutations: remove the deadline and the spec hangs until the test timeout; set
+`reapTimedOut` unconditionally and the _reaped_ case reddens.
+
+The evidence file for the class also had a wrong cause in it — it said the attempt directory had gone
+missing; it had not, my `ls` was one level off. Corrected in place: the receipt proves the ceiling
+tripped and the wait was the defect.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.10.0 — 2026-11-06
 
 **A third certified class, and the answer to "is the gate ever going to refuse a class?" — no, not

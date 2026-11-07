@@ -602,3 +602,18 @@ the probe spawns a real `/bin/sh` script and under full-suite load on this machi
 budget. Re-run on an idle machine: 9/9 green, and the whole gate 7 passed / 1 skipped / 0 failed. The
 flake is written down rather than smoothed: the probe cannot distinguish "timed out" from "no version"
 and both are `null` by design, so a loaded machine makes two specs read as the wrong answer.
+
+### Round 17 — the kill that did not end the attempt (2026-11-06)
+
+**Diagnosed from the receipt, not from the symptom.** The `type-repair` loop lost one unit to a 2 h 23 min
+attempt. The receipt settles it: `ceilings.wallClockMs = 8572243`, `ceilings.hit = ['wall-clock']` — the
+15-minute ceiling fired and the group was killed, and then the adapter waited on a `close` event that
+could never arrive, because a `setsid`-style grandchild had escaped the group and kept the pipes open.
+Fixed with a bounded grace period that writes the receipt anyway and records `reapTimedOut: true`.
+
+Also corrected a wrong claim I had written in `evidence/phase-20-type-repair.md`: I said the attempt
+directory had gone missing (which would have made `--verify-only` useless); it had not — my `ls` was one
+directory level off. The file now says what the receipt proves.
+
+**Not built, and named:** a re-dispatch path for an `unknown` verdict, and a `worker_timeout` reason in
+the wall so a timeout reads as one fact instead of five unknowns.

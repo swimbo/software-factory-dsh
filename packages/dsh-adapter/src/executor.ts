@@ -102,6 +102,18 @@ export const TASK_FILE = 'task.md';
 export const DEFAULT_WALL_CLOCK_MS = 15 * 60 * 1000;
 export const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
+/**
+ * How long the adapter waits for a killed process tree to report its own death.
+ *
+ * The kill is sent when a ceiling trips; this is the deadline for the operating system to confirm
+ * it. Without one, `child.once('close')` is the only exit path and it never fires when something the
+ * killed group spawned outlived the kill and kept the pipes open: one live attempt sat for 2 h 23 min
+ * after its 15-minute ceiling had already tripped, wrote no receipt, produced no verdict, and cost
+ * the class a sample. Ten seconds is long enough for a SIGKILLed tree to be reaped and short enough
+ * that a leak costs one line in the log instead of an afternoon.
+ */
+export const DEFAULT_KILL_GRACE_MS = 10_000;
+
 /** `WorkerReceipt.narrative` is capped at 200k characters by the contract. */
 const MAX_NARRATIVE_CHARS = 200_000;
 
@@ -200,6 +212,8 @@ export interface DshExecutorOptions {
   wallClockMs?: number;
   /** Overrides {@link DEFAULT_MAX_OUTPUT_BYTES}. */
   maxOutputBytes?: number;
+  /** Overrides {@link DEFAULT_KILL_GRACE_MS}: how long a killed tree may take to report its death. */
+  killGraceMs?: number;
   /** Parent environment to allowlist from. Defaults to `process.env`; injectable for tests. */
   parentEnv?: NodeJS.ProcessEnv;
   /** The exact `dsh --version` this adapter may talk to. Defaults to {@link PINNED_DSH_VERSION}. */
@@ -337,6 +351,7 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
   const { dshBin, factoryHome, proxyBaseUrl, modelId, log } = options;
   const wallClockMs = options.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
   const parentEnv = options.parentEnv ?? process.env;
   const expectedVersion = options.expectedVersion ?? PINNED_DSH_VERSION;
   const profile = options.profile ?? DSH_PROFILE;
@@ -557,6 +572,15 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
       let stderrText = '';
       let stderrTruncated = false;
       let killedBy: WatchdogCeiling | null = null;
+      /**
+       * True when the kill was sent and the tree never confirmed its own death, so the receipt was
+       * written on a deadline. See {@link DEFAULT_KILL_GRACE_MS}.
+       */
+      let reapTimedOut = false;
+      /** How the run ended. Settled once, by `close` or by the grace deadline, never twice. */
+      let settleExit:
+        ((outcome: { code: number | null; signal: NodeJS.Signals | null }) => void) | null = null;
+      let graceTimer: NodeJS.Timeout | null = null;
 
       const started = performance.now();
       const child = spawn(launchArgv[0] ?? '', launchArgv.slice(1), {
@@ -595,6 +619,24 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
             }
           }
           if (child.pid !== undefined) killProcessGroup(child.pid, 'SIGKILL');
+          // A killed tree normally reports `close` within milliseconds. When it does not — a
+          // `setsid` grandchild holding the pipes, a daemonised runner — waiting is unbounded, and
+          // one live attempt proved it: 2 h 23 min after its 15-minute ceiling had tripped, still no
+          // receipt, no verdict, no sample, and a driver that had nothing to record. Write the
+          // receipt on a deadline instead, and say so in it.
+          graceTimer = setTimeout(() => {
+            reapTimedOut = true;
+            log.error(
+              { effectId: ctx.effectId, attemptId: payload.attemptId, pid: child.pid, killGraceMs },
+              'killed tree did not report its death within the grace period; writing the receipt anyway',
+            );
+            // One more kill, then stop waiting: whatever outlived the first SIGKILL is a leak the
+            // log now names, and blocking on it is the defect this deadline exists to remove.
+            if (child.pid !== undefined) killProcessGroup(child.pid, 'SIGKILL');
+            settleExit?.({ code: null, signal: 'SIGKILL' });
+          }, killGraceMs);
+          // Do not hold the process open for a receipt that is already written.
+          graceTimer.unref?.();
         },
       });
 
@@ -621,6 +663,13 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
 
       const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
         (resolve, reject) => {
+          let settled = false;
+          settleExit = (outcome) => {
+            if (settled) return;
+            settled = true;
+            if (graceTimer !== null) clearTimeout(graceTimer);
+            resolve(outcome);
+          };
           child.once('error', (cause) => {
             watchdog.stop();
             reject(
@@ -632,10 +681,11 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
             );
           });
           child.once('close', (code, signal) => {
-            resolve({ code, signal });
+            settleExit?.({ code, signal });
           });
         },
       );
+      if (graceTimer !== null) clearTimeout(graceTimer);
       watchdog.stop();
       // The sweep runs before anything can throw: a container is a client's claim on a daemon,
       // and the one exit path that leaves it behind is the one where this process stops early.
@@ -744,6 +794,7 @@ export function createDshExecutor(options: DshExecutorOptions): Executor {
         turnsUsed: parsed.turnsUsed,
         wallClockMs: wallClockUsedMs,
         hit,
+        ...(reapTimedOut ? { reapTimedOut: true } : {}),
       };
 
       // `commands[]` is FORENSIC ONLY. The wall owns the oracle and re-executes

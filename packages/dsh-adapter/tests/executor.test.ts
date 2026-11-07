@@ -52,6 +52,7 @@ beforeAll(() => {
     'fake-dsh-max-tokens.sh',
     'fake-dsh-crash.sh',
     'fake-dsh-hang.sh',
+    'fake-dsh-hang-escaping.sh',
     'fake-dsh-noisy.sh',
     'fake-dsh-degraded.sh',
     'fake-dsh-env.sh',
@@ -354,12 +355,49 @@ describe('createDshExecutor — a runaway attempt', () => {
     expect(receipt.exitCode).toBeNull();
     expect(receipt.ceilings.hit).toStrictEqual(['wall-clock']);
     expect(receipt.sessionId).toBe('sess-fixture-hang');
+    // Absent, not false: this tree *was* reaped, and the receipt only carries the fact when it wasn't.
+    expect(receipt.ceilings.reapTimedOut).toBeUndefined();
     expect(WorkerReceipt.safeParse(receipt).success).toBe(true);
     expect(receipt.diff.baseRev).toMatch(/^[0-9a-f]{40}$/);
 
     const grandchild = Number(readFileSync(pidFile, 'utf8').trim());
     expect(Number.isInteger(grandchild)).toBe(true);
     expect(await eventually(() => isDead(grandchild), 5000)).toBe(true);
+  });
+
+  it('writes the receipt on a deadline when the killed tree never reports its death', async () => {
+    // The live failure this exists for: the ceiling trips, the kill is sent, and `close` never arrives
+    // because something the group spawned outlived it and holds the pipes. The run must still end, and
+    // the receipt must say that the process was not reaped — otherwise "exitCode: null" reads as a
+    // clean signal death when in fact nobody confirmed anything.
+    const dir = tempDir('hang-escaping');
+    const escapeeFile = join(dir, 'escapee.pid');
+    const { run } = harness('fake-dsh-hang-escaping.sh', {
+      wallClockMs: 400,
+      killGraceMs: 300,
+      parentEnv: { PATH: process.env['PATH'] ?? '', FACTORY_FAKE_ESCAPEE: escapeeFile },
+    });
+
+    const startedMs = Date.now();
+    const receipt = await run();
+    const elapsedMs = Date.now() - startedMs;
+
+    expect(WorkerReceipt.safeParse(receipt).success).toBe(true);
+    expect(receipt.ceilings.hit).toStrictEqual(['wall-clock']);
+    expect(receipt.ceilings.reapTimedOut).toBe(true);
+    expect(receipt.exitCode).toBeNull();
+    // Bounded: the ceiling plus the grace period, not the five minutes the fixture would otherwise run.
+    expect(elapsedMs).toBeLessThan(20_000);
+
+    // The escapee really did outlive the kill; clean it up rather than leave a stray for two minutes.
+    const escapee = Number(readFileSync(escapeeFile, 'utf8').trim());
+    if (Number.isInteger(escapee) && escapee > 0) {
+      try {
+        process.kill(escapee, 'SIGKILL');
+      } catch {
+        // Already gone — the point was to try, not to succeed.
+      }
+    }
   });
 
   it('trips the output-bytes ceiling on a stream that never ends', async () => {

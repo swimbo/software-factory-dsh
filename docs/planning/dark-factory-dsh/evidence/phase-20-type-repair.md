@@ -79,15 +79,23 @@ Per-unit: `U-836200a512c4` … `U-c218bbc8ae34` passed (Δ 1.00 each); `U-a09779
    live lease, `factory recover` defers until the lease expires (`LEASE_TTL_MS`), and re-running the
    loop stops with `UNIT_ALREADY_TERMINAL … is dispatched`. Nothing was spent; one store was abandoned
    (`home-abandoned-attempt-1`) and a fresh one planned rather than aborting a unit and losing a sample.
-4. **A worker can hang, and the result is `unknown` that cannot be re-measured.** One attempt ran
-   2 h 23 min with no exit code and no tokens, then the wall recorded `unknown`
+4. **A ceiling tripped, and then the adapter waited 2 h 7 min for a process that was already dead.**
+   One attempt ran 2 h 23 min and produced no readable turn. Its receipt says exactly what happened:
+   `ceilings.wallClockMs = 8572243` (2 h 22 m 52 s) with `ceilings.hit = ['wall-clock']` — so the
+   15-minute ceiling *did* fire and the process group *was* killed, and then the adapter waited on
+   `child.once('close')`, which never arrived because something the killed group spawned outlived the
+   kill and held the pipes open. The wall recorded `unknown`
    (`receipt_unavailable, acceptance_unmeasured, suite_unknown, holdout_unavailable,
-   delta_unmeasured, no_change`). The CLI's remedy (`factory run <unit> --verify-only`) re-measures the
-   *recorded attempt*, and the attempt directory no longer existed, so it produced the same unknown a
-   second time — which the store counted as another verdict row for the same unit. **Not built:** a
-   worker wall-clock ceiling that fires (the attempt exceeded every sensible bound and the driver waited),
-   and a re-dispatch path for an `unknown` verdict that is a *transport* failure rather than a candidate
-   failure.
+   delta_unmeasured, no_change`), the class lost a sample, and the driver stopped needing a person.
+   **Fixed in v0.10.1:** a bounded grace period after the kill (`DEFAULT_KILL_GRACE_MS = 10 s`) that
+   writes the receipt anyway and records `ceilings.reapTimedOut: true`, so a leak costs one line in
+   the log instead of an afternoon. The fixture that proves it puts a grandchild in its own session
+   (`setsid` via `detached: true`) so the pipe really survives the group kill, and two mutations show
+   the spec earns its place: remove the deadline and the spec hangs (killed at the test timeout);
+   claim the timeout unconditionally and the *reaped* case reddens.
+   **Still not built:** a re-dispatch path for an `unknown` verdict, and a wall reason that names a
+   timeout (`worker_timeout`) instead of five separate unknowns. The honest status of such a verdict
+   remains "unknown — a person decides", which is what the store says.
 5. **`samples` counts an `unknown` as a sample.** With 19 passes and one unknown the certificate reads
    `samples=20, passes=19`. That is conservative (an unmeasured unit can only make certification
    harder), but it is not what "samples" sounds like; a reader should know that one sample was never
