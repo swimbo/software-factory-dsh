@@ -797,3 +797,9 @@ they say nothing about whether it is hard, and a sweep this clean cannot disting
 "easy class". The `CLASS_NOT_CERTIFIED` dispatch refusal still has never fired on real evidence — no
 dispatch in this run was ever for an uncertified class, because the class did not exist before it. That,
 and the scheduler's first real spend, remain the two unfired controls.
+
+**Housekeeping (the round list's item 6).** All seventeen local `codex/*` branches were fully merged into
+`main`; sixteen were deleted and the two that were still checked out in prunable `/tmp` worktrees were
+deleted after `git worktree prune`. What remains is `main` and `feat/dark-factory-dsh`, both at the same
+commit as `origin/main` and `origin/feat/dark-factory-dsh`. Nothing unmerged was deleted — the check was
+`git merge-base --is-ancestor <branch> main`, not "looks old".
