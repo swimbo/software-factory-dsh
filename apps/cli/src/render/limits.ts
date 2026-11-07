@@ -23,6 +23,7 @@ export const VERBS = [
   'credential',
   'gate',
   'ledger',
+  'class',
   'version',
 ] as const;
 
@@ -99,6 +100,16 @@ const SPECIFIC: Readonly<Record<Verb, readonly string[]>> = {
     '`audit` is read-only and works on a quarantined store.',
     'The escape-rate sample asks you to re-validate; it never re-validates for you.',
     'Printing the trace says nothing about safety — see the block this command prints verbatim.',
+  ],
+  class: [
+    'Authoring and judging only: `class new` writes a corpus that fails every rule by construction,',
+    '  and `class doctor` runs the class against base revisions and a repaired tree.',
+    'Neither action calls a model, spends tokens or writes to the store: rules and the visible check',
+    '  are local commands, and a class is certified by `factory certify`, which is a separate budget.',
+    'The doctor never repairs a corpus. It prints the sentence that would fix each finding and exits',
+    '  non-zero; editing the class to satisfy it is the operator’s decision, recorded in the diff.',
+    'Exit codes: 0 clean, 3 the class’s contract is wrong, 8 a check could not run, 9 the corpus',
+    '  or its descriptor is unreadable or lies about its own hash.',
   ],
   alerts: [
     'Read-only: `alerts` never anchors, never re-certifies and never writes to the store or ledger.',

@@ -32,6 +32,7 @@ import { limitsFor } from './render/limits.ts';
 import { abortVerb } from './verbs/abort.ts';
 import { alertsVerb } from './verbs/alerts.ts';
 import { auditVerb } from './verbs/audit.ts';
+import { classVerb } from './verbs/class.ts';
 import { ledgerVerb } from './verbs/ledger.ts';
 import { budgetVerb } from './verbs/budget.ts';
 import { credentialVerb } from './verbs/credential.ts';
@@ -61,6 +62,7 @@ export const VERB_SPECS: readonly VerbSpec[] = [
   credentialVerb,
   gateVerb,
   ledgerVerb,
+  classVerb,
   versionVerb,
 ];
 
