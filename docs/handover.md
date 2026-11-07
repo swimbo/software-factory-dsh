@@ -129,7 +129,7 @@ and the reason each one has:
   and `maxConcurrentWalls` (both default 1) make a second dispatch exit **7** with
   `CONCURRENCY_LIMIT` before anything is reserved (`packages/contracts/src/errors.ts`). There is no
   fairness, no priorities and no dispatch on a timer. GAP-004 stands.
-- **No no-progress detector.** The watchdog enforces wall-clock and output-byte ceilings and the kill
+- **No stalled-progress detector.** The watchdog enforces wall-clock and output-byte ceilings and the kill
   switch; "the worker is doing nothing" needs step-level signals DSH owns.
 - **The allow path exists only where the factory sees an argv.** `factory gate request|decide|list|show`
   mints a `PrivilegedDecision` from a signature **verified** against the operator's public key (the

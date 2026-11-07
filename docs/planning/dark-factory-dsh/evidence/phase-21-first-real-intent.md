@@ -857,3 +857,51 @@ died on `Expecting value: line 1 column 3`. The verb now writes every human line
 the contract the other verbs follow (`status.ts`: *"a script that captured stdout must never find a sentence in
 it"*), and `apps/cli/src/classes/class-verb.test.ts` runs the real binary to pin it.
 
+## 18. Shipped: the operator signed, the patch applied, the defect is gone
+
+The signature arrived from the operator, on this Mac, from `~/.factory-operator-keys/operator.ed25519.pem`
+(derived key id `ed25519:85b955eb`, matching the published `$FACTORY_HOME/keys/operator.pub.pem`) over the payload
+the gate printed. The signer was the repository's own `signPayload`, not a hand-rolled `openssl` call: the payload
+is `contentHash({ unitId, verdictSha, approvedBy })` and the signature is an armoured ed25519 PEM, so signing with
+anything other than the canonical function invites a format mismatch that verifies as garbage.
+
+```
+$ node apps/cli/src/main.ts promote U-60b581aad79f --signature "$KEYDIR/promotion-U-60b581aad79f.sig" \
+    --signed-by operator --confirm "sign promotion U-60b581aad79f" --json
+{"ok":true,"unitId":"U-60b581aad79f","promotionId":"P-a48d82c8",
+ "promotionSha":"sha256:a48d82c860a7f831cae38315256204ae36c6f6126749fa9f37ee3209c2e3fdde",
+ "promotionPath":"/Users/bo/.factory/artifacts/U-60b581aad79f/promotion.yaml",
+ "verdictId":"V-4ce04baafc5f","humanKeyId":"ed25519:85b955eb","signedBy":"operator",
+ "wrote":true,"firstPromotion":true,"traceId":"T-eb0d86611a"}
+```
+
+`promotion.yaml` is written, `promotion_requires_human_signature: false`, and the ledger holds
+`unit.promoted sha256:bfaa5a21…` at `2026-11-07T21:09:40Z`, three hours after `unit.verified`. The audit of the
+unit now reads `verdict V-4ce04baafc5f pass delta 1.00 wall/0.1.0+local
+h-docs-hygiene-2026-11-07-handover-040ce767`.
+
+**Then the apply step, which the tool does not do for you** — and where the first attempt failed for an instructive
+reason: the promote output names the patch at
+`$FACTORY_HOME/attempts/<unitId>/<attemptId>/attempt.patch`, and the `artifacts/*/change.patch` path in an older
+runbook transcript does not exist in this build. `git apply --check` on the real path passed, and the patch is one
+line:
+
+```
+ docs/handover.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+-- **No no-progress detector.** → -- **No stalled-progress detector.**
+```
+
+With the fix applied, both rules of the new `docs-hygiene` class and its visible check are green in the real tree:
+
+```
+$ node …/rules/handover-no-doubled-words.mjs   → handover-no-doubled-words: ok   (exit 0)
+$ node …/rules/readme-no-doubled-words.mjs     → readme-no-doubled-words: ok     (exit 0)
+$ node …/suite/docs-hygiene-guard.mjs          → guard: ok, FACTORY_SUMMARY {"passed":1,"failed":0,…} (exit 0)
+```
+
+**What this closes.** The second real intent is shipped: filed, qualified, run live, measured `pass`, signed by
+the operator's key, promoted as `P-a48d82c8`, and applied. The three-step sequence the operator approved is
+complete in all three parts — (1) shipped, (2) the authoring path built and proved, (3) both never-fired controls
+fired and the silent-night defect they exposed fixed.
+

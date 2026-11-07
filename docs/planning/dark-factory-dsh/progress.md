@@ -912,3 +912,17 @@ pins "exactly one JSON object on stdout". A machine surface is only tested by a 
 measured against the previous revision. That is what a verdict is — one candidate against one corpus — and the
 promotion promotes that verdict, not a claim about the new class.
 
+### Round 28 — signed, promoted, applied: the second real intent ships (2026-11-07)
+
+The operator signed with `~/.factory-operator-keys/operator.ed25519.pem` (`ed25519:85b955eb`, the published key)
+using the repository's own `signPayload`; `factory promote` wrote `promotion.yaml` and the ledger row
+`unit.promoted sha256:bfaa5a21…` at 21:09:40Z, promotion `P-a48d82c8`, `firstPromotion: true`.
+
+The apply step then failed on my instructions, not on the tool: the patch lives at
+`$FACTORY_HOME/attempts/<unitId>/<attemptId>/attempt.patch`, and the `artifacts/*/change.patch` glob I handed over
+comes from an older runbook transcript and does not exist here. Corrected path; `git apply --check` passed; the
+one-line change is `docs/handover.md:132`, *"No no-progress detector"* → *"No stalled-progress detector"*.
+
+Both rules of the new `docs-hygiene` class and its visible check are now green in the real tree, which is the
+first time a class authored through `factory class new` has been satisfied by a shipped change. Evidence §18.
+
