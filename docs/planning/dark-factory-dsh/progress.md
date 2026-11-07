@@ -891,3 +891,24 @@ ever spent would therefore have been the one night nobody was told, its progress
 `2` is `incomplete, not failed`: counted as spent, alerted, and the script exits `4` (unknown, never a pass). A new
 spec pins it; `certify-class.md` §10 documents it; evidence §16.1–16.2 quote the runs.
 
+### Round 27 — the authoring path used on real work, and the --json bug it exposed (2026-11-07)
+
+**Step (3)'s first clause, properly.** `docs-hygiene` was the class the doctor refused in §15 for being a mirror
+(one rule, visible check enforcing that same rule). It is now re-created through `factory class new` for the two
+defects this store actually fixed: at base `d310644`, both `README.md:137` and `docs/handover.md:132` open a bullet
+with "No no-…"; `f6f581a` fixed the first and `U-60b581aad79f` is the unit for the second. The class holds two
+rules and its visible check enforces exactly one, so the wall is not a mirror by construction.
+
+`factory class doctor` against the real mirror and a real repair tree (`git archive d310644` plus both
+rewordings) passes all twelve checks — `clean: 12 check(s) passed` — including `bases_red` (both rules fail at the
+base), `visible_check_is_strict_subset`, and `repair_green`. Evidence §17 quotes it.
+
+**The bug scripting it found.** `class doctor --json` printed its report with `console.log`, so stdout held a
+dozen sentences before the object and the first script to parse it died on `Expecting value: line 1 column 3`.
+Fixed: human lines go through `ctx.ui.err`, as the other verbs do; `class-verb.test.ts` runs the real binary and
+pins "exactly one JSON object on stdout". A machine surface is only tested by a machine.
+
+**Recorded consequence:** the newest `docs-hygiene` revision is now this one, so `U-60b581aad79f`'s verdict was
+measured against the previous revision. That is what a verdict is — one candidate against one corpus — and the
+promotion promotes that verdict, not a claim about the new class.
+

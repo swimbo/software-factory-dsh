@@ -799,3 +799,61 @@ end to end and stops where the budget says: plan → decision → credential rea
 certificate row → alert. The economics of a live class remain the operator's decision, and §10 of the runbook is
 where those numbers live.
 
+## 17. The authoring path on real work: `docs-hygiene` becomes a conforming class
+
+Section 15 ended with a refusal that was about the class rather than the corpus: the real-intent
+`docs-hygiene` revision measured one rule, and its visible check enforced that same rule, so it was a mirror.
+That refusal is now answered with real work rather than prose. The class was re-created through
+`factory class new` for the two defects the last two real intents actually fixed:
+
+- at the base revision `d310644`, **both** `README.md:137` and `docs/handover.md:132` open a bullet with
+  "No no-…"; `f6f581a` fixed the first, and `U-60b581aad79f` is the unit that fixes the second;
+- so the class holds two rules, and the visible check enforces exactly one of them;
+
+```
+$ factory class new --class docs-hygiene --root ~/.factory/real-intent-2026-11-07/holdout \
+    --rule readme-no-doubled-words --rule handover-no-doubled-words \
+    --visible "node …/suite/docs-hygiene-guard.mjs"
+Class docs-hygiene revision h-docs-hygiene-2026-11-07T200107-4645eff2 is red by construction (sha256:76c2f1c3…).
+
+$ factory class doctor --class docs-hygiene --root ~/.factory/real-intent-2026-11-07/holdout \
+    --repo ~/.factory/real-intent-2026-11-07/mirror.git --base d310644c4e68f55e2977210dbcef538edaca99a4 \
+    --repair /tmp/docs-repair
+CLASS DOCTOR  docs-hygiene  revision h-docs-hygiene-2026-11-07T200107-4645eff2  sha256:76c2f1c3…
+  ok   corpus_loads                     corpus … with 2 scenario(s)
+  ok   descriptor_present               class.json declares 2 rule(s)
+  ok   descriptor_matches_manifest      2 rule(s) declared and run
+  ok   visible_check_enforces_something the worker can see 1 rule(s)
+  ok   visible_check_is_strict_subset   visible check enforces 1 of 2 rule(s); invisible: handover-no-doubled-words
+  ok   matrix_covers_every_rule         every rule is reddened by a named defect
+  ok   matrix_defect_reddens_something  2 defect(s) each name what they redden
+  ok   bases_red                        all 1 base tree(s) fail all 2 rule(s)
+  ok   visible_check_sees_a_base        the visible check fails on at least one base revision
+  ok   repair_green                     all 2 rule(s) pass on the repaired tree
+  ok   visible_check_green_on_repair    the visible check passes on the repaired tree
+  ok   suite_prints_summary             the visible check prints FACTORY_SUMMARY
+
+clean: 12 check(s) passed. The class is authored; certification is a separate, spending decision.
+```
+
+The repair tree is a real one: `git archive d310644` plus the two rewordings, and the doctor ran the real rules
+against it and against the extracted base. This is the first class in this store that is *authored* in the sense
+the doctor means — not a fixture, not a copy of one, and with a visible check that is deliberately smaller than
+what the wall measures.
+
+**Two consequences, stated rather than implied.**
+
+1. The class's newest revision is now this one, so the unit waiting for a signature (`U-60b581aad79f`, verdict
+   `V-…` against `h-docs-hygiene-2026-11-07-handover-040ce767`) was measured under the previous revision. That is
+   what a verdict is: a measurement of one candidate against one corpus. The promotion, when it is signed,
+   promotes that verdict; it does not claim the new class was satisfied. Re-certification would use the new
+   revision, and the README rule in it is already green at `main` because of `f6f581a`.
+2. The `docs-hygiene` certificate state stays `never-certified` / `insufficient` (2 samples). Authoring a class
+   and certifying it are different acts, and this section only claims the first.
+
+**A bug the authoring path had, found by scripting it.** `factory class doctor --json` printed its report with
+`console.log`, so stdout carried a dozen sentences before the object and the first script that tried to parse it
+died on `Expecting value: line 1 column 3`. The verb now writes every human line through `ctx.ui.err`, which is
+the contract the other verbs follow (`status.ts`: *"a script that captured stdout must never find a sentence in
+it"*), and `apps/cli/src/classes/class-verb.test.ts` runs the real binary to pin it.
+

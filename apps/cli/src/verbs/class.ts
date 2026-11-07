@@ -120,16 +120,16 @@ function runClassNew(input: VerbInput): number {
       : { revision: textOption(input.options, 'revision') as string }),
   });
 
-  for (const path of result.files) console.log(`  wrote ${path}`);
-  console.log('');
-  console.log(
+  for (const path of result.files) input.ctx.ui.err(`  wrote ${path}`);
+  input.ctx.ui.err('');
+  input.ctx.ui.err(
     `Class ${taskClass} revision ${result.revision} is red by construction (${result.revisionHash}).`,
   );
-  console.log('');
-  console.log(
+  input.ctx.ui.err('');
+  input.ctx.ui.err(
     'It is not authorable yet. The next command shows why, and every finding is a sentence to write:',
   );
-  console.log(`  ${result.doctorCommand}`);
+  input.ctx.ui.err(`  ${result.doctorCommand}`);
   input.emit({
     ok: true,
     action: 'new',
@@ -187,17 +187,17 @@ function runClassDoctor(input: VerbInput): number {
         : { expectedRevision: textOption(input.options, 'revision') as string }),
     });
 
-    console.log(
+    input.ctx.ui.err(
       `CLASS DOCTOR  ${report.taskClass}  revision ${report.revision ?? '(none)'}  ${report.revisionHash ?? ''}`.trim(),
     );
-    for (const line of renderReport(report)) console.log(line);
+    for (const line of renderReport(report)) input.ctx.ui.err(line);
     const failed = report.findings.filter((finding) => finding.severity === 'policy').length;
     const cannot = report.findings.filter(
       (finding) => finding.severity !== 'ok' && finding.severity !== 'policy',
     ).length;
-    console.log('');
+    input.ctx.ui.err('');
     if (failed === 0 && cannot === 0) {
-      console.log(
+      input.ctx.ui.err(
         `clean: ${String(report.findings.length)} check(s) passed. The class is authored; certification is a ` +
           'separate, spending decision (docs/runbooks/certify-class.md).',
       );
@@ -207,7 +207,7 @@ function runClassDoctor(input: VerbInput): number {
       const parts: string[] = [];
       if (failed > 0) parts.push(`${String(failed)} failed`);
       if (cannot > 0) parts.push(`${String(cannot)} could not run`);
-      console.log(
+      input.ctx.ui.err(
         `${parts.join(', ')} of ${String(report.findings.length)} check(s) (exit ${String(report.exitCode)}). ` +
           'Nothing was repaired: each finding names the sentence that would fix it.',
       );
