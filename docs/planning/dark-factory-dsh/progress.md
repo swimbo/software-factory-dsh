@@ -774,3 +774,26 @@ green on all four.
 ~2 M-token item, and until they run every unit in the class is cold-started and the certificate is
 `insufficient`. The plan verb that prices it (Round 21) will project the cost from the first measured
 attempts rather than a guess.
+
+### Round 23 — the fourth class is certified against the live model (2026-11-07)
+
+**`import-hygiene` is certified.** Twenty measured attempts in the live store (`FACTORY_HOME=~/.factory`,
+not a side store): 20 pass, 0 fail, 1,443,304 tokens (in 1,388,406 / out 54,898), median 64,709 per unit,
+min 42,234, max 163,661. Certificate `cert:V-09f28117f026` `samples=20 passes=20 m=20 k=18`
+`holdoutRevision=h-import-hygiene-2026-11-07` `modelId=auto` `state=current`; `audit --certifications`
+→ `4 of 4 classes current` (the fifth, `docs-hygiene`, is still `never-certified`).
+
+The loop's stop reason was `units-exhausted`, not `operating-point-reached`: the first attempt was run by
+hand so an environment mistake would cost one unit instead of three (`m − k + 1` unknown verdicts end a
+certificate). It passed, which means the check was not needed — recorded as "not needed", not as "proven".
+
+**Twenty verified fixtures would have been twenty rows of wallpaper.** They were aborted after the
+certificate landed, each with the reason naming the certificate they bought; `status` reads
+`0 in flight · 1 need you · 0 unknown`, and the one remaining "need you" is the `lit_parked` unit from
+Round 12.
+
+**What the class proves and what it does not.** Twenty passes say the class is not too hard for the model;
+they say nothing about whether it is hard, and a sweep this clean cannot distinguish "good class" from
+"easy class". The `CLASS_NOT_CERTIFIED` dispatch refusal still has never fired on real evidence — no
+dispatch in this run was ever for an uncertified class, because the class did not exist before it. That,
+and the scheduler's first real spend, remain the two unfired controls.

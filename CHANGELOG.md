@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.15.0 — 2026-11-07
+
+**The fourth class is certified, live, in the live store.** `import-hygiene` — the class that checks what
+`tsc` cannot: relative imports carry `.ts`, type-only symbols use `import type`, no `enum`/`export =` — ran
+twenty measured attempts against the live model: **20 pass, 0 fail**, 1,443,304 tokens (median 64,709 per
+unit) against the ~2 M estimate. Certificate `cert:V-09f28117f026`, `samples=20 passes=20 m=20 k=18`,
+`holdoutRevision=h-import-hygiene-2026-11-07`, `modelId=auto`, `state=current`;
+`audit --certifications` reads `docs-typo-fix current / import-hygiene current / test-repair current /
+type-repair current — 4 of 4 classes current`.
+
+The twenty fixture units were aborted after the certificate landed, each with the reason that names what
+they were and which certificate they bought, so `status` stays at `0 in flight · 1 need you · 0 unknown`
+instead of gaining twenty rows of certificate wallpaper.
+
+New runbook [certify-class-import-hygiene.md](docs/runbooks/certify-class-import-hygiene.md): what is
+specific to this class (`FACTORY_TEST_ROOT="tools"` so the wall restores the _check_ and not the code; the
+visible check covering one of four rules; node erasing `import type` before it resolves anything; the
+dynamic `runtime-resolve` oracle), the artefacts build, the live loop, and the measured run.
+
+**Still untrue, and recorded as such:** the `CLASS_NOT_CERTIFIED` dispatch refusal has never fired on real
+evidence (every dispatch in this run was for a class that exists, and it is now `current`), and scheduled
+re-certification has never spent. A class that passes every attempt also proves the class is not too hard
+for the model — not that it is hard.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.14.0 — 2026-11-07
 
 **A fourth task class, hard for a different reason: `import-hygiene`.** The three existing classes all fail

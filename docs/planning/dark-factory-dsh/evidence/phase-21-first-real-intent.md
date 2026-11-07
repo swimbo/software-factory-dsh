@@ -463,7 +463,59 @@ foreign directory it did not build, and a base revision that stops breaking all 
 three-revision build: `3 distinct base commits`, all red on all four rules, `repair/` green on all four,
 `plan-units.sh` names the checkout it was built against.
 
-**What is not done, and it is the whole remainder:** the class has never been certified. Twenty attempts
-against the live model are the ~2 M-token item, and until they run the class is `insufficient` — every unit
-in it is cold-started, and the certificate it would file does not exist. The free half is now complete
-enough that the spend is the only thing between this class and a certificate.
+**Then certified, live, in one run** (2026-11-07 04:16–04:38Z, `FACTORY_HOME=~/.factory` — the live store,
+not a side store, because a certificate that lives only in a side store is not the factory's fourth class):
+
+```
+$ bash scripts/import-hygiene-artifacts.sh --root ~/.factory/certification-import --revisions 20
+import-hygiene-artifacts: built 20 base revisions
+import-hygiene-artifacts: corpus /Users/bo/.factory/certification-import/holdout/import-hygiene/h-import-hygiene-2026-11-07
+
+$ FACTORY_HOME=~/.factory FACTORY_REPO=import-fixture bash ~/.factory/certification-import/plan-units.sh
+      20                                        # twenty units submitted and qualified dark, free
+
+$ bash scripts/certify-class.sh --units-file …/units-remaining.txt
+certify-class: corpus import-hygiene@h-import-hygiene-2026-11-07 scenarios=4
+certify-class: class import-hygiene, operating point m=20 k=18
+certify-class: allowed failures 2; the cert cannot exist after 3
+U-bc7aa5a99fae 0 pass 1 0 1
+… 19 lines, all `0 pass`, `0` failures …
+certify-class: measured 19 of 20 attempts: 19 pass, 0 fail; stop units-exhausted
+certificate: class import-hygiene state=current outcome=certified samples=20 m=20 alpha=0.07548367378849634
+
+$ FACTORY_HOME=~/.factory factory audit --certifications
+CLASS CERTIFICATIONS under sha256:a368cc6f…
+  docs-hygiene  never-certified
+  docs-typo-fix  current
+  import-hygiene  current
+  test-repair  current
+  type-repair  current
+  STALE OR NEVER CERTIFIED  1 of 5 entries; a stale certificate is expired evidence, not a warning
+```
+
+Certificate `cert:V-09f28117f026`: `samples=20 passes=20 m=20 k=18 p0=0.95
+alpha=0.07548367378849634297 modelId=auto holdoutRevision=h-import-hygiene-2026-11-07
+certificateSha=sha256:be1c46505c1eece9f279fecb86eda1c0241854ec595b49d4633cadf803af2cad`.
+
+**Cost, measured:** 1,443,304 tokens across 20 usage rows (in 1,388,406 / out 54,898) — median 64,709 per
+unit, min 42,234, max 163,661 — against the ~2 M estimate. All twenty passed, so the class never
+approached the failure budget (`m − k = 2`); the loop's stop reason was `units-exhausted`, not
+`operating-point-reached`, because the first attempt was run by hand before the driver started and the
+driver was handed the nineteen that remained.
+
+That hand-run first attempt is worth naming: it existed to find an environment mistake for the price of
+one unit instead of three (`m − k + 1` unknown verdicts end a certificate). It passed, which means the
+check did not fire — a pre-flight that succeeds tells you nothing except that it was not needed this time.
+
+**The twenty fixture units are `aborted`, not dangling.** Each records the reason: *"import-hygiene
+certification fixture: the class certificate is the deliverable (cert:V-09f28117f026), no promotion
+intended"*. `status` reads `0 in flight · 1 need you · 0 unknown` — the one remaining "need you" is the
+`lit_parked` unit from Round 12, not certificate wallpaper. Twenty verified units would have been twenty
+more entries in exactly the 102 the operator objected to; aborting them with a reason is the difference
+between a decision and a mess.
+
+**Two things this class still cannot claim.** (1) The gate the class now feeds — `CLASS_NOT_CERTIFIED`
+refusal at dispatch — still has never fired on real evidence: every dispatch in this run was for a class
+that was already `never-certified` and is now `current`, so the refusal is exercised by specs, not by a
+live refusal. (2) The scheduled re-certification of §12 has not spent: `import-hygiene` is current and not
+due, and `docs-hygiene` is still refused for want of a budget. Both stay recorded as untrue.
