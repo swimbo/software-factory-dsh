@@ -11,7 +11,7 @@
  */
 import { dirname } from 'node:path';
 
-import { contentHash } from '@factory/contracts';
+import { contentHash, isTerminal } from '@factory/contracts';
 import { currentPolicyVersion } from '@factory/qualifier';
 import { probeTopology, type UnitRow, type VerdictRow } from '@factory/store';
 
@@ -350,8 +350,14 @@ export function buildStatus(
     const promotionRow =
       verdictSha === null ? null : ctx.store.getPromotion(unit.unitId, verdictSha);
     let pageState = PAGE_STATE[unit.state] ?? 'unknown';
-    if (verdictRow !== null && verdictRow.outcome === 'unknown') pageState = 'unknown';
-    if (verdictRow !== null && verdictRow.outcome === 'fail') pageState = 'failed';
+    // The same rule as the prompts below: a verdict outlives its unit, so it may describe one that
+    // is still live and never one that has been ended. An aborted unit whose last verdict was
+    // `unknown` used to render as `unknown`, which made the aggregate line count ended work as
+    // "unknown (not a pass)" — a state about a unit that no longer exists.
+    if (!isTerminal(unit.state)) {
+      if (verdictRow !== null && verdictRow.outcome === 'unknown') pageState = 'unknown';
+      if (verdictRow !== null && verdictRow.outcome === 'fail') pageState = 'failed';
+    }
 
     const status: UnitStatus = {
       unitId: unit.unitId,
@@ -415,7 +421,14 @@ export function buildStatus(
         since: unit.updatedAt,
       });
     }
-    if (verdictRow !== null && verdictRow.outcome === 'unknown') {
+    // A unit that has been ended is recorded history, not a chore. The two prompts below are derived
+    // from the *verdict* row, and a verdict outlives the unit it was measured for: ending a unit
+    // after a pass used to leave its "sign the first promotion" gate open forever, so `status`
+    // reported 103 things to do where 2 were real (found 2026-11-07 while triaging the certification
+    // fixtures — defect 7 in `evidence/phase-21-first-real-intent.md`). `lit_parked` is the one
+    // terminal state that *is* a chore and it is handled above, so it is exempt here.
+    const ended = isTerminal(unit.state) && unit.state !== 'lit_parked';
+    if (!ended && verdictRow !== null && verdictRow.outcome === 'unknown') {
       waitingOnPerson.push({
         id: waitingId('unknown_verdict', unit.unitId),
         kind: 'unknown_verdict',
@@ -426,7 +439,13 @@ export function buildStatus(
         since: verdictRow.evaluatedAt,
       });
     }
-    if (verdictRow !== null && verdictRow.outcome === 'pass' && promotionRow === null) {
+    if (
+      !ended &&
+      unit.state === 'verified' &&
+      verdictRow !== null &&
+      verdictRow.outcome === 'pass' &&
+      promotionRow === null
+    ) {
       waitingOnPerson.push({
         id: waitingId('initial_production_deploy', unit.unitId),
         kind: 'initial_production_deploy',
@@ -659,7 +678,7 @@ function taskClassHealth(ctx: FactoryContext): StatusModel['health']['taskClasse
   });
 }
 
-export const FACTORY_VERSION = '0.11.0';
+export const FACTORY_VERSION = '0.11.1';
 export const PINNED_DSH_VERSION = '0.2.1-rc.5';
 export const WALL_VERSION_FALLBACK = 'wall-2026.11.1';
 

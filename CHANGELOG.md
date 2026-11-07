@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.11.1 — 2026-11-07
+
+**A verdict outlived its unit, and `status` kept asking about a unit that was gone.** Both the
+"sign the first promotion" prompt and the page state were derived from the latest _verdict_ row with no
+check on the unit's own state. Ending a unit after a measured pass therefore left an irreversible gate
+open forever, and ending one whose verdict was `unknown` left it rendering as `unknown` — so the
+aggregate line kept counting ended work as "unknown (not a pass)". On the live store, one triage of 101
+retired certification fixtures left `status` reading `105 need you · 2 unknown` where the truth was
+`2 need you · 0 unknown`; the number only moved after the renderer learned that a terminal unit is
+recorded history, except `lit_parked`, which is a chore by definition.
+
+Found while running the first real intent end to end (see
+[`evidence/phase-21-first-real-intent.md`](docs/planning/dark-factory-dsh/evidence/phase-21-first-real-intent.md)),
+and fixed there: `apps/cli/src/render/status.ts` gates both the prompts and the page state on
+`isTerminal()`, and two e2e specs assert the pair — one ends a verified unit, one ends a unit whose
+verdict is `unknown` — after proving each fails without the guard.
+
+**Also recorded, not shipped:** the first real intent against this repository was measured and passed
+(`U-052939402fae`, corpus `h-docs-hygiene-2026-11-07-b3f9c2e1`), and its promotion is waiting for the
+operator's signature. The corpus took two revisions to accept: the wall refused the first one for a
+`suite_unknown` and for a holdout that could not discriminate, which is the gate doing its job on
+a corpus rather than on a patch.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.11.0 — 2026-11-06
 
 **A certificate counted other stores' measurements.** The criteria log was written beside the _corpus_

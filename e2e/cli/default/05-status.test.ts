@@ -16,6 +16,7 @@ import { parseStatus } from '@factory/contracts';
 import { jsonOf, newFactoryHome, runFactory, specFor, submitUnit } from '../../harness/factory.ts';
 import { createFixtureRepo, type FixtureRepo } from '../../harness/fixture.ts';
 import { seedStaleAttempt, seedUnit } from '../../../apps/cli/src/testing.ts';
+import { createWallFixture } from '../../harness/wall-fixture.ts';
 
 let fixture: FixtureRepo;
 let home: string;
@@ -155,5 +156,118 @@ describe('status --json', () => {
       run.stdout.indexOf('Commands:'),
     );
     expect(optionsBlock).not.toMatch(/--yes|--force|--assume-yes/u);
+  });
+});
+
+/**
+ * A verdict outlives the unit it was measured for — and `status` had been reading the verdict, not
+ * the unit.
+ *
+ * The "sign the first promotion" prompt was derived from `verdictRow !== null &&
+ * verdictRow.outcome === 'pass' && promotionRow === null` with no check on `unit.state`. So ending a
+ * unit after a measured pass left the prompt open forever: on the live store, 101 certification
+ * fixtures that were ended in one triage left `status` reading `105 need you` while 2 items were
+ * real. Wallpaper is the failure this whole surface exists to avoid, so the prompt must be a fact
+ * about the unit's *state*, not about a row that survives it.
+ */
+describe('a unit that was ended after it passed', () => {
+  it('[@default] stops asking for a signature that nobody can give', { timeout: 180_000 }, () => {
+    const wall = createWallFixture();
+    try {
+      const unitId = wall.submit();
+      const run = wall.run(unitId);
+      expect(run.code, `run ${unitId}: ${run.stdout}${run.stderr}`).toBe(0);
+
+      const before = jsonOf(runFactory(['status', '--json'], { home: wall.home }));
+      const gatesBefore = (before['waitingOnPerson'] as Record<string, unknown>[]).filter(
+        (gate) => gate['kind'] === 'initial_production_deploy' && gate['unitId'] === unitId,
+      );
+      // The premise: a measured pass with no promotion is a signature waiting to happen.
+      expect(gatesBefore, 'a verified unit must ask for its first signature').toHaveLength(1);
+
+      const aborted = runFactory(
+        [
+          'abort',
+          unitId,
+          '--reason',
+          'certification fixture ended after its measured pass; no promotion was ever intended',
+          '--json',
+        ],
+        { home: wall.home },
+      );
+      expect(aborted.code, `abort ${unitId}: ${aborted.stdout}${aborted.stderr}`).toBe(0);
+
+      const after = jsonOf(runFactory(['status', '--json'], { home: wall.home }));
+      const gatesAfter = (after['waitingOnPerson'] as Record<string, unknown>[]).filter(
+        (gate) => gate['unitId'] === unitId,
+      );
+      // Nothing about an ended unit can be actionable, whichever row it came from.
+      expect(gatesAfter, JSON.stringify(gatesAfter)).toHaveLength(0);
+
+      const unit = (after['units'] as Record<string, unknown>[]).find(
+        (row) => row['unitId'] === unitId,
+      );
+      expect(unit?.['state']).toBe('aborted');
+      // The verdict is still evidence and the surface must not lose it: an abort ends the unit,
+      // never the measurement.
+      expect((unit?.['verdict'] as Record<string, unknown> | undefined)?.['state']).toBe('passed');
+    } finally {
+      wall.cleanup();
+    }
+  });
+});
+
+/**
+ * The same defect in the other direction: the aggregate line counted a *verdict*, not a unit.
+ *
+ * A unit whose last verdict is `unknown` renders as `unknown` on purpose (L3: not measured is not a
+ * pass). But it kept rendering that way after the unit was ended, so `status` reported
+ * "N unknown (not a pass)" about work that no longer exists. On the live store that line survived the
+ * triage of 101 ended fixtures. The state of an ended unit is the state it was ended in.
+ */
+describe('a unit that was ended with an unknown verdict', () => {
+  it('[@default] does not keep counting as unknown after it is ended', { timeout: 180_000 }, () => {
+    const wall = createWallFixture();
+    try {
+      // A silent pinned suite is the shortest honest route to an `unknown` verdict: the wall's own
+      // oracle produced no readable summary, so the attempt is unmeasured (not failed).
+      const unitId = wall.submit({ revision: 2 });
+      wall.run(unitId, [], wall.wallEnv({ FACTORY_WALL_SUITE: 'node -e process.exit(0)' }));
+
+      const before = jsonOf(runFactory(['status', '--json'], { home: wall.home }));
+      const live = (before['units'] as Record<string, unknown>[]).find(
+        (row) => row['unitId'] === unitId,
+      );
+      expect((live?.['verdict'] as Record<string, unknown> | undefined)?.['state']).toBe('unknown');
+      expect(live?.['state']).toBe('unknown');
+
+      const aborted = runFactory(
+        [
+          'abort',
+          unitId,
+          '--reason',
+          'superseded: the pinned suite was silent, so nothing was measured',
+          '--json',
+        ],
+        { home: wall.home },
+      );
+      expect(aborted.code, `abort ${unitId}: ${aborted.stdout}${aborted.stderr}`).toBe(0);
+
+      const after = jsonOf(runFactory(['status', '--json'], { home: wall.home }));
+      const ended = (after['units'] as Record<string, unknown>[]).find(
+        (row) => row['unitId'] === unitId,
+      );
+      expect(ended?.['state']).toBe('aborted');
+      // The measurement is still readable, and still says unknown: the abort ends the unit, not the
+      // fact that it was never measured.
+      expect((ended?.['verdict'] as Record<string, unknown> | undefined)?.['state']).toBe(
+        'unknown',
+      );
+      expect(
+        (after['units'] as Record<string, unknown>[]).filter((row) => row['state'] === 'unknown'),
+      ).toHaveLength(0);
+    } finally {
+      wall.cleanup();
+    }
   });
 });

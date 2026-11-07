@@ -635,3 +635,39 @@ caught it.
 **Still open:** `k = 18` uncalibrated (β(0.9) = 0.6769, no class has ever landed near the boundary), no
 merit-based class refusal, a wall reason that names a worker timeout (does not exist), and the live
 store's ~102 units that "need a person" — a backlog nobody has triaged since the docs class.
+
+### Round 19 — the first real intent, and a verdict that outlived its unit (2026-11-07)
+
+**The product claim ran against a repository for the first time.** One intent against this checkout
+(`README.md:137`, the doubled word in the sentence that admits there is no progress-stall detector),
+measured by a repo-scoped corpus, `V-c40f24ed88ac` → **pass**, 10,151 tokens. It took three submissions to
+get there and the refusals were the interesting part: a pinned suite that printed prose is `unknown`, not
+fine; and a holdout scenario that passes on every base revision cannot discriminate, so the refusal was
+`holdout_not_discriminating` at a threshold of zero. Revision 2 put the deletion guard in the wall's own
+suite and left one discriminating scenario. Full record: `evidence/phase-21-first-real-intent.md`.
+
+**The operator key did not exist**, which is why `promotions` has held 0 rows since the first day. The
+keypair is now generated and the public half published at `~/.factory/keys/operator.pub.pem`; the
+signature is the one step this session did not take, and it is waiting
+(`~/.factory/real-intent-2026-11-07/sign-and-promote.sh`). A signature an agent can mint is not a gate.
+
+**Triaging the 106 fixture units found the defect that made the number wallpaper.** `status` derived both
+the "sign the first promotion" prompt and the page state from the latest *verdict* row without checking the
+unit's state. So ending a unit after a pass left an irreversible gate open forever, and ending one with an
+unknown verdict left it counted as `unknown`. Ending 101 units moved the backlog line from 105 to **105**;
+after the fix (both derivations gated on `isTerminal()`, `lit_parked` exempt) the same store reads
+`2 need you · 0 unknown`. Two e2e specs, each verified to fail against the unfixed renderer. v0.11.1.
+
+**Smaller, recorded:** `factory receipts` printed `<home>/artifacts/<unit>/<attempt>/receipt.json` — a path
+nothing ever writes; it now names the store row and the attempt's on-disk records. The corpus does not run
+the repository's own `format:check`/`typecheck`/`lint`, so a docs patch that breaks the formatter would
+still pass the wall. Both are in the evidence file's §9.
+
+**Housekeeping:** `main` fast-forwarded to the PR merge (`1fc3ab8`) and pushed; `feat/dark-factory-dsh`
+moved to the same commit, so all four refs agree and the launchd jobs run the merge line.
+
+**Still open:** the signature (above); `k = 18` uncalibrated (β(0.9) = 0.6769, no class near the
+boundary); no class certificate for any real repository; a corpus that consumes the repo's own gates; a
+`worker_timeout` wall reason; a re-dispatch path for transport `unknown`. Next in line and not started:
+a dispatch path that *consumes* a class certificate, and scheduled re-certification (both need the
+operator's call on auto-spend).

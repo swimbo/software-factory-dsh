@@ -77,7 +77,13 @@ export function runReceipts(input: VerbInput): number {
       `diff ${receipt.diff.filesChanged} file(s) +${receipt.diff.insertions}/-${receipt.diff.deletions}  ` +
       `commands ${receipt.commands.length}  exits [${exits.join(',')}]`,
   );
-  ctx.ui.err(field('  path', `${ctx.paths.artifacts}/${unitId}/${latest.attemptId}/receipt.json`));
+  // The receipt is a store row, not a file. This line used to print
+  // `<home>/artifacts/<unit>/<attempt>/receipt.json`, a path nothing ever writes — verified on
+  // 2026-11-07: `ls ~/.factory/artifacts` was ENOENT while the receipt row was right there in the
+  // store. The attempt's *records* do live on disk (launch.json, task.md, stdout.log, the patch), so
+  // both places are named and neither is invented.
+  ctx.ui.err(field('  store', `${ctx.paths.state}/store.sqlite  (receipt ${latest.receiptId})`));
+  ctx.ui.err(field('  records', `${ctx.paths.attempts}/${unitId}/${latest.attemptId}/`));
   ctx.ui.err(
     field(
       '  narrative',
