@@ -88,9 +88,25 @@ export interface DiscriminationReport {
   readonly observed: string;
 }
 
-/** `<holdoutRoot>/audit/criteria-log.jsonl`, next to the store and never inside a repo. */
-export function criteriaLogPath(holdoutRoot: string): string {
-  return join(holdoutRoot, 'audit', 'criteria-log.jsonl');
+/**
+ * `<storeHome>/certification/audit/criteria-log.jsonl` — the store's own measurement history.
+ *
+ * Scoped by **store**, not by holdout corpus, and that distinction cost a real number before it was
+ * made. The log used to live beside the corpus (`<holdoutRoot>/audit/criteria-log.jsonl`), so every
+ * store that measured the same class wrote into one file and every certificate counted all of it. The
+ * `type-repair` class then certified in the live store with `samples=20 passes=19` although all twenty
+ * of its own verdicts were passes: one revision had been measured four times, and two of those
+ * measurements — from a store that was later abandoned — were `unknown`, so the revision was not
+ * *clean*. The direction there was conservative, which is luck rather than design: a store that ran
+ * ten units of a class would inherit the other ten from a store that ran them first and certify on
+ * work it never did.
+ *
+ * The corpus is shared on purpose (one corpus, many stores); the evidence of what *this* store measured
+ * is not. Old logs under the holdout root stay where they are — they are append-only history, and the
+ * certificates recorded from them are rows in the ledger, not recomputations.
+ */
+export function criteriaLogPath(storeHome: string): string {
+  return join(storeHome, 'certification', 'audit', 'criteria-log.jsonl');
 }
 
 /**

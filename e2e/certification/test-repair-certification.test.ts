@@ -228,7 +228,7 @@ describe('twenty measured attempts of test-repair', () => {
       // differential rule runs in both directions like the others: the base side is what says the
       // rule discriminates, and a corpus line that cannot say which side it measured is not
       // evidence.
-      const log = readCriteriaLog(criteriaLogPath(substrate.holdoutRoot));
+      const log = readCriteriaLog(criteriaLogPath(substrate.home));
       expect(log.corruptLines).toBe(0);
       expect(log.entries).toHaveLength(120);
       expect(new Set(log.entries.map((entry) => entry.revision)).size).toBe(20);

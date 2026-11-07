@@ -201,7 +201,9 @@ describe('twenty measured attempts of docs-typo-fix', () => {
       }
 
       // The accumulator on disk: 20 revisions × 5 rules × 2 sides, every line parseable.
-      const log = readCriteriaLog(criteriaLogPath(substrate.holdoutRoot));
+      // The store's own log, not the corpus's: a certificate counts what *this* store measured, so the
+      // evidence lives under `FACTORY_HOME` (v0.11.0). Reading it from the holdout root now finds nothing.
+      const log = readCriteriaLog(criteriaLogPath(substrate.home));
       expect(log.corruptLines).toBe(0);
       expect(log.entries).toHaveLength(200);
       expect(new Set(log.entries.map((entry) => entry.revision)).size).toBe(20);

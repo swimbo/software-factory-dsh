@@ -53,6 +53,7 @@ import {
   type DiffInspector,
   type ScenarioRunInput,
 } from '@factory/wall';
+import { resolveHome } from './context.ts';
 
 /** Wall knobs that are operator policy, read from the environment once per invocation. */
 export interface WallPolicyEnv {
@@ -288,6 +289,14 @@ export interface WallInputs {
   readonly home?: string | null | undefined;
   /** Where a fake wall's template lives, when `FACTORY_WALL=fake` is not in play this is null. */
   readonly holdoutRoot?: string | undefined;
+  /**
+   * `FACTORY_HOME` — the store this measurement is evidence for.
+   *
+   * The criteria log is written under it, because a class certificate is a claim about this store's
+   * measurements. Omitted only by tests that pass their own log port, and by any caller that wants the
+   * default `~/.factory`.
+   */
+  readonly storeHome?: string | undefined;
 }
 
 export interface WallOutcome {
@@ -345,8 +354,12 @@ export async function evaluateReceipt(input: WallInputs): Promise<WallOutcome> {
     // unwired made every verdict count as the class's first sample, so twenty measured passes
     // produced twenty `samples=1 … insufficient` rows and a class that could never be certified
     // — a defect the package tests could not catch, because they pass this port directly.
+    // Store-scoped, not corpus-scoped: a certificate counts what *this* store measured. See
+    // `criteriaLogPath`.
     criteriaLog: createCriteriaLog(
-      criteriaLogPath(input.policy.holdoutRoot ?? defaultHoldoutRoot()),
+      criteriaLogPath(
+        input.storeHome ?? resolveHome(process.env as Record<string, string | undefined>),
+      ),
     ),
     diff: patchDiffInspector(input.patchFile, input.policy.testRoot),
     nowIso: input.nowIso,

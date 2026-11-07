@@ -617,3 +617,21 @@ directory level off. The file now says what the receipt proves.
 
 **Not built, and named:** a re-dispatch path for an `unknown` verdict, and a `worker_timeout` reason in
 the wall so a timeout reads as one fact instead of five unknowns.
+
+### Round 18 — the third class lands, and a number that was not what it looked like (2026-11-06)
+
+**`type-repair` is the live store's third class.** Twenty units, twenty passes, `3 of 3 classes current`,
+1.94 M tokens (median 95,775/unit, max 189,117). The earlier 19-of-20 in the dedicated store lost its one
+sample to the 2 h 23 min hang, so the class has been measured twice and the wall has never refused a
+class on merit.
+
+**Then the arithmetic disagreed with the verdicts** — all twenty passed, the certificate says
+`samples=20 passes=19` — and chasing that found the round's real defect: the criteria log was written
+beside the corpus and shared by every store, so a certificate counted other stores' measurements. Here it
+lost a pass; a store that ran ten units would have inherited ten more and certified on work it never did.
+v0.11.0 scopes the log to the store (`<storeHome>/certification/audit/`) and adds the spec that would have
+caught it.
+
+**Still open:** `k = 18` uncalibrated (β(0.9) = 0.6769, no class has ever landed near the boundary), no
+merit-based class refusal, a wall reason that names a worker timeout (does not exist), and the live
+store's ~102 units that "need a person" — a backlog nobody has triaged since the docs class.

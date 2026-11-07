@@ -51,18 +51,33 @@ the two classes cannot measure subtly different things and call it the same rule
 
 ## 4. The live loop, as run
 
-- Corpus `h-type-repair-2026-11-05-027a32e2` (content-addressed: the artefacts were rebuilt once during
-  development and minted the same id, which is the property the id exists for).
-- Store `~/.factory/certification-type-repair/home`; twenty units planned and qualified dark for free.
-- 19 passes, 1 `unknown`; certificate `cert:V-27c814c2ac68`, `samples=20`, `passes=19`,
-  `outcome=certified`, `m=20`, `k=18`, α = `0.07548367378849634`, heldout corpus named in the row.
-- Tokens 1,907,300 total (in 1,838,904 / out 68,396); median 59,046; max 396,456.
-- **The certificate lives in a dedicated store, not in `~/.factory`.** The live store's
-  `audit --certifications` therefore still reports two classes. Making this the third would mean
-  spending another ~1.9 M tokens against the live store; it is recorded here as work not done, not as
-  work that happened.
+**First, in a dedicated store** (2026-11-05/06, `FACTORY_HOME=~/.factory/certification-type-repair/home`):
+corpus `h-type-repair-2026-11-05-027a32e2`, twenty units planned and qualified dark for free, 19 passes
+and 1 `unknown`, certificate `cert:V-27c814c2ac68` with `samples=20 passes=19`, 1,907,300 tokens (median
+59,046/unit, max 396,456). The unknown was the worker that hung for 2 h 23 min — the receipt shows its
+15-minute ceiling tripped and the adapter then waited 2 h 7 min more (defect 4 below).
 
-Per-unit: `U-836200a512c4` … `U-c218bbc8ae34` passed (Δ 1.00 each); `U-a09779d225f5` is the unknown.
+**Then in the live store** (`FACTORY_HOME=~/.factory`, 2026-11-06 19:33–20:49 local), because a
+certificate that lives only in a side store is not the factory's third class:
+
+```
+certify-class: measured 20 of 20 attempts: 20 pass, 0 fail; stop operating-point-reached
+certificate: class type-repair state=current outcome=certified samples=20 m=20 alpha=0.07548367378849634
+audit --certifications → docs-typo-fix current / test-repair current / type-repair current
+                         3 of 3 classes current
+```
+
+Tokens for that run: **1,944,675** (in 1,895,971 / out 48,704) across 20 usage rows — median 95,775 per
+unit, min 42,718, max 189,117. All twenty revisions passed, so the class cost the same order of
+magnitude as the first run and produced a clean sweep; the hang did not recur (the bounded kill
+deadline had not even been written yet, so its absence was luck, not proof).
+
+**The certificate row reads `samples=20 passes=19` anyway** (`cert:V-0605510b8514`), even though all
+twenty verdicts are passes. That is not a typo, and finding out why produced defect 6 below: the
+criteria log was shared by every store measuring the corpus, and one revision had also been measured in
+an abandoned store, twice, as `unknown` — so the revision was not "clean". Under the old shared-log
+rule the count was honest and the direction was conservative. Under any other history it would have
+been a certificate for work this store never did.
 
 ## 5. The defects this phase found
 
@@ -100,6 +115,19 @@ Per-unit: `U-836200a512c4` … `U-c218bbc8ae34` passed (Δ 1.00 each); `U-a09779
    `samples=20, passes=19`. That is conservative (an unmeasured unit can only make certification
    harder), but it is not what "samples" sounds like; a reader should know that one sample was never
    measured.
+
+6. **A certificate counted other stores' measurements.** The criteria log lived at
+   `<holdoutRoot>/audit/criteria-log.jsonl`, beside the *corpus*, so every store that measured a class
+   appended to one file and every certificate read all of it. The live store's twenty passes counted as
+   nineteen because revision `892a7397…` had four measurement runs in that file: two from the abandoned
+   store (`unknown`), one from a `--verify-only` re-run (`modelId: null`, correctly ignored), and the
+   live store's own `pass`. Conservative here — and pure luck. A store that ran ten units of a class
+   would have inherited the other ten from whichever store ran them first and certified `samples=20`
+   on ten measurements. **Fixed in v0.11.0:** the log is now
+   `<storeHome>/certification/audit/criteria-log.jsonl`, scoped to the store whose evidence it is, and
+   a spec asserts that one store's file is invisible to another. Certificates already recorded are
+   ledger rows, not recomputations, so nothing was rewritten by the move; the old file stays where it
+   is as append-only history.
 
 ## 6. What this phase did not settle
 

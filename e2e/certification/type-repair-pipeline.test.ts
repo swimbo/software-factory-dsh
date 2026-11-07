@@ -168,7 +168,7 @@ describe('type-repair through the wall', () => {
   }
 
   it('records both sides in the criteria log, and every class rule fails on every base revision', () => {
-    const log = readCriteriaLog(criteriaLogPath(substrate.holdoutRoot));
+    const log = readCriteriaLog(criteriaLogPath(substrate.home));
     expect(log.corruptLines).toBe(0);
     // Eight units × three rules × two sides: every line says which side it measured.
     expect(log.entries).toHaveLength(48);

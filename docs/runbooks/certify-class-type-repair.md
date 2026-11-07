@@ -231,20 +231,33 @@ samples=20  passes=19  m=20  k=18  alpha=0.07548367378849634  outcome=certified
 tokens 1,907,300 (in 1,838,904 / out 68,396); median 59,046/unit; max 396,456
 ```
 
-The unknown is **not** a wrong answer: one worker hung for 2 h 23 min, produced no readable receipt,
-and the wall recorded `unknown` (`receipt_unavailable, acceptance_unmeasured, suite_unknown,
-holdout_unavailable, delta_unmeasured, no_change`). `factory run <unit> --verify-only` could not
-re-measure it either, because the attempt directory no longer existed — that is recorded as a defect,
-not as a class property.
+The unknown is **not** a wrong answer: one worker hung for 2 h 23 min. Its receipt shows the 15-minute
+ceiling tripped and the adapter then waited 2 h 7 min more for a process that was already dead
+(`ceilings.hit: ['wall-clock']`, `wallClockMs: 8572243`) — fixed in v0.10.1 with a bounded grace period
+after the kill. `factory run <unit> --verify-only` re-measures the recorded attempt and recorded the same
+`unknown`, which is correct: a re-measurement is not new evidence.
+
+**Live again, in the store that matters** (2026-11-06 19:33–20:49 local, `~/.factory`):
+
+```
+certify-class: measured 20 of 20 attempts: 20 pass, 0 fail; stop operating-point-reached
+audit --certifications → docs-typo-fix current / test-repair current / type-repair current
+                         3 of 3 classes current
+tokens 1,944,675 (in 1,895,971 / out 48,704); median 95,775/unit; min 42,718; max 189,117
+```
+
+Twenty of twenty this time; the hang did not recur. The row still reads `samples=20 passes=19`
+(`cert:V-0605510b8514`) while all twenty verdicts are passes, because the criteria log used to be shared
+by every store measuring the corpus and one revision had also been measured in the abandoned store as
+`unknown`. That is defect 6 in the evidence file, fixed in v0.11.0 by scoping the log to the store.
 
 **What that means for the question this class was built to answer: it did not answer it.** The gate has
-still never refused a class on merit. Difficulty showed up as _cost_ (10× the `test-repair` loop), not
-as _failure rate_. Two things follow, and both are stated in
+still never refused a class on merit — three classes, zero merit-based class refusals. Difficulty showed
+up as _cost_ (10× the `test-repair` loop), not as _failure rate_. What remains, stated in
 [phase-20-type-repair.md](../planning/dark-factory-dsh/evidence/phase-20-type-repair.md):
 
-- **The certificate is real but sits in a dedicated store** (`~/.factory/certification-type-repair/home`),
-  not in `~/.factory`, so the live `audit --certifications` still reports two classes. Making it the
-  third means spending another ~1.9 M tokens against the live store — not done.
+- **The next class has to be hard for a different reason** — a hidden convention, or a whole-repository
+  invariant. More compiler errors is not difficulty; this model fixed every one of them.
 - **`k = 18` remains uncalibrated.** β(0.9) = 0.6769, β(0.8) = 0.2061: a truly-90%-reliable class still
   fails to certify about a third of the time. No class has ever landed near that boundary, so the
   operating point is strict on paper and untested in practice.

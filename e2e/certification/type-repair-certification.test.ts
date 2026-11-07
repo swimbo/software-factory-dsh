@@ -140,7 +140,7 @@ describe('six measured attempts of type-repair', () => {
   }, 300_000);
 
   it('left the evidence an operator reads: a criteria log with every class rule measured on both sides, and a store with no unreachable unit', () => {
-    const log = readCriteriaLog(criteriaLogPath(substrate.holdoutRoot));
+    const log = readCriteriaLog(criteriaLogPath(substrate.home));
     expect(log.corruptLines).toBe(0);
     // Seven attempts × three rules × two sides.
     expect(log.entries).toHaveLength(42);

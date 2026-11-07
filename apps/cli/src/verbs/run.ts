@@ -646,6 +646,9 @@ async function evaluateRealWall(
     nowIso: ctx.nowIso(),
     policyVersion: ctx.policyVersion,
     home: ctx.env['HOME'] ?? null,
+    // The store this measurement is evidence for: the criteria log is written under it, so a
+    // certificate counts this store's attempts and not another store's. See `criteriaLogPath`.
+    storeHome: ctx.home,
     // The certificate records the model the attempt actually ran under, so a later policy or model
     // change can be detected instead of inferred. Absent is `null`, which the audit treats as
     // "cannot prove current" rather than "unchanged".

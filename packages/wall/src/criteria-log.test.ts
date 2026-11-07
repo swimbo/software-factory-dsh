@@ -8,7 +8,7 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FactoryError } from '@factory/contracts';
 import type { HoldoutStore } from './holdout.ts';
@@ -87,6 +87,25 @@ function legacyEntry(
 }
 
 describe('the criteria log is append-only and self-describing', () => {
+  it('keeps one store’s history out of another store’s file', () => {
+    // The live `type-repair` certification read `samples=20 passes=19` from a log that four different
+    // stores had written to: one revision had been measured in an abandoned store, twice, as `unknown`,
+    // so the live store's own twenty passes counted as nineteen. Conservative that time — and pure luck.
+    // A store that measured ten units of a class would have inherited the other ten and certified on
+    // work it never did. The log is scoped by store for exactly this reason.
+    const one = criteriaLogPath(join(scratchDir(), 'store-a'));
+    const two = criteriaLogPath(join(scratchDir(), 'store-b'));
+
+    expect(one).not.toBe(two);
+    expect(one.endsWith(join('certification', 'audit', 'criteria-log.jsonl'))).toBe(true);
+    // Under the store home it belongs to, never beside the shared corpus.
+    expect(one.includes(join('certification', 'audit'))).toBe(true);
+
+    recordRun(entry({ scenarioId: 's-1', outcome: 'pass' }), one);
+    expect(readCriteriaLog(two).entries).toHaveLength(0);
+    expect(readCriteriaLog(one).entries).toHaveLength(1);
+  });
+
   it('writes one self-describing JSON line per observation and reads it back', () => {
     const logPath = criteriaLogPath(scratchDir());
     expect(logPath.endsWith(join('audit', 'criteria-log.jsonl'))).toBe(true);
@@ -168,7 +187,7 @@ describe('the criteria log is append-only and self-describing', () => {
     // Fresh install: no file, no corruption, no observations.
     expect(readCriteriaLog(logPath)).toEqual({ entries: [], corruptLines: 0, legacyLines: 0 });
 
-    mkdirSync(join(dir, 'audit'), { recursive: true });
+    mkdirSync(dirname(logPath), { recursive: true });
     writeFileSync(
       logPath,
       `${JSON.stringify(entry({ scenarioId: 's-1', outcome: 'pass' }))}\n{ this is not json\n`,
@@ -186,7 +205,7 @@ describe('the criteria log is append-only and self-describing', () => {
     // base pass) but it must be counted as legacy, so no certificate counts it.
     const dir = scratchDir();
     const logPath = criteriaLogPath(dir);
-    mkdirSync(join(dir, 'audit'), { recursive: true });
+    mkdirSync(dirname(logPath), { recursive: true });
     writeFileSync(
       logPath,
       `${JSON.stringify(legacyEntry({ scenarioId: 's-legacy', outcome: 'pass' }))}\n` +
@@ -207,7 +226,7 @@ describe('the criteria log is append-only and self-describing', () => {
     // distinction is load-bearing: one is skipped, the other degrades the control to unknown.
     const dir = scratchDir();
     const logPath = criteriaLogPath(dir);
-    mkdirSync(join(dir, 'audit'), { recursive: true });
+    mkdirSync(dirname(logPath), { recursive: true });
     writeFileSync(
       logPath,
       `${JSON.stringify({ ...entry({ scenarioId: 's-1', outcome: 'pass' }), policyVersion: '' })}\n`,
@@ -222,7 +241,7 @@ describe('the criteria log is append-only and self-describing', () => {
   it('counts a well-formed line that is not an entry as corruption too', () => {
     const dir = scratchDir();
     const logPath = criteriaLogPath(dir);
-    mkdirSync(join(dir, 'audit'), { recursive: true });
+    mkdirSync(dirname(logPath), { recursive: true });
     writeFileSync(logPath, '{"hello":"world"}\n', 'utf8');
     expect(readCriteriaLog(logPath).corruptLines).toBe(1);
   });

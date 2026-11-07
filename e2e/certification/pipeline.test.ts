@@ -54,7 +54,7 @@ const certificates = (): readonly Record<string, unknown>[] => {
 };
 
 const criteria = (): { entries: readonly CriteriaLogEntry[]; corruptLines: number } =>
-  readCriteriaLog(criteriaLogPath(substrate.holdoutRoot));
+  readCriteriaLog(criteriaLogPath(substrate.home));
 
 beforeAll(() => {
   substrate = createDocsSubstrate({ units: 3 });

@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.11.0 — 2026-11-06
+
+**A certificate counted other stores' measurements.** The criteria log was written beside the _corpus_
+(`<holdoutRoot>/audit/criteria-log.jsonl`), so every store that measured a class appended to one file and
+every certificate read all of it. The live store's `type-repair` certificates say `samples=20 passes=19`
+although all twenty of its own verdicts are passes: one revision had been measured four times, twice in a
+store that was later abandoned, as `unknown`. Conservative in that direction — and entirely by luck. A
+store that ran ten units of a class would have inherited the other ten from whichever store ran them
+first, and certified `samples=20` on ten measurements.
+
+The log is now `<storeHome>/certification/audit/criteria-log.jsonl`: the corpus is shared on purpose, the
+evidence of what _this_ store measured is not. Existing certificates are ledger rows rather than
+recomputations, so the move rewrote nothing; the old file stays where it is as append-only history. A new
+spec asserts that one store's file is invisible to another, the four specs that pre-created `<dir>/audit`
+now create the log's own parent, and the five e2e readers ask the log for the store's home instead of the
+corpus's — with the reason written where the reader is.
+
+**Also recorded, not shipped as code: `type-repair` is the live store's third class.** All twenty units
+ran against `FACTORY_HOME=~/.factory` and all twenty passed — `audit --certifications → 3 of 3 classes
+current` — for 1,944,675 tokens (median 95,775/unit). The certificate from the dedicated store earlier
+the same day read 19 of 20, the single non-pass being the 2 h 23 min worker hang that v0.10.1's bounded
+kill now prevents. The class is therefore certified twice, and the gate still has never refused a class
+on merit.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.10.1 — 2026-11-06
 
 **The ceiling that tripped and then waited 2 hours for a process that was already dead.** One live
