@@ -337,6 +337,30 @@ payload change next round would make "which certificate authorised this attempt"
 an inference. And this gate has never fired on real evidence: no class has ever been measured
 `not-certified`, so its first true firing is still ahead.
 
+**A probe tried to make it fire on 2026-11-07 and could not** — the attempt is worth recording because the
+assumption behind it was wrong, and the wrongness is a fact about the policy. A unit was filed against
+`docs-hygiene`, a class whose newest certificate is `insufficient` (1 of 20 samples), expecting
+`CLASS_NOT_CERTIFIED` and no spend. It dispatched:
+
+```
+$ factory run U-ecfea08279ed            # class docs-hygiene, certificate outcome insufficient
+verdict      pass  wall wall/0.1.0+local  no reasons
+class-certification pass  1 delta samples for this task class (min 0); 1 of 20 attempts … insufficient
+```
+
+The gate refuses `not-certified` only, and the engine says why in the place that decides it
+(`packages/core/src/engine.ts:655`): *"`insufficient` never refuses: every first-of-class unit is
+insufficient by construction (that is what `--cold-start` exists for), and refusing it would make the
+factory unable to take the first unit of any class."* So an insufficient class takes dark work, and the
+probe spent one attempt (~64k tokens) measuring a change that had already shipped as `f6f581a`. The unit was
+aborted with that recorded as its reason; it is evidence about the rule, not a change.
+
+The consequence for the claim above is precise: **"the certificate gate has fired" is still untrue**, and
+the probe showed the gate is reachable only by a class that has been measured to `m` attempts and failed
+`k` — a state no class in this store has ever reached. What the probe *did* establish is the permissive
+half on real evidence: a class at 1 of 20 samples dispatches, which is the intended cold-start behaviour and
+was previously only spec'd.
+
 ## 12. Scheduled re-certification (item 4b): built, and fenced on a per-class budget
 
 The round list asks for "scheduled re-certification (needs your call on auto-spend, since it spends
