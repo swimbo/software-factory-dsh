@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import { UnitSpec } from '../../packages/contracts/src/index.ts';
 import { buildImportArtifacts, MARKER } from './import-artifacts.ts';
-import { runRules, TASK_CLASS } from './import-substrate.ts';
+import { readManifest, runRules, TASK_CLASS } from './import-substrate.ts';
 
 const SOURCE = join(import.meta.dirname, '..', '..');
 
@@ -118,7 +118,20 @@ describe('the import-hygiene artefacts build', () => {
       source: SOURCE,
       createdAt: '2026-11-07T00:01:00Z',
     });
-    // A rebuild starts from scratch: the new commit differs because the timestamps do.
-    expect(second.baseRevs[0]).not.toBe(first.baseRevs[0]);
+    // The corpus is content-addressed, so its identity survives a rebuild — that is the thing a
+    // certificate records, and the reason a rebuilt corpus with changed rules mints a new id instead of
+    // silently inheriting the old certificate's trust.
+    expect(readManifest(second.revisionDir)['revisionHash']).toBe(
+      readManifest(first.revisionDir)['revisionHash'],
+    );
+    // The *base revisions* are not reproducible, and pretending otherwise would be the lie: a git commit
+    // carries its commit time, so rebuilding the same trees a second later produces different hashes.
+    // The consequence is worth knowing before a certification starts — build the artefacts once, and
+    // certify against that build, because a rebuild moves the sample keys the certificate counts.
+    expect(second.baseRevs).toHaveLength(1);
+    // What does move by construction is the record of when it was built.
+    const marker = JSON.parse(readFileSync(join(target, MARKER), 'utf8')) as { createdAt: string };
+    expect(marker.createdAt).toBe('2026-11-07T00:01:00Z');
+    expect(readFileSync(join(target, 'README.md'), 'utf8')).toContain('2026-11-07T00:01:00Z');
   });
 });
