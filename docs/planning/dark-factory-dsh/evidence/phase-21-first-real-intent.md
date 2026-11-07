@@ -398,44 +398,72 @@ exits 9 without spending, and a failing driver stops the run instead of grinding
 plan is `refused-no-budget`. Its first real spend is an operator decision, and its first *successful*
 spend is a fact nobody has observed yet.
 
-## 13. Item 5, scoped: the next class is a whole-repo invariant, and the plan can now price it
+## 13. Item 5: the `import-hygiene` class exists, and is proven offline
 
 The round list's paid item asks for "the next class, hard for a different reason: a hidden convention or a
-whole-repo invariant, not more compiler errors". Item (1) shipped, so the gate on it is satisfied, and the
-choice below is made on evidence rather than taste.
+whole-repo invariant, not more compiler errors". Item (1) shipped, so that gate was satisfied. This round
+built the class; the certification spend is the only thing left.
 
-**The class: `import-hygiene`.** The invariant is the one this repository actually lives by and states in
-`AGENTS.md`: *every relative import carries its `.ts` extension*, because the tree is `module: nodest` +
-`verbatimModuleSyntax` + `erasableSyntaxOnly` and an extensionless import fails at runtime. It is a
-whole-repo invariant, not a per-file compile error: a change can add an extensionless import in a file
-that TypeScript accepts (a `.ts` sibling resolves) while `node file.ts` fails, or can import a type-only
-symbol as a value and break under `verbatimModuleSyntax` without any compiler error in the changed file.
-That is "hard for a different reason" by construction: the visible signal (tsc) is green exactly when the
-hidden convention is violated.
+**The class.** `import-hygiene` enforces the convention this repository lives by and states in `AGENTS.md`:
+every relative import carries its `.ts` extension, type-only symbols are imported with `import type`, and no
+`enum`/`export =` remains — because the tree is run by node's type stripping, not by a transpiler. This is
+hard for a reason `type-repair` was not: **`tsc` accepts all three violations**. `import { Shape } from
+'./shape'` compiles whenever a `.ts` sibling resolves; a value import of an interface compiles and is
+rejected at load by `verbatimModuleSyntax`; `enum` compiles under tsc and is rejected by node. The visible
+signal is green exactly when the hidden convention is broken.
 
-**Why this one and not a cleverer one:** the corpus can be written as rules over the repo's own source
-(the same shape as `readme-no-doubled-words`), the repair is mechanical enough for a worker, and the
-failure mode is falsifiable — `node` either resolves the import or it does not. A class whose oracle were
-a style preference would be a class that measures taste, which this system explicitly refuses to do.
+**Four rules, and the one that cannot be argued with** (`e2e/certification/import-substrate.ts`):
 
-**What building it costs, in the shape the earlier classes used:**
-
-| piece | what it is | cost |
+| rule | what it refuses | kind |
 | --- | --- | --- |
-| corpus | rules (extension present; type-only symbols imported with `import type`; no `enum`/`export =`) + a guard suite, filed under `holdout/import-hygiene/<rev>/` | free, ~half a day |
-| fixtures | 20 base/repair revision pairs where the base violates the rule and the repair is the minimal fix (the test-repair shape: a temp-root farm, three revisions built by `e2e/certification/artifacts.test.ts`) | free, ~a day |
-| units | 20 pre-submitted dark specs, one per fixture revision | free |
-| certification | 20 measured attempts, `k=18` needed to certify | **paid**, and now projected rather than guessed |
+| `import-extension` | a relative import without its `.ts` extension | static |
+| `type-only-import` | a value import of a symbol that exists only in the type system | static |
+| `no-transpiler-syntax` | `enum`, `export =` | static |
+| `runtime-resolve` | the tree does not load, measured by importing every source file | **dynamic oracle** |
 
-**The projection is the new part.** `factory audit --certifications` reports, per class, median
-tokens/attempt × attempts still needed. On today's live store that is 76,494 tokens/attempt for
-`docs-hygiene`; an `import-hygiene` attempt should land in the same range as `type-repair` (59,046 median)
-because the work is source edits with a compile-free oracle, giving a certificate in the 1.2–1.9 M token
-range. That is the round list's "~2 M tokens", and it is now a number the plan computes for the class
-before a token is spent — the same fence item 4b just built.
+`runtime-resolve` is red whenever the others are — that is honest and it is why the mutation matrix in
+`e2e/certification/import-hygiene.test.ts` expects more than one red rule per planted defect. A subtlety
+the specs pin: node **erases `import type`** before resolving anything, so an extensionless *type* import
+never reaches the resolver; the extension defect is measured with a value import, or the rule would be
+measuring tsc instead of node.
 
-**What is deliberately not started:** the fixtures. Building 20 base/repair pairs is the expensive *time*
-part and there is no way to certify a class without them, so the next round opens with the fixture farm
-(the corpus and the farm are free; only the certification loop spends). Until a class is certified at
-`m=20`, every unit in it is `insufficient` by construction and the dispatch gate lets it through — which
-is correct, and is why this class cannot be "half certified".
+**The visible check covers one rule on purpose.** `tools/check-imports.mjs` (in the fixture repository)
+checks the extension rule only, and it is the acceptance oracle each unit declares. A worker that fixes
+exactly what it prints produces a tree that passes acceptance and still does not run.
+
+**What was measured, offline, with the real wall** (`e2e/certification/import-pipeline.test.ts`, three
+specs, 45 s):
+
+```
+$ factory run U-… --scenario <repaired tree> --json
+verdict      pass   wall/0.1.0+local
+  acceptance:check-imports pass  oracle satisfied (runs=2 pass=2 fail=0 unknown=0)
+  suite      pass  the wall's own suite passed (runs=2 pass=2 fail=0 unknown=0)
+  holdout:01–04 pass
+→ unit verified · class certificate insufficient samples=1 passes=1
+
+$ factory run U-… --scenario <visible-check-only tree> --json     # exit 3
+verdict      fail   wall/0.1.0+local  holdout_failed
+  acceptance:check-imports pass   ← the visible oracle is satisfied
+  suite             pass          ← the pinned suite is satisfied
+  holdout:02–04 fail              ← the class rules are not
+→ unit rejected · class certificate insufficient samples=2 passes=1
+
+$ factory run U-… --scenario <repaired tree> --json               # third revision
+→ verified · certificate insufficient samples=3 passes=2
+```
+
+That is the property the class exists for: a candidate that satisfies every visible signal and still does
+not run is refused by the wall, and a rejected candidate occupies its revision as a non-pass rather than
+leaving a gap.
+
+**The artefacts are buildable and free** (`scripts/import-hygiene-artifacts.sh` → 20 commits, bare mirror,
+corpus, 20 specs, planner, repair target), with three refusals the specs pin: a root inside the checkout, a
+foreign directory it did not build, and a base revision that stops breaking all four rules. Measured on a
+three-revision build: `3 distinct base commits`, all red on all four rules, `repair/` green on all four,
+`plan-units.sh` names the checkout it was built against.
+
+**What is not done, and it is the whole remainder:** the class has never been certified. Twenty attempts
+against the live model are the ~2 M-token item, and until they run the class is `insufficient` — every unit
+in it is cold-started, and the certificate it would file does not exist. The free half is now complete
+enough that the spend is the only thing between this class and a certificate.

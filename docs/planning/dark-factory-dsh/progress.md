@@ -748,3 +748,29 @@ failing driver stops the run instead of moving to the next class.
 now — (1) shipped — and the shape the evidence supports is `m≈150, k≈142` re-certification (the only
 operating point where a certificate accepts a truly-0.90 class only ~3 % of the time), whose cost the new
 plan now projects instead of guessing.
+
+### Round 22 — the fourth class exists, and is proven offline (2026-11-07)
+
+**Item 5's free half is done: `import-hygiene`.** The class enforces the repository's own hidden
+convention — relative imports carry `.ts`, type-only symbols use `import type`, no `enum`/`export =` —
+which `tsc` accepts in all three cases and node rejects. Four rules, three static and one dynamic
+(`runtime-resolve`: import every source file and see whether it loads). A subtlety the specs pin: node
+erases `import type` before resolving, so the extension defect must be measured with a *value* import or
+the rule measures tsc instead of node.
+
+**Proven with the real wall, offline, in 45 s** (`e2e/certification/import-pipeline.test.ts`): a repaired
+tree passes acceptance, the pinned suite and all four holdout rules; the candidate that satisfies the
+visible check *and* the wall's own suite is refused by the class (`holdout_failed`, exit 3, unit
+`rejected`); a third revision passes, and the certificate row moves `samples=1 passes=1` → `2/1` → `3/2`.
+A rejected candidate occupies its revision as a non-pass — no gap, no free retry.
+
+**Artefacts build free** (`scripts/import-hygiene-artifacts.sh`): 20 commits of a source repository, a bare
+mirror, the corpus, 20 specs, an emitted planner, a `repair/` tree. Three refusals, each spec'd: a root
+inside the checkout, a foreign directory it did not build, and a base revision that stops breaking all four
+rules. Verified on a 3-revision build: three distinct base commits, all red on all four rules, `repair/`
+green on all four.
+
+**What remains is only the spend.** The class has never been certified: twenty live attempts are the
+~2 M-token item, and until they run every unit in the class is cold-started and the certificate is
+`insufficient`. The plan verb that prices it (Round 21) will project the cost from the first measured
+attempts rather than a guess.

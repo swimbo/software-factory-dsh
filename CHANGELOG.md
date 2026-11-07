@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.14.0 — 2026-11-07
+
+**A fourth task class, hard for a different reason: `import-hygiene`.** The three existing classes all fail
+the same way — the compiler tells the worker it is not finished. This one enforces the convention this
+repository states in `AGENTS.md` but `tsc` cannot check: every relative import carries its `.ts` extension,
+type-only symbols are imported with `import type`, and no `enum`/`export =` remains, because the tree is run
+by node's type stripping. All three violations compile; node refuses them. The visible signal is green
+exactly when the hidden convention is broken, which is the failure mode a merge-ready verdict has to catch
+and a compiler never will.
+
+Four class rules — three static and one dynamic (`runtime-resolve`, which imports every source file and
+says _that the tree does not run_), plus a visible check that covers the extension rule only. The gap
+between them is the point: the pipeline specs run a candidate that satisfies the visible check and both of
+the wall's own oracles and is still refused by the class (`holdout_failed`, exit 3, unit rejected), then a
+third revision that passes (`certificate insufficient samples=3 passes=2`).
+
+`scripts/import-hygiene-artifacts.sh` builds the persistent artefacts free — 20 commits of a source
+repository, a bare mirror, the corpus, 20 unit specs, an emitted planner, and a `repair/` tree — refusing a
+root inside the checkout, a foreign directory it did not build, and a base revision that stops breaking all
+four rules. `e2e/certification/import-hygiene.test.ts` (6 specs) pins the corpus and its mutation matrix,
+`import-pipeline.test.ts` (3) the wall end to end, `import-artifacts.test.ts` (5) the build and its
+refusals.
+
+**Not done, and it is the whole remainder:** the class has never been certified against the live model.
+Until twenty attempts run, every unit in it is cold-started and `insufficient` — the ~2 M-token item of the
+round list, now the only thing between this class and a certificate.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.13.0 — 2026-11-07
 
 **Scheduled re-certification, with the spend fenced on a per-class budget.** The nightly alert job could
