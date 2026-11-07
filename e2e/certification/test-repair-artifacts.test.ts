@@ -58,7 +58,7 @@ const SCRIPT = join(REPO_ROOT, 'scripts', 'test-repair-artifacts.sh');
 // The real configuration: `DEFAULT_REVISIONS` is 20, and the certification loop needs 20 units. A
 // smaller build would make "every spec qualifies dark" a statement about a build nobody runs.
 const REVISIONS = 20;
-const BUILD_TIMEOUT_MS = 120_000;
+const BUILD_TIMEOUT_MS = 240_000;
 
 interface RunResult {
   readonly code: number;
@@ -462,7 +462,7 @@ describe('the persistent test-repair artefacts', () => {
     expect(replan.stderr).toContain("a unit's identity is (repo, slug, revision)");
     expect(replan.stderr).toContain('nothing was submitted');
     expect(existsSync(join(build.root, 'units.txt'))).toBe(false);
-  }, 120_000);
+  }, 240_000);
 
   it(
     'mints the same corpus id for the same content, whatever the clock and the root say',

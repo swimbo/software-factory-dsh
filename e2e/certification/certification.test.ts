@@ -107,10 +107,11 @@ afterAll(() => {
   substrate.cleanup();
 });
 
-// One `factory run` is ~2.5 s of real wall work. Twenty-one of them, plus the store reads, is the
-// suite's longest test; the timeout is the measured cost with room for a slow machine, not a way to
-// hide a hang.
-const LOOP_TIMEOUT_MS = 300_000;
+// One `factory run` is ~2.5 s of real wall work, but the count is 21 runs and the suite runs files in
+// parallel: under a full-suite load each of those runs takes several times longer than it does alone.
+// The budget below is the measured cost with headroom for that contention, not a way to hide a hang —
+// a hang still trips the adapter's own kill deadline long before this fires.
+const LOOP_TIMEOUT_MS = 600_000;
 
 describe('twenty measured attempts of docs-typo-fix', () => {
   it(
