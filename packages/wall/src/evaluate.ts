@@ -50,6 +50,9 @@ import { replayArgv, verificationReadProblem, verificationSequenceProblem } from
 import type { CriteriaLogEntry, CriteriaLogPort, DiscriminationReport } from './criteria-log.ts';
 import type { HoldoutScenario, HoldoutStore } from './holdout.ts';
 import { assessSecurityPaths, SENSITIVE_OPERATION_CLASSES } from './security-path.ts';
+import type { ClassCertificate } from '@factory/contracts';
+
+import { certificationForClass, type ClassCertification } from './operating-point.ts';
 import { normalisePath, pathIsInScope } from './scope.ts';
 
 export { pathIsInScope } from './scope.ts';
@@ -166,6 +169,14 @@ export interface EvaluateInput {
   readonly receipt: DecisionReceipt;
   readonly holdout: HoldoutStore | null;
   readonly runner: ScenarioRunner;
+  /**
+   * The model id this attempt ran under, when the caller knows it. It is *recorded*, never judged:
+   * it rides on the verdict so a class certificate can be checked against the model that produced
+   * it (`re-certify: model changed`), and it is absent for an offline attempt rather than being
+   * invented — L2 forbids a model anywhere on a decision path, and this is metadata about a
+   * measurement, not an input to one.
+   */
+  readonly modelId?: string | undefined;
   readonly policy: {
     readonly deltaThreshold: number;
     readonly commandTimeoutMs: number;
@@ -199,6 +210,15 @@ export interface EvaluateInput {
      * gate and is the honest default for a cold start.
      */
     readonly minDeltaSamples?: number;
+    /**
+     * The certification operating point (ND1). Defaults to the ratified m = 20, k = 18, p0 = 0.95;
+     * a policy may tighten it, and `evaluate` publishes the α that follows from it.
+     */
+    readonly certification?: {
+      readonly m?: number;
+      readonly k?: number;
+      readonly p0?: number;
+    };
     /**
      * The `factory-env` image digest the wall ran, so a verdict names its instrument
      * (A4.4). Recorded in `wallVersion`; a tag is a mutable pointer and therefore not an
@@ -636,7 +656,11 @@ async function checkFaithfulness(input: EvaluateInput): Promise<CheckOutcome> {
           refused ? error.message : 'recorded command could not be re-executed',
         ),
       );
-      const reason = refused ? 'privileged_unbrokered' : 'receipt_unavailable';
+      // The code names the refusal, not the operation: the wall is not a consumer of decisions, so
+      // what it observed is "the replay was refused because it had no decision", never "this
+      // operation was never approved". `privileged_unbrokered` stays in the contract for verdicts
+      // already on disk; new rows carry the additive code.
+      const reason = refused ? 'privileged_replay_refused' : 'receipt_unavailable';
       if (!reasons.includes(reason)) reasons.push(reason);
       continue;
     }
@@ -852,7 +876,11 @@ function requirementOf(scenario: HoldoutScenario): ScenarioRequirements {
   };
 }
 
-async function assessHoldout(input: EvaluateInput, runs: number): Promise<HoldoutAssessment> {
+async function assessHoldout(
+  input: EvaluateInput,
+  runs: number,
+  identity: MeasurementIdentity,
+): Promise<HoldoutAssessment> {
   const { holdout, policy, runner, receipt } = input;
   const threshold = policy.deltaThreshold;
 
@@ -896,7 +924,9 @@ async function assessHoldout(input: EvaluateInput, runs: number): Promise<Holdou
       exitSetJudge(scenario.expectExit),
     );
 
-    observations.push(observation(holdout, receipt, scenario.id, 'candidate', verdict.outcome));
+    observations.push(
+      observation(holdout, receipt, scenario.id, 'candidate', verdict.outcome, identity),
+    );
 
     if (verdict.outcome === 'fail') {
       scenarios.push(result(id, 'holdout', 'fail', `scenario failed (${verdict.observed})`));
@@ -930,7 +960,9 @@ async function assessHoldout(input: EvaluateInput, runs: number): Promise<Holdou
       exitSetJudge(scenario.expectExit),
     );
 
-    observations.push(observation(holdout, receipt, scenario.id, 'base', verdict.outcome));
+    observations.push(
+      observation(holdout, receipt, scenario.id, 'base', verdict.outcome, identity),
+    );
     basePassed.push(verdict.outcome === 'unknown' ? null : verdict.outcome === 'pass');
   }
 
@@ -1002,6 +1034,7 @@ function observation(
   scenarioId: string,
   side: 'base' | 'candidate',
   outcome: 'pass' | 'fail' | 'unknown',
+  identity: MeasurementIdentity,
 ): CriteriaLogEntry {
   return {
     taskClass: holdout.taskClass,
@@ -1010,8 +1043,16 @@ function observation(
     revision: receipt.diff.baseRev,
     side,
     outcome,
+    policyVersion: identity.policyVersion,
+    modelId: identity.modelId,
     at: '',
   };
+}
+
+/** The policy + model an observation was measured under: the identity a class count may not borrow. */
+interface MeasurementIdentity {
+  readonly policyVersion: string;
+  readonly modelId: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1636,9 +1677,14 @@ function countDeltaSamples(
   holdout: HoldoutStore,
   live: readonly CriteriaLogEntry[],
   log: readonly CriteriaLogEntry[],
+  identity: MeasurementIdentity,
 ): number {
   const relevant = [...log, ...live].filter(
-    (entry) => entry.taskClass === holdout.taskClass && entry.holdoutRevision === holdout.revision,
+    (entry) =>
+      entry.taskClass === holdout.taskClass &&
+      entry.holdoutRevision === holdout.revision &&
+      entry.policyVersion === identity.policyVersion &&
+      (entry.modelId ?? null) === identity.modelId,
   );
 
   const byRevision = new Map<string, { base: boolean; candidate: boolean }>();
@@ -1650,6 +1696,45 @@ function countDeltaSamples(
   }
 
   return [...byRevision.values()].filter((entry) => entry.base && entry.candidate).length;
+}
+
+/**
+ * The class's certification attempts: one per paired revision, and "passed" when the candidate
+ * side of that attempt produced no `fail` and no unmeasured run.
+ *
+ * A paired revision is one *attempt* — base and candidate observations of the same scenario set —
+ * which is the unit ND1 certifies. Counting scenario rows instead would make a class look
+ * certifiable because its tasks have many scenarios, which is the same error as counting test cases
+ * as attempts.
+ */
+export function countClassAttempts(
+  holdout: HoldoutStore,
+  live: readonly CriteriaLogEntry[],
+  log: readonly CriteriaLogEntry[],
+  identity: MeasurementIdentity,
+): { readonly samples: number; readonly passes: number } {
+  const relevant = [...log, ...live].filter(
+    (entry) =>
+      entry.taskClass === holdout.taskClass &&
+      entry.holdoutRevision === holdout.revision &&
+      entry.policyVersion === identity.policyVersion &&
+      (entry.modelId ?? null) === identity.modelId,
+  );
+  const byRevision = new Map<string, { base: boolean; candidate: number; clean: boolean }>();
+  for (const entry of relevant) {
+    const current = byRevision.get(entry.revision) ?? { base: false, candidate: 0, clean: true };
+    if (entry.side === 'base') current.base = true;
+    else {
+      current.candidate += 1;
+      if (entry.outcome !== 'pass') current.clean = false;
+    }
+    byRevision.set(entry.revision, current);
+  }
+  const attempts = [...byRevision.values()].filter((entry) => entry.base && entry.candidate > 0);
+  return {
+    samples: attempts.length,
+    passes: attempts.filter((entry) => entry.clean).length,
+  };
 }
 
 /**
@@ -1666,29 +1751,73 @@ function checkClassCertification(
   live: readonly CriteriaLogEntry[],
   log: readonly CriteriaLogEntry[],
   minSamples: number,
-): { readonly outcome: CheckOutcome; readonly requiresHuman: boolean } {
+  operatingPoint: { readonly m?: number; readonly k?: number; readonly p0?: number } | undefined,
+  identity: MeasurementIdentity,
+  legacyLines: number,
+): {
+  readonly outcome: CheckOutcome;
+  readonly requiresHuman: boolean;
+  readonly certificate: ClassCertificate | null;
+} {
   if (holdout === null) {
-    return { outcome: { scenarios: [], reasons: [] }, requiresHuman: false };
+    return { outcome: { scenarios: [], reasons: [] }, requiresHuman: false, certificate: null };
   }
 
-  const samples = countDeltaSamples(holdout, live, log);
-  const certifiable = samples >= minSamples;
+  const samples = countDeltaSamples(holdout, live, log, identity);
+  const deltaCertifiable = samples >= minSamples;
+  const counted = countClassAttempts(holdout, live, log, identity);
+  const certification: ClassCertification = certificationForClass({
+    samples: counted.samples,
+    passes: counted.passes,
+    ...(operatingPoint?.m === undefined ? {} : { m: operatingPoint.m }),
+    ...(operatingPoint?.k === undefined ? {} : { k: operatingPoint.k }),
+    ...(operatingPoint?.p0 === undefined ? {} : { p0: operatingPoint.p0 }),
+  });
+
+  // Wording rule: the word "certified" appears only when the class certified. `insufficient` says
+  // unknown and says so plainly — a class with three attempts is not "probably fine".
+  const point =
+    `m=${certification.m.toString()} k=${certification.k.toString()} ` +
+    `alpha=${certification.alphaExact}`;
+  const legacyNote =
+    legacyLines > 0
+      ? `; ${legacyLines.toString()} log line(s) predate policy/model identity and were not counted`
+      : '';
+  const detail =
+    certification.outcome === 'certified'
+      ? `${counted.passes.toString()} of ${counted.samples.toString()} attempts passed for this ` +
+        `task class: certified at ${point} (alpha is P(a class that truly passes ` +
+        `${certification.p0.toString()} fails certification))${legacyNote}`
+      : certification.outcome === 'not-certified'
+        ? `${counted.passes.toString()} of ${counted.samples.toString()} attempts passed for this ` +
+          `task class: not certified at ${point}; promotion requires a human signature${legacyNote}`
+        : `${counted.samples.toString()} of ${certification.m.toString()} attempts for this task ` +
+          `class: insufficient evidence to certify at ${point} — unknown is not "probably fine", ` +
+          `so promotion requires a human signature${legacyNote}`;
+
+  // Two different facts, both kept: `minDeltaSamples` is Δ evidence, certification is the
+  // binomial operating point. Either one unsatisfied means a person decides.
+  const requiresHuman = !deltaCertifiable || certification.outcome !== 'certified';
+  const deltaLine = deltaCertifiable
+    ? `${samples.toString()} delta samples for this task class (min ${minSamples.toString()})`
+    : `${samples.toString()} of ${minSamples.toString()} delta samples for this task class: promotion requires a human signature`;
 
   return {
     outcome: {
-      scenarios: [
-        result(
-          'class-certification',
-          'policy',
-          'pass',
-          certifiable
-            ? `${samples.toString()} delta samples for this task class (min ${minSamples.toString()})`
-            : `${samples.toString()} of ${minSamples.toString()} delta samples for this task class: promotion requires a human signature`,
-        ),
-      ],
+      scenarios: [result('class-certification', 'policy', 'pass', `${deltaLine}; ${detail}`)],
       reasons: [],
     },
-    requiresHuman: !certifiable,
+    requiresHuman,
+    certificate: {
+      taskClass: holdout.taskClass,
+      m: certification.m,
+      k: certification.k,
+      p0: certification.p0,
+      alpha: certification.alpha,
+      samples: certification.samples,
+      passes: certification.passes,
+      outcome: certification.outcome,
+    },
   };
 }
 
@@ -1701,12 +1830,13 @@ function checkClassCertification(
 function readLogPort(port: CriteriaLogPort | undefined): {
   readonly entries: readonly CriteriaLogEntry[];
   readonly corruptLines: number;
+  readonly legacyLines: number;
 } {
-  if (port === undefined) return { entries: [], corruptLines: 0 };
+  if (port === undefined) return { entries: [], corruptLines: 0, legacyLines: 0 };
   try {
     return port.read();
   } catch {
-    return { entries: [], corruptLines: 1 };
+    return { entries: [], corruptLines: 1, legacyLines: 0 };
   }
 }
 
@@ -1737,13 +1867,19 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
   // loudly instead of silently falling back to a single execution.
   const runs = runsPerScenario(input.policy);
   const maxNonDiscriminating = input.policy.maxNonDiscriminating ?? 0;
+  // The identity a class count may not borrow: the policy version this verdict will carry, plus
+  // the model that produced the attempt (`null` when the caller could not name one). Every
+  // observation this run records is stamped with it, and history is only counted under the same
+  // identity, so a new policy or model cannot mint a certificate from another one's measurements.
+  const policyVersion = derivePolicyVersion(input.policy);
+  const identity: MeasurementIdentity = { policyVersion, modelId: input.modelId ?? null };
 
   const files = await inspectChangedFiles(input.diff);
   const log = readLogPort(input.criteriaLog);
 
   const faithfulness = await checkFaithfulness(input);
   const acceptance = await checkAcceptance(input, runs);
-  const holdout = await assessHoldout(input, runs);
+  const holdout = await assessHoldout(input, runs, identity);
   const quality = assessHoldoutQuality(
     input.holdout,
     holdout.observations,
@@ -1762,6 +1898,9 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
     holdout.observations,
     log.entries,
     input.policy.minDeltaSamples ?? 0,
+    input.policy.certification,
+    identity,
+    log.legacyLines,
   );
 
   // History is written after the decision is computed, and a failed append does not
@@ -1823,7 +1962,7 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
     attemptId: input.receipt.attemptId,
     receiptSha: contentHash(input.receipt),
     holdoutRevision: holdout.delta.holdoutRevision,
-    policyVersion: derivePolicyVersion(input.policy),
+    policyVersion,
     wallVersion,
     outcome,
     scenarios: [...merged.scenarios],
@@ -1834,6 +1973,10 @@ export async function evaluate(input: EvaluateInput): Promise<Verdict> {
     ...(outcome === 'pass' && certification.requiresHuman
       ? { promotionRequiresHumanSignature: true }
       : {}),
+    // The class judgement, as data. Absent — never `certified` — when there was no holdout to
+    // judge the class against, so a reader cannot mistake a cold start for a certificate.
+    ...(certification.certificate === null ? {} : { certification: certification.certificate }),
+    ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
     evaluatedAt: input.nowIso,
   };
 

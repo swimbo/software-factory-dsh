@@ -7,9 +7,17 @@
  * settle is answered 401 after it. That last spec is the wiring proof for "revoked before the
  * verdict is written": `launch.ts` calls `settle()` in a `finally`, and this is the same call.
  */
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { openAttemptCredential, type AttemptCredential } from './credential.ts';
+import {
+  apiKeyPath,
+  openAttemptCredential,
+  resolveApiKey,
+  type AttemptCredential,
+} from './credential.ts';
 
 const GATEWAY_KEY = 'sk-gateway-never-in-the-worker';
 
@@ -204,5 +212,73 @@ describe('refusing to half-configure a live run', () => {
     if (opened.ok) throw new Error('expected a refusal');
     // Dead on arrival is refused, not minted and left to fail inside `dsh`.
     expect(opened.detail).toContain('dead on arrival');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Where the key comes from: the environment, or a file nobody else can read
+//
+// The file path exists because operators put `BIFROST_API_KEY` into a launch agent, and a plist
+// in `~/Library/LaunchAgents` is readable by other local users and by anything that snapshots the
+// home directory. These specs are about the *resolution order and the refusal*, not about the
+// proxy: the proxy's own specs already prove what the gateway receives.
+// ---------------------------------------------------------------------------
+
+describe('resolveApiKey', () => {
+  const scratch = (): string => mkdtempSync(join(tmpdir(), 'factory-key-'));
+
+  /** A factory home with a key file at `secrets/bifrost-key`, in the mode asked for. */
+  function homeWithKey(contents: string, mode: number): string {
+    const home = scratch();
+    mkdirSync(join(home, 'secrets'), { recursive: true });
+    const path = join(home, 'secrets', 'bifrost-key');
+    writeFileSync(path, contents);
+    chmodSync(path, mode);
+    return home;
+  }
+
+  it('prefers the environment, and does not need a file at all', () => {
+    const resolved = resolveApiKey({ BIFROST_API_KEY: 'from-env', FACTORY_HOME: scratch() });
+    expect(resolved).toEqual({ ok: true, key: 'from-env', source: 'environment' });
+  });
+
+  it('reads a 0600 file when the environment has no key, trimming the newline a paste leaves', () => {
+    const home = homeWithKey('sk-from-a-file\n', 0o600);
+    const resolved = resolveApiKey({ FACTORY_HOME: home });
+    expect(resolved).toEqual({ ok: true, key: 'sk-from-a-file', source: 'file' });
+  });
+
+  it('refuses a 0644 file and names chmod 600 instead of using it', () => {
+    const home = homeWithKey('sk-should-not-be-read', 0o644);
+    const resolved = resolveApiKey({ FACTORY_HOME: home });
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) throw new Error('unreachable');
+    expect(resolved.detail).toContain('chmod 600');
+    expect(resolved.detail).toContain('secrets/bifrost-key');
+    // The value must not appear in a refusal that will be printed to a terminal and a log.
+    expect(resolved.detail).not.toContain('sk-should-not-be-read');
+  });
+
+  it('names both ways to provide a key when there is none anywhere', () => {
+    const resolved = resolveApiKey({ FACTORY_HOME: scratch() });
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) throw new Error('unreachable');
+    expect(resolved.detail).toContain('BIFROST_API_KEY');
+    expect(resolved.detail).toContain('0600');
+  });
+
+  it('resolves the file under FACTORY_HOME, defaulting to ~/.factory', () => {
+    expect(apiKeyPath({ FACTORY_HOME: '/tmp/elsewhere' })).toBe(
+      '/tmp/elsewhere/secrets/bifrost-key',
+    );
+    expect(apiKeyPath({})).toBe(join(homedir(), '.factory', 'secrets', 'bifrost-key'));
+  });
+
+  it('treats an empty key file as a mistake, not as "no key configured"', () => {
+    const home = homeWithKey('   \n', 0o600);
+    const resolved = resolveApiKey({ FACTORY_HOME: home });
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) throw new Error('unreachable');
+    expect(resolved.detail).toContain('empty');
   });
 });

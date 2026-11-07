@@ -44,14 +44,17 @@ const EXPECTED_EXIT_CODES: Readonly<Record<ErrorCode, number>> = {
   VERDICT_UNKNOWN: 5,
   // 6 — budget
   BUDGET_EXCEEDED: 6,
+  USAGE_UNRECONCILED: 6,
   // 7 — concurrency / conflict
   CONCURRENCY_LIMIT: 7,
   LEASE_HELD: 7,
   RECEIPT_CONFLICT: 7,
   // 8 — environment
+  ANCHOR_UNAVAILABLE: 8,
   EXECUTOR_UNAVAILABLE: 8,
   DSH_VERSION_MISMATCH: 8,
   CONTAINER_UNAVAILABLE: 8,
+  CONFIGURATION_CONFLICT: 8,
   // 9 — integrity
   STORE_QUARANTINED: 9,
   // 1 — internal

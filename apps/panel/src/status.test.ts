@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { parseStatus } from '@factory/contracts';
 import type { StatusV1 } from '@factory/contracts';
+import { SCHEMA_VERSION } from '@factory/store';
 
 import {
   DEFAULT_PER_DAY_USD,
@@ -468,7 +469,9 @@ describe('health is derived from evidence, never from optimism', () => {
     walkToVerdict(store());
     const status = statusOf(store());
     expect(status.health.store.ledgerHead).not.toBeNull();
-    expect(status.health.store.schemaVersion).toBe(1);
+    // Read from the store rather than hard-coded: the panel reports the schema the ledger is at, and
+    // a literal here would turn every additive migration into an unrelated panel failure.
+    expect(status.health.store.schemaVersion).toBe(SCHEMA_VERSION);
   });
 });
 

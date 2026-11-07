@@ -62,7 +62,16 @@ function must(args: string[]): string {
 const SUFFIX = `${process.pid.toString(36)}${Date.now().toString(36).slice(-4)}`;
 const NETWORK = `factory-egress-${SUFFIX}`;
 const PROXY = `factory-proxy-${SUFFIX}`;
-const WORKER = `factory-worker-${SUFFIX}`;
+/**
+ * Deliberately **not** in the launcher's `factory-worker-<attemptId>` namespace.
+ *
+ * This container is hand-rolled here, so it is not the launcher's to discover — but a spec that
+ * looks for a container by the name prefix `factory-worker-` cannot tell the difference, and under
+ * `maxWorkers: 4` one did: the worker-container suite's E2E-45 picked this container, killed it, and
+ * left its own run hanging. Its identity has to be ours alone. Every container this spec creates is
+ * also removed by the exact name it created (`cleanup`), never by a pattern.
+ */
+const WORKER = `factory-egress-worker-${SUFFIX}`;
 const PROXY_PORT = 8080;
 
 /** The attempt directory the worker mount mirrors: same path inside and out. */

@@ -254,3 +254,10 @@ describe('the refusal pages', () => {
     expect(html).toContain('/units');
   });
 });
+
+describe('the footer states the topology the page is served under (ND2)', () => {
+  it('quotes the claim the deployment may make, not a generic one', () => {
+    const html = render(sampleStatus());
+    expect(html).toContain('single-uid: the wall is a separate process, not a separate principal');
+  });
+});

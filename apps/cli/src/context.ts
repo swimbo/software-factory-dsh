@@ -23,7 +23,7 @@ import { createRequire } from 'node:module';
 
 import type { LaneDecision } from '@factory/contracts';
 import { createEngine, type Engine, type QualifyInput } from '@factory/core';
-import { newTraceIdForCli } from './exit.ts';
+import { CONFIGURATION_CONFLICT_RUNBOOK, newTraceIdForCli } from './exit.ts';
 import {
   currentPolicyVersion,
   DEFAULT_POLICY,
@@ -127,6 +127,29 @@ export interface ExecutorProbe {
   readonly scenarioPath: string | null;
   readonly detail: string;
   readonly runbook: string;
+  /**
+   * The contract code a refusal must be reported under, when the probe knows better than the
+   * default. `run` turns `available: false` into a `FactoryError`, and the choice between
+   * `EXECUTOR_UNAVAILABLE`, `CONTAINER_UNAVAILABLE` and `CONFIGURATION_CONFLICT` decides which
+   * runbook line the operator reads — so it is a property of *why* the probe refused, not something
+   * the verb can re-derive from `isolation.mode`. `undefined` means "derive it the old way": no
+   * executor at all, so `EXECUTOR_UNAVAILABLE`.
+   */
+  readonly refusalCode?:
+    'EXECUTOR_UNAVAILABLE' | 'CONTAINER_UNAVAILABLE' | 'CONFIGURATION_CONFLICT';
+  /**
+   * Where the turn will run, and what it will run inside.
+   *
+   * `mode: 'host'` is the default and means a child of this process. `mode: 'container'` carries
+   * the plan the executor needs; it is `null` for a host launch, so a caller cannot accidentally
+   * pass a container plan it did not probe. The refusal case is `available: false` with the
+   * docker/image reason in `detail` — never a host launch.
+   */
+  readonly isolation: {
+    readonly mode: 'host' | 'container' | 'refused';
+    readonly reason: string;
+    readonly container: import('@factory/dsh-adapter').WorkerContainerPlan | null;
+  };
 }
 
 export interface WallProbe {
@@ -173,6 +196,24 @@ export function findOnPath(
   return null;
 }
 
+/**
+ * The adapter, required lazily.
+ *
+ * `context.ts` is the composition root and must import on a host with no adapter installed
+ * (`run` then refuses with a runbook line). A static import would turn that refusal into a stack
+ * trace at module load, so the one package the probe needs is required here, inside a try/catch,
+ * exactly like {@link moduleResolves}.
+ */
+function requireAdapter(): typeof import('@factory/dsh-adapter') | null {
+  try {
+    return createRequire(import.meta.url)(
+      '@factory/dsh-adapter',
+    ) as typeof import('@factory/dsh-adapter');
+  } catch {
+    return null;
+  }
+}
+
 function moduleResolves(specifier: string): boolean {
   try {
     createRequire(import.meta.url).resolve(specifier);
@@ -180,6 +221,74 @@ function moduleResolves(specifier: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Why container isolation and a live model cannot be combined *today*, or `null` when they can.
+ *
+ * The two levers are named in the message because an operator who has to work out which pair of
+ * settings produced an exit 8 at 2am pays for our brevity. The two ways forward are named for the
+ * same reason: "it is impossible" without "here is what to do instead" is a wall, not a gate.
+ *
+ * ## This is a measurement, not an assumption
+ *
+ * The message used to say the combination "cannot both be honoured", which was an assertion we
+ * had never tested. `e2e/cli/docker/10-internal-bridge.test.ts` now measures the two facts that
+ * make it true on this host (macOS/OrbStack — a docker daemon inside a Linux VM):
+ *
+ *   - the `--internal` network's gateway is not an address on this host, so a host process
+ *     cannot bind it (`EADDRNOTAVAIL`), and
+ *   - an `--internal` network is `ENETUNREACH` towards every host address, including the
+ *     `host.docker.internal` route that works from a normal bridge network.
+ *
+ * On a **native-Linux** daemon the gateway *is* a host interface, so the transport is viable
+ * there — but nothing in this tree creates the network or binds the proxy to it, so the pair is
+ * still refused there too, for a reason the message says out loud rather than hiding behind the
+ * platform one. What the refusal must never do is let a worker start and fail later as an
+ * unexplained 401 that looks like a model fault.
+ */
+const CONTAINER_LIVE_MODEL_REASON =
+  'container isolation and a live model cannot both be honoured today: the worker has no route ' +
+  'to the credential proxy, and the transport that would give it one is not available';
+
+/** The platform half of the refusal: the same fact, worded for the host that measured it. */
+function containerLiveModelTransportDetail(platform: NodeJS.Platform | string): string {
+  if (platform === 'linux') {
+    return (
+      'The transport that would make the pair possible — the credential proxy bound to the ' +
+      'gateway of an `--internal` network, the worker attached to that network — would work on ' +
+      'a native-Linux daemon, where the bridge gateway is a real host interface. It is not ' +
+      'built in this tree yet: nothing creates that network, attaches the worker to it, or ' +
+      'binds the proxy to the gateway, so the pair stays refused instead of dispatching a ' +
+      'worker that would fail with a 401.'
+    );
+  }
+  return (
+    'The transport that would make the pair possible is not buildable on this host: docker runs ' +
+    'in a VM here, so the `--internal` network gateway is not an address on this host (binding ' +
+    'it fails with EADDRNOTAVAIL) and an `--internal` network has no route to a host process ' +
+    '(ENETUNREACH, not a refusal). Both are measured by ' +
+    'e2e/cli/docker/10-internal-bridge.test.ts and recorded in ' +
+    'docs/runbooks/worker-container.md.'
+  );
+}
+
+function containerLiveModelRefusal(
+  env: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform | string,
+): string | null {
+  // "with a key" is part of the condition, not decoration: a run that has no credential cannot
+  // spend, and refusing it for a network conflict would send the operator to fix the wrong thing.
+  if ((env.FACTORY_LIVE_MODEL ?? '').trim() !== '1') return null;
+  if ((env.BIFROST_API_KEY ?? '').trim() === '') return null;
+  return (
+    'FACTORY_WORKER_ISOLATION=container runs the worker with `--network none`, but a live model ' +
+    '(FACTORY_LIVE_MODEL=1) authenticates through the credential proxy, which binds 127.0.0.1 on ' +
+    "the host. A container with no network cannot reach this host's loopback, so the model call " +
+    `inside the worker could never be authenticated. ${containerLiveModelTransportDetail(platform)} ` +
+    'Two ways forward: unset FACTORY_WORKER_ISOLATION to drop the container and run this turn on ' +
+    'the host (the default), or unset FACTORY_LIVE_MODEL and run this turn without a model call'
+  );
 }
 
 export function probeExecutor(
@@ -202,6 +311,11 @@ export function probeExecutor(
         detail: refusal,
         runbook:
           'runbook: unset NODE_ENV or FACTORY_EXECUTOR=fake; the real executor needs the pinned dsh',
+        isolation: {
+          mode: 'host',
+          reason: 'the scripted executor launches no process',
+          container: null,
+        },
       };
     }
     if (scenarioPath === null) {
@@ -213,6 +327,11 @@ export function probeExecutor(
         scenarioPath: null,
         detail: 'FACTORY_EXECUTOR=fake needs a scenario (--scenario <path> or FACTORY_SCENARIO)',
         runbook: 'runbook: pass --scenario <scenario.json> describing the worker the test needs',
+        isolation: {
+          mode: 'host',
+          reason: 'the scripted executor launches no process',
+          container: null,
+        },
       };
     }
     return {
@@ -223,21 +342,108 @@ export function probeExecutor(
       scenarioPath,
       detail: `fake executor, scenario ${scenarioPath} - no dsh process will be launched`,
       runbook: '',
+      isolation: {
+        mode: 'host',
+        reason: 'the scripted executor launches no process',
+        container: null,
+      },
     };
   }
   const moduleAvailable = options.moduleAvailable ?? moduleResolves('@factory/dsh-adapter');
+  // Where the turn will run. Consulted even for a host request, because an unrecognised value is a
+  // usage error and the operator has to learn about it before anything is reserved.
+  const adapter = moduleAvailable ? requireAdapter() : null;
+
+  // (c) The one launch combination the factory cannot honour today: a container worker with a
+  // live model. `worker-container.ts` launches the worker with `--network none`, and the credential
+  // proxy that fronts the gateway binds `127.0.0.1` on this host (ADR-007). A loopback address
+  // inside the container's own, empty network namespace is not this host's loopback, so the
+  // worker can never reach the token it would need — the failure surfaces after the worker
+  // starts, as an unexplained 401 that looks like a model fault rather than a configuration one.
+  //
+  // The justification is measured, not asserted: `e2e/cli/docker/10-internal-bridge.test.ts` pins
+  // the platform fact (the `--internal` gateway is not host-bindable on a docker-in-a-VM host, and
+  // an internal network has no route to the host) and the platform's alternative (native Linux
+  // would work but is not wired). See `containerLiveModelRefusal`.
+  //
+  // Checked *before* `decideWorkerIsolation` on purpose: whether a docker daemon happens to be
+  // running cannot change this answer, so shelling out to ask would only replace an accurate
+  // message with a less accurate one.
+  const conflict =
+    adapter !== null && adapter.requestedIsolation(env) === 'container'
+      ? containerLiveModelRefusal(env, process.platform)
+      : null;
+  if (conflict !== null) {
+    return {
+      available: false,
+      kind: 'headless',
+      binPath,
+      moduleAvailable,
+      scenarioPath: null,
+      // `run` renders `detail` into the refusal message (`verbs/run.ts`), so the two levers and
+      // the two ways forward live here rather than in a runbook line keyed by the exit code.
+      detail: conflict,
+      runbook: CONFIGURATION_CONFLICT_RUNBOOK,
+      refusalCode: 'CONFIGURATION_CONFLICT',
+      isolation: { mode: 'refused', reason: CONTAINER_LIVE_MODEL_REASON, container: null },
+    };
+  }
+
+  const choice =
+    adapter === null ? null : adapter.decideWorkerIsolation({ env, platform: process.platform });
+
+  if (choice !== null && choice.mode === 'refuse') {
+    // A refusal is never a fallback. If `container` was asked for and docker, the image, or a flag
+    // is missing, the launch stops here with the reason and the command that fixes it — running a
+    // host child instead would make the isolation claim in the README false while every test
+    // stayed green.
+    return {
+      available: false,
+      kind: 'headless',
+      binPath,
+      moduleAvailable,
+      scenarioPath: null,
+      // The reason *and* the fix, in the one field `run` renders (`verbs/run.ts` turns `detail`
+      // into the refusal message and drops `runbook`, which is why the command is carried here
+      // too — the same shape `resolveMirror` uses for its refusals).
+      detail: `${choice.reason}. ${choice.runbook}`,
+      runbook: choice.runbook,
+      // The daemon or the image is missing: the turn could run, just not where it was asked to.
+      refusalCode: 'CONTAINER_UNAVAILABLE',
+      isolation: { mode: 'refused', reason: choice.reason, container: null },
+    };
+  }
+
+  const wantsContainer = choice !== null && choice.mode === 'container';
   const missing: string[] = [];
-  if (binPath === null) missing.push('no `dsh` binary on PATH (set DSH_BIN to override)');
-  if (!moduleAvailable) missing.push('the @factory/dsh-adapter package could not be resolved');
+  if (!moduleAvailable || adapter === null) {
+    missing.push('the @factory/dsh-adapter package could not be resolved');
+  }
+  // In container mode the binary that runs is the image's; only a host launch needs the host one.
+  if (!wantsContainer && binPath === null) {
+    missing.push('no `dsh` binary on PATH (set DSH_BIN to override)');
+  }
+  const container =
+    wantsContainer && choice !== null && choice.mode === 'container' ? choice.plan : null;
+  const reason = choice === null ? 'the worker runs as a child of this process' : choice.reason;
   return {
     available: missing.length === 0,
     kind: 'headless',
     binPath,
     moduleAvailable,
     scenarioPath: null,
-    detail: missing.length === 0 ? `dsh at ${String(binPath)}` : missing.join('; '),
+    detail:
+      missing.length === 0
+        ? container === null
+          ? `dsh at ${String(binPath)}`
+          : reason
+        : missing.join('; '),
     runbook:
       'runbook: install the pinned dsh (0.2.1-rc.5) and make it reachable on PATH, then re-run: factory run <unitId>',
+    isolation:
+      container === null
+        ? { mode: 'host', reason, container: null }
+        : { mode: 'container', reason, container },
   };
 }
 
@@ -334,6 +540,8 @@ export interface FactoryContext {
   readonly policy: QualifierPolicy;
   /** `contentHash(policy)` — changes when the policy does, which forces a re-score. */
   readonly policyVersion: string;
+  /** The dispatch ceilings, read separately: they are operator limits, not policy. */
+  readonly limits: OperatorLimits;
   readonly allowColdStart: boolean;
   readonly executor: ExecutorProbe;
   readonly wall: WallProbe;
@@ -348,6 +556,11 @@ export interface FactoryContext {
  * because the flag is part of the policy object it changes `currentPolicyVersion`.
  * A decision made under cold start therefore carries a different version from one
  * made under the shipped policy, and can never be mistaken for a measured pass.
+ *
+ * The dispatch ceilings are **not** policy: they are resolved by {@link resolveLimits}
+ * into a separate `OperatorLimits` object, because "how much may run at once" changes
+ * nothing about what a pass means and must not change `currentPolicyVersion` (see
+ * `packages/qualifier/src/policy.ts`).
  */
 export function resolvePolicy(
   env: Readonly<Record<string, string | undefined>>,
@@ -357,9 +570,33 @@ export function resolvePolicy(
   // Read here, at the composition root, and nowhere else: the worker's process environment
   // must not be able to switch brokering off for the factory that brokers it.
   const brokering = env['FACTORY_PRIVILEGED_BROKERING'] === 'on' ? 'on' : 'off';
-  // The ceilings are the operator's, read here and nowhere else. A value that is not a
-  // positive integer is ignored rather than coerced: "MAX=0" must not become a silent
-  // "no dispatch ever", and "" must not become NaN.
+  return {
+    ...DEFAULT_POLICY,
+    allowColdStart: enabled,
+    privilegedBrokering: brokering,
+  };
+}
+
+/** The dispatch ceilings, kept out of the policy so they cannot move `currentPolicyVersion`. */
+export interface OperatorLimits {
+  readonly maxConcurrentAttempts: number;
+  readonly maxConcurrentWalls: number;
+}
+
+/** The shipped ceilings; an operator who does not raise them runs at these. */
+export const DEFAULT_LIMITS: OperatorLimits = Object.freeze({
+  maxConcurrentAttempts: 1,
+  maxConcurrentWalls: 1,
+});
+
+/**
+ * Read the operator's dispatch ceilings, here and nowhere else.
+ *
+ * A value that is not a positive integer is ignored rather than coerced: "MAX=0" must not
+ * become a silent "no dispatch ever", and "" must not become NaN. The ceilings are read
+ * separately from the policy so changing them re-schedules work without re-scoring it.
+ */
+export function resolveLimits(env: Readonly<Record<string, string | undefined>>): OperatorLimits {
   const ceiling = (raw: string | undefined, fallback: number): number => {
     const text = (raw ?? '').trim();
     if (text === '') return fallback;
@@ -367,16 +604,13 @@ export function resolvePolicy(
     return Number.isInteger(value) && value >= 1 ? value : fallback;
   };
   return {
-    ...DEFAULT_POLICY,
-    allowColdStart: enabled,
-    privilegedBrokering: brokering,
     maxConcurrentAttempts: ceiling(
       env['FACTORY_MAX_CONCURRENT_ATTEMPTS'],
-      DEFAULT_POLICY.maxConcurrentAttempts,
+      DEFAULT_LIMITS.maxConcurrentAttempts,
     ),
     maxConcurrentWalls: ceiling(
       env['FACTORY_MAX_CONCURRENT_WALLS'],
-      DEFAULT_POLICY.maxConcurrentWalls,
+      DEFAULT_LIMITS.maxConcurrentWalls,
     ),
   };
 }
@@ -403,6 +637,7 @@ export function createContext(ui: CliUi, overrides: ContextOverrides = {}): Fact
 
   const policy = resolvePolicy(env, overrides.allowColdStart);
   const policyVersion = currentPolicyVersion(policy);
+  const limits = resolveLimits(env);
   const store = openStore({ dir: paths.state, now: clock });
   const envelopeUsd =
     overrides.envelopeUsd ??
@@ -450,6 +685,7 @@ export function createContext(ui: CliUi, overrides: ContextOverrides = {}): Fact
     envelopeUsd,
     policy,
     policyVersion,
+    limits,
     allowColdStart: policy.allowColdStart,
     executor:
       overrides.executor ?? probeExecutor(env, { scenarioPath: overrides.scenarioPath ?? null }),

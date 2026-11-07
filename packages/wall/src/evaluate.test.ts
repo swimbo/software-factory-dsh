@@ -38,6 +38,8 @@ import {
   type ScenarioRunInput,
   type ScenarioRunResult,
 } from './evaluate.ts';
+import { broker, createMemoryRegistry, type BrokerRefusal } from '../../proxy/src/broker.ts';
+import { PrivilegedBrokerRefusal } from './local.ts';
 import { oneLineReason, workerFacingReason } from './reasons.ts';
 import type { HoldoutScenario, HoldoutStore } from './holdout.ts';
 import type { CriteriaLogEntry, CriteriaLogPort, CriteriaLogReadResult } from './criteria-log.ts';
@@ -61,6 +63,13 @@ interface Outcome {
   readonly outputSha: string;
   readonly timedOut?: boolean;
   readonly throws?: boolean;
+  /**
+   * When set, the run throws the broker's own refusal type, exactly as the local runner does when
+   * brokering is on. `packages/wall/src/local.test.ts` proves the runner throws it for a privileged
+   * argv; this table is how the wall's *mapping* of that throw to a reason code is exercised without
+   * spawning anything.
+   */
+  readonly privilegeRefusal?: BrokerRefusal;
   /** Explicit summary, when a test cares about the counts rather than just the exit code. */
   readonly summary?: {
     readonly passed: number;
@@ -72,6 +81,27 @@ interface Outcome {
 
 const PASS: Outcome = { exitCode: 0, outputSha: OK_SHA };
 const FAIL: Outcome = { exitCode: 1, outputSha: FAIL_SHA };
+
+/**
+ * The broker's own refusal for `sudo ls`, built by the real classifier. The wall's *mapping* of a
+ * refusal to a reason code is what this file exercises, so the fixture must be the type the runner
+ * actually throws rather than a hand-written approximation of it.
+ */
+function privilegeRefusal(): BrokerRefusal {
+  const outcome = broker(['sudo', 'ls'], {
+    nowIso: NOW,
+    home: null,
+    operatorPhrase: null,
+    decision: null,
+    sink: null,
+    registry: createMemoryRegistry(),
+    activeKeys: new Map<string, string>(),
+  });
+  if (outcome.kind !== 'refuse') {
+    throw new Error('the fixture must be a privileged command with no decision');
+  }
+  return outcome;
+}
 
 /**
  * A runner whose behaviour is a lookup table keyed by argv, with two tables:
@@ -90,6 +120,9 @@ class FakeRunner implements ScenarioRunner {
     const outcome = table.get(keyOf(input.argv)) ?? this.fallback;
     if (outcome.throws === true) {
       throw new Error('runner could not execute (fake infrastructure failure)');
+    }
+    if (outcome.privilegeRefusal !== undefined) {
+      throw new PrivilegedBrokerRefusal(outcome.privilegeRefusal);
     }
     return {
       exitCode: outcome.exitCode,
@@ -368,6 +401,40 @@ describe('evaluate', () => {
 
     expect(verdict.reasons).toContain('receipt_unfaithful');
     expect(verdict.outcome).not.toBe('pass');
+  });
+
+  it('names a refused privileged replay for the refusal, and only with the new code', async () => {
+    const spec = makeSpec();
+    // A receipt that claims the worker ran `sudo ls`. The wall refuses to replay it because it has
+    // no decision to broker with (it is not a consumer of one), and that is what the verdict says.
+    const receipt = makeReceipt([commandRecord(['sudo', 'ls'], 0, OK_SHA)]);
+    const holdout = makeHoldout('core', [holdoutScenario('holdout-alpha')]);
+    const runner = new FakeRunner();
+    runner.patched.set(keyOf(['sudo', 'ls']), { ...PASS, privilegeRefusal: privilegeRefusal() });
+    runner.patched.set(keyOf(['node', '--probe', 'acceptance-ok']), PASS);
+    runner.patched.set(keyOf(['node', '.holdout/run.js', 'holdout-alpha']), PASS);
+    runner.base.set(keyOf(['node', '.holdout/run.js', 'holdout-alpha']), FAIL);
+
+    const verdict = await evaluate({
+      spec,
+      receipt,
+      holdout,
+      runner,
+      policy: policy(),
+      diff: CLEAN_DIFF,
+      nowIso: NOW,
+    });
+
+    expect(verdict.outcome).toBe('unknown');
+    // The new code, and *only* the new code. A rename would have made stored evidence unparseable;
+    // emitting both would leave a query unable to tell the two claims apart.
+    expect(verdict.reasons).toContain('privileged_replay_refused');
+    expect(verdict.reasons).not.toContain('privileged_unbrokered');
+    // The operator is told which command needed a person and which rule matched, not the generic
+    // "could not be re-executed" that would hide a gate refusal behind a transport failure.
+    const replay = verdict.scenarios.find((row) => row.id === 'faithfulness:01');
+    expect(replay?.outcome).toBe('unknown');
+    expect(replay?.observed).toMatch(/GATE_REQUIRED.*broker\.no-decision/u);
   });
 
   it('treats a missing holdout as unknown, never as pass', async () => {
@@ -1142,7 +1209,7 @@ describe('holdout discrimination', () => {
     // The live measurement alone would be damning anyway; the point is that a log a
     // candidate can damage must never read as "no history, therefore nothing wrong".
     const port: CriteriaLogPort = {
-      read: (): CriteriaLogReadResult => ({ entries: [], corruptLines: 1 }),
+      read: (): CriteriaLogReadResult => ({ entries: [], corruptLines: 1, legacyLines: 0 }),
       record: () => undefined,
     };
 
@@ -1174,7 +1241,9 @@ describe('holdout discrimination', () => {
     runner.base.set(keyOf(['node', '.holdout/run.js', 'holdout-alpha']), PASS);
 
     // History: the scenario has failed on the base before, so it *can* distinguish —
-    // one live base pass is not enough to condemn it.
+    // one live base pass is not enough to condemn it. It carries no policy identity (it
+    // predates the field), so it is legacy: usable for discrimination, never counted
+    // toward the class certificate.
     const history: CriteriaLogEntry[] = [
       {
         taskClass: 'core',
@@ -1188,7 +1257,7 @@ describe('holdout discrimination', () => {
     ];
     const recorded: CriteriaLogEntry[][] = [];
     const port: CriteriaLogPort = {
-      read: () => ({ entries: history, corruptLines: 0 }),
+      read: () => ({ entries: history, corruptLines: 0, legacyLines: history.length }),
       record: (entries) => {
         recorded.push([...entries]);
       },
@@ -1213,7 +1282,7 @@ describe('holdout discrimination', () => {
     const { runner, spec, receipt, holdout } = oracleVerdictRunner();
     const recorded: CriteriaLogEntry[][] = [];
     const port: CriteriaLogPort = {
-      read: () => ({ entries: [], corruptLines: 0 }),
+      read: () => ({ entries: [], corruptLines: 0, legacyLines: 0 }),
       record: (entries) => {
         recorded.push([...entries]);
       },

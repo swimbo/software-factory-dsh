@@ -23,7 +23,7 @@
 import { keyId, signPayload, verifyPayloadSignature } from '../../gates/src/signing.ts';
 import { contentHash } from '../../contracts/src/index.ts';
 
-import type { Classification } from './classify.ts';
+import { classify, operationSha, type Classification } from './classify.ts';
 
 /** ISO-8601 UTC. The decision is refused rather than coerced if it is not. */
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
@@ -101,6 +101,14 @@ export class DecisionError extends Error {
 /** The decision id is a function of the content, so replay cannot mint a second record. */
 function deriveId(content: DecisionContent): string {
   return `gd_${contentHash(content).slice('sha256:'.length, 'sha256:'.length + 24)}`;
+}
+
+/**
+ * The id a verified envelope will get, so a caller that already holds a signature can assemble the
+ * record without holding a private key. `buildDecision` is for the signer; this is for the verifier.
+ */
+export function decisionIdOf(content: DecisionContent): string {
+  return deriveId(content);
 }
 
 /**
@@ -343,6 +351,67 @@ export function decisionFault(
     };
   }
   return null;
+}
+
+/**
+ * The canonical phrase a decision for this operation carries: `decide <first 8 hex>`.
+ *
+ * The phrase is the operator's *typed* confirmation, so it belongs to the invocation rather than to
+ * the record — but the artifact deliberately writes only `phraseSha`, never the phrase (a reader
+ * should not be handed a string they can reuse, and the record should not carry the operator's
+ * words in a file). Making the phrase a function of the signed `operationSha` is what lets a later
+ * reader recover it, check it against `phraseSha`, and re-verify the signature at all. It also means
+ * a decision can only ever confirm the operation it names: there is no "decide something else".
+ */
+export function gatePhraseOf(operationSha: string): string {
+  if (!SHA.test(operationSha)) {
+    throw new DecisionError(
+      `a gate phrase is derived from a sha256 operation hash, got ${JSON.stringify(operationSha)}`,
+    );
+  }
+  return `decide ${operationSha.slice('sha256:'.length, 'sha256:'.length + 8)}`;
+}
+
+/**
+ * Which of the live decisions, if any, authorises *this* argv.
+ *
+ * The lookup is by the classified operation's hash, never by argv equality: the classifier
+ * normalises (`/usr/bin/sudo` and `sudo` are one operation, `env X=1 sudo` unwraps to `sudo`),
+ * so a match on the raw strings would let a decision for one shape authorise a different one.
+ *
+ * The `phrase` this returns is safe to hand to the broker as `operatorPhrase` *because* the
+ * candidate has already passed `decisionFault` — signature against an active key, `outcome:
+ * 'allow'`, this exact operation, and a live expiry. The phrase is a field of the signed
+ * content, so a verified signature is what proves the operator committed to it; reading it
+ * from the record is not reading it from the worker's fixture. A `deny` record is a refusal,
+ * never an "allow with a different phrase".
+ *
+ * Newest wins when two decisions cover the same operation: the operator's most recent word is
+ * the one that counts, and either would be a valid single use.
+ */
+export function liveDecisionFor(
+  argv: readonly string[],
+  options: {
+    readonly home: string | null;
+    readonly nowIso: string;
+    readonly activeKeys: ReadonlyMap<string, string>;
+    readonly decisions: readonly PrivilegedDecision[];
+  },
+): PrivilegedDecision | null {
+  const classification = classify(argv, { home: options.home });
+  // An unprivileged operation needs no decision, and an ambiguous one is refused by the broker
+  // whatever we return here — so presenting nothing is the honest answer in both cases.
+  if (classification.ambiguous || !classification.privileged) return null;
+  const sha = operationSha(classification);
+  let best: PrivilegedDecision | null = null;
+  for (const decision of options.decisions) {
+    if (decision.outcome !== 'allow') continue;
+    if (decision.operationSha !== sha) continue;
+    if (decisionFault(decision, sha, options.nowIso, decision.phrase, options.activeKeys) !== null)
+      continue;
+    if (best === null || decision.issuedAt > best.issuedAt) best = decision;
+  }
+  return best;
 }
 
 /** The ledger event an audit replays. */

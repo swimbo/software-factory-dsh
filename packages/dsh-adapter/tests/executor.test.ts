@@ -13,6 +13,7 @@ import { FactoryError, WorkerReceipt, type WorkerReceiptType } from '@factory/co
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
+  attemptRecordDir,
   buildChildEnv,
   createDshExecutor,
   DEFAULT_MAX_OUTPUT_BYTES,
@@ -51,6 +52,7 @@ beforeAll(() => {
     'fake-dsh-max-tokens.sh',
     'fake-dsh-crash.sh',
     'fake-dsh-hang.sh',
+    'fake-dsh-hang-escaping.sh',
     'fake-dsh-noisy.sh',
     'fake-dsh-degraded.sh',
     'fake-dsh-env.sh',
@@ -353,12 +355,49 @@ describe('createDshExecutor — a runaway attempt', () => {
     expect(receipt.exitCode).toBeNull();
     expect(receipt.ceilings.hit).toStrictEqual(['wall-clock']);
     expect(receipt.sessionId).toBe('sess-fixture-hang');
+    // Absent, not false: this tree *was* reaped, and the receipt only carries the fact when it wasn't.
+    expect(receipt.ceilings.reapTimedOut).toBeUndefined();
     expect(WorkerReceipt.safeParse(receipt).success).toBe(true);
     expect(receipt.diff.baseRev).toMatch(/^[0-9a-f]{40}$/);
 
     const grandchild = Number(readFileSync(pidFile, 'utf8').trim());
     expect(Number.isInteger(grandchild)).toBe(true);
     expect(await eventually(() => isDead(grandchild), 5000)).toBe(true);
+  });
+
+  it('writes the receipt on a deadline when the killed tree never reports its death', async () => {
+    // The live failure this exists for: the ceiling trips, the kill is sent, and `close` never arrives
+    // because something the group spawned outlived it and holds the pipes. The run must still end, and
+    // the receipt must say that the process was not reaped — otherwise "exitCode: null" reads as a
+    // clean signal death when in fact nobody confirmed anything.
+    const dir = tempDir('hang-escaping');
+    const escapeeFile = join(dir, 'escapee.pid');
+    const { run } = harness('fake-dsh-hang-escaping.sh', {
+      wallClockMs: 400,
+      killGraceMs: 300,
+      parentEnv: { PATH: process.env['PATH'] ?? '', FACTORY_FAKE_ESCAPEE: escapeeFile },
+    });
+
+    const startedMs = Date.now();
+    const receipt = await run();
+    const elapsedMs = Date.now() - startedMs;
+
+    expect(WorkerReceipt.safeParse(receipt).success).toBe(true);
+    expect(receipt.ceilings.hit).toStrictEqual(['wall-clock']);
+    expect(receipt.ceilings.reapTimedOut).toBe(true);
+    expect(receipt.exitCode).toBeNull();
+    // Bounded: the ceiling plus the grace period, not the five minutes the fixture would otherwise run.
+    expect(elapsedMs).toBeLessThan(20_000);
+
+    // The escapee really did outlive the kill; clean it up rather than leave a stray for two minutes.
+    const escapee = Number(readFileSync(escapeeFile, 'utf8').trim());
+    if (Number.isInteger(escapee) && escapee > 0) {
+      try {
+        process.kill(escapee, 'SIGKILL');
+      } catch {
+        // Already gone — the point was to try, not to succeed.
+      }
+    }
   });
 
   it('trips the output-bytes ceiling on a stream that never ends', async () => {
@@ -631,5 +670,21 @@ describe('the documented defaults', () => {
       modelId: MODEL,
     });
     expect(entryValue(overlay, 'workspaceRoot')).toBe(repo.attemptDir);
+  });
+});
+
+describe('a host launch says so, in the record', () => {
+  it('records `container: null` — a host child is a fact, not a missing measurement', async () => {
+    const { run, repo } = harness();
+    await run();
+    const recordPath = join(attemptRecordDir(repo.factoryHome, UNIT_ID, ATTEMPT_ID), 'launch.json');
+    const record = JSON.parse(readFileSync(recordPath, 'utf8')) as Record<string, unknown>;
+    // The key is present and null: a reader can tell "ran on the host" from "nobody said".
+    expect(Object.hasOwn(record, 'container')).toBe(true);
+    expect(record['container']).toBeNull();
+    // And the argv is the child's, not a docker wrapper's: no `docker` at the head.
+    const argv = record['argv'] as string[];
+    expect(argv[0]).toBe(fixturePath('fake-dsh-success.sh'));
+    expect(argv).not.toContain('run');
   });
 });

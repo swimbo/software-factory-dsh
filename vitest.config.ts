@@ -2,7 +2,18 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['packages/**/*.test.ts', 'apps/**/*.test.ts', 'e2e/cli/**/*.test.ts'],
+    // `scripts/` is included because the shell entry points are tested by spawning them: a
+    // provisioner that only runs on the target host is a provisioner nobody has run.
+    include: [
+      'packages/**/*.test.ts',
+      'apps/**/*.test.ts',
+      'e2e/cli/**/*.test.ts',
+      // The certification substrate is offline: it runs the whole wall against a throwaway
+      // store with the scripted executor, so it belongs in the gate the operator runs before
+      // trusting a certificate. Excluded from the gate is how a claims-bearing suite rots.
+      'e2e/certification/**/*.test.ts',
+      'scripts/**/*.test.ts',
+    ],
     exclude: ['**/node_modules/**', '**/dist/**'],
     // The per-test budget has to be longer than the slowest legitimate test, or it
     // measures the scheduler instead of the code. The e2e specs spawn real `factory`

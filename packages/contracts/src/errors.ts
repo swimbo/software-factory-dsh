@@ -28,13 +28,38 @@ export const ERROR_CODES = [
   'VERDICT_UNKNOWN',
   // 6 — budget
   'BUDGET_EXCEEDED',
+  /**
+   * Metered spend could not be reconciled against the gateway: either the gateway's own
+   * export was missing/unreadable, or a recorded usage fact disagrees with it. Exit 6 with
+   * `BUDGET_EXCEEDED`'s family, because the subject is spend — but distinct, because
+   * "we overspent" and "we cannot account for what we spent" are different sentences and an
+   * operator needs to know which one they are being told.
+   */
+  'USAGE_UNRECONCILED',
   // 7 — concurrency / conflict
   'LEASE_HELD',
   'RECEIPT_CONFLICT',
   // 8 — environment
+  /**
+   * No ledger anchor target is configured (or the configured one cannot be reached). Exit 8, not 9:
+   * the ledger may be perfectly intact — nobody has told the factory where the off-host copy lives, so
+   * "is this ledger anchored?" has no answer yet. The distinction matters because exit 9 tells an
+   * operator to stop and investigate, while 8 tells them to finish configuring.
+   */
+  'ANCHOR_UNAVAILABLE',
   'EXECUTOR_UNAVAILABLE',
   'DSH_VERSION_MISMATCH',
   'CONTAINER_UNAVAILABLE',
+  /**
+   * Two settings are each valid and cannot both be honoured — today the only case is
+   * `FACTORY_WORKER_ISOLATION=container` with a live model: the container runs with
+   * `--network none`, and the credential proxy that fronts the gateway binds `127.0.0.1` on this
+   * host. Exit 8 like the other "the environment cannot do this" codes, but distinct because the
+   * next action is the opposite of `CONTAINER_UNAVAILABLE`'s: nothing is missing and nothing needs
+   * to be built, so a reader sent to `docker build` would rebuild a daemon and an image that are
+   * both fine. The fix is to unset one of the two levers.
+   */
+  'CONFIGURATION_CONFLICT',
   /**
    * A dispatch ceiling the operator set is already reached. Exit 7 (conflict), like
    * `LEASE_HELD`: the request is well-formed and the factory is healthy — the *world* is
@@ -69,11 +94,14 @@ const EXIT: Record<ErrorCode, number> = {
   VERDICT_STALE: 5,
   VERDICT_UNKNOWN: 5,
   BUDGET_EXCEEDED: 6,
+  USAGE_UNRECONCILED: 6,
   LEASE_HELD: 7,
   RECEIPT_CONFLICT: 7,
+  ANCHOR_UNAVAILABLE: 8,
   EXECUTOR_UNAVAILABLE: 8,
   DSH_VERSION_MISMATCH: 8,
   CONTAINER_UNAVAILABLE: 8,
+  CONFIGURATION_CONFLICT: 8,
   CONCURRENCY_LIMIT: 7,
   STORE_QUARANTINED: 9,
   INTERNAL: 1,

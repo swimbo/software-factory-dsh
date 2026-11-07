@@ -110,12 +110,29 @@ export function exitCodeOf(code: string): ExitCode {
 }
 
 /**
+ * The configuration conflict's runbook line.
+ *
+ * Exported because the probe (`context.ts`) sets the same string on `ExecutorProbe.runbook`, and two
+ * copies of one instruction is how a reader ends up with the wrong one. It is deliberately *not*
+ * the `CONTAINER_UNAVAILABLE` line: there is nothing to build and no daemon to start.
+ */
+export const CONFIGURATION_CONFLICT_RUNBOOK =
+  'runbook: docs/runbooks/worker-container.md §"When the two settings cannot both be honoured" — ' +
+  'the daemon and the image are fine; unset FACTORY_WORKER_ISOLATION (drop the container) or ' +
+  'FACTORY_LIVE_MODEL (call the model from the host), then re-run: factory run <unitId>';
+
+/**
  * One line per environment/integrity code, because `ux-plan.md` §5.2 promises a
  * "printed runbook line" for the class-8 and class-9 refusals.
  */
 const RUNBOOKS: Readonly<Record<string, string>> = {
+  ANCHOR_UNAVAILABLE:
+    'runbook: docs/runbooks/ledger-anchor.md — either no target is configured (set FACTORY_ANCHOR_SSH + FACTORY_ANCHOR_PATH, or FACTORY_ANCHOR_DIR to accept a local anchor) or the host did not answer; the message above says which',
   EXECUTOR_UNAVAILABLE:
     'runbook: install the pinned dsh on PATH and start a docker daemon, then re-run: factory run <unitId>',
+  CONTAINER_UNAVAILABLE:
+    'runbook: build or pull the worker image and check the daemon — docker build --tag factory-env:rc5 docker/factory-env — then re-run; leaving container mode is an explicit choice (unset FACTORY_WORKER_ISOLATION), never an automatic fallback',
+  CONFIGURATION_CONFLICT: CONFIGURATION_CONFLICT_RUNBOOK,
   DSH_VERSION_MISMATCH:
     'runbook: install dsh 0.2.1-rc.5 exactly — a version mismatch is refused, never warned about',
   STORE_QUARANTINED:

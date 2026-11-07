@@ -31,9 +31,29 @@ PROMOTION_UNSIGNED: promotion requires a human signature over sha256:b9fb2326…
 none was provided and none can be synthesized. No artifact was written.
 ```
 
-Two distinct causes look identical here: (a) no `--signature` at all, (b) a signature that does not
-verify against the **currently published** public key. After a rotation, (b) is the expected
-symptom of an old key.
+Three distinct causes look identical here, and the offline soak (`scripts/soak.sh`) found the third
+one by walking the promotion path as an operator would:
+
+- **(a)** no `--signature` at all;
+- **(b)** a signature that does not verify against the **currently published** public key — after a
+  rotation this is the expected symptom of an old key;
+- **(c)** the right signature but a missing companion flag — a promotion also needs
+  `--signed-by operator` and `--confirm "sign promotion <unitId>"`, and omitting either produces the
+  same exit `5` with the same "requires a human signature" sentence.
+
+If you are sure the signature is good, check the flags before you check the key:
+
+```bash
+factory promote "$UNIT" \
+  --signature "$KEYDIR/promotion.sig" \
+  --signed-by operator \
+  --confirm "sign promotion $UNIT" \
+  --json
+```
+
+That is deliberate, not an oversight — the typed phrase is the gate, and a gate that can be completed
+by remembering one flag out of three is not much of a gate. It is written here because "I signed it and
+it still refused" is a 2am sentence that deserves an answer.
 
 ## What the factory will refuse to do
 
@@ -48,7 +68,7 @@ symptom of an old key.
 ## Procedure (verified end-to-end on this tree)
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 KEYDIR="$HOME/.factory-operator-keys"      # outside the repo: it holds a private key
 mkdir -p "$KEYDIR"
 

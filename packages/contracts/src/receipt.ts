@@ -90,6 +90,20 @@ export const Ceilings = z.object({
   wallClockMs: z.number().int().nonnegative(),
   /** Which ceilings actually tripped, in the order they tripped. */
   hit: z.array(z.enum(['turns', 'wall-clock', 'tokens', 'output-bytes'])).max(4),
+  /**
+   * True when the ceiling tripped, the kill was sent, and the process tree never reported that it
+   * died — the receipt was written anyway, after a bounded grace period.
+   *
+   * This is a fact about the *host*, not about the worker's answer: something the killed group
+   * spawned outlived the kill (a `setsid` grandchild, a daemonised runner) and kept the pipes open.
+   * Recording it matters because the alternative was unbounded: the adapter used to wait on the
+   * process 'close' event with no deadline, and one live attempt sat there for 2 h 23 min after its
+   * 15-minute ceiling had already fired, producing no receipt, no verdict, and no sample.
+   *
+   * Optional and additive: every receipt written before this existed omits it, and a missing value
+   * means "the process was reaped normally", which is what those receipts observed.
+   */
+  reapTimedOut: z.boolean().optional(),
 });
 export type Ceilings = z.infer<typeof Ceilings>;
 

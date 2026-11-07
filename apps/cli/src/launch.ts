@@ -11,7 +11,10 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { FactoryError, type ErrorCode } from '@factory/contracts';
+import type { PriceTable } from '@factory/credential-proxy';
 
+import { DEFAULT_PER_UNIT_USD } from './context.ts';
+import { activeOperatorKeys, loadDecisions, storeDecisionPorts } from './gate.ts';
 import { openAttemptCredential, type AttemptCredential } from './credential.ts';
 import type { VerbInput } from './verbs/types.ts';
 
@@ -157,6 +160,65 @@ function modelApiOf(value: string): 'anthropic-messages' | 'openai-completions' 
   return undefined;
 }
 
+/**
+ * The operator's price table, when the gateway reports tokens and not prices.
+ *
+ * Read here rather than in the proxy for the same reason every other `env` read is: the
+ * package must not reach into a process environment, and a price table is a policy input.
+ * Both values must be present and finite, or the table is absent and an unpriced call is
+ * recorded as `unknown` rather than priced from half a table.
+ */
+function priceTableOf(env: NodeJS.ProcessEnv): PriceTable | undefined {
+  const input = Number((env.FACTORY_PRICE_IN_PER_TOKEN_USD ?? '').trim());
+  const output = Number((env.FACTORY_PRICE_OUT_PER_TOKEN_USD ?? '').trim());
+  if (!Number.isFinite(input) || !Number.isFinite(output)) return undefined;
+  if (input < 0 || output < 0) return undefined;
+  if (
+    env.FACTORY_PRICE_IN_PER_TOKEN_USD === undefined ||
+    env.FACTORY_PRICE_OUT_PER_TOKEN_USD === undefined
+  )
+    return undefined;
+  return { inPerTokenUsd: input, outPerTokenUsd: output };
+}
+
+/**
+ * Write one usage row for the attempt from what the proxy observed.
+ *
+ * Three states, and the difference is the point: tokens **and** a price (measured), tokens but
+ * no price (`costUsd: null` — unknown), or no observation at all (no row: there is nothing to
+ * claim). A failed launch still records what was spent before it failed — the money left
+ * regardless of whether the attempt succeeded.
+ */
+function recordUsageForAttempt(
+  ctx: VerbInput['ctx'],
+  launch: LaunchPayloadLike,
+  credential: AttemptCredential,
+): void {
+  const totals = credential.usage();
+  if (totals === undefined) return;
+  try {
+    ctx.store.recordUsage({
+      usageId: `usg-${launch.attemptId}`,
+      unitId: launch.unitId,
+      attemptId: launch.attemptId,
+      tokensIn: totals.tokensIn,
+      tokensOut: totals.tokensOut,
+      costUsd: totals.costUsd,
+      gatewayRequestId: totals.gatewayRequestIds[0] ?? null,
+      signedAt: ctx.nowIso(),
+      ceilingCrossed: totals.ceilingCrossed,
+    });
+  } catch (error) {
+    // A usage row that cannot be written must be loud: the alternative is a ledger that looks
+    // like the attempt spent nothing.
+    ctx.ui.err(
+      `WARN usage for attempt ${launch.attemptId} could not be recorded: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
 export type LaunchOutcome =
   | { readonly ok: true; readonly receipt: unknown }
   | { readonly ok: false; readonly code: ErrorCode; readonly detail: string };
@@ -189,12 +251,29 @@ export async function launchAttempt(
       };
     try {
       const pidFile = (ctx.env.FACTORY_SCENARIO_PID_FILE ?? '').trim();
+      // The decisions this factory holds, and the keys it still accepts. Both are read once per
+      // launch: a decision minted mid-run must not silently widen an operation already dispatched.
+      const recorded = loadDecisions(ctx.home);
+      for (const problem of recorded.problems) {
+        // An artifact that cannot be re-verified is not a decision the broker may accept. Saying so
+        // here is what keeps the step's later "no live decision covers this" from being the only
+        // clue: the operator gets the file, the reason, and the fact it was ignored.
+        ctx.ui.err(`WARN gate: ignoring ${problem.path}`);
+        ctx.ui.err(`WARN gate:   ${problem.detail}`);
+      }
+      // The registry is the store's, not a per-invocation Map: that is the whole point of R5. A
+      // decision consumed by one launch is spent for every later launch, including a later process.
+      const ports = storeDecisionPorts(ctx.store, { actor: 'control', traceId: ctx.traceId });
       const executor = adapter.createFakeExecutorFromFile(ctx.executor.scenarioPath, {
         factoryHome: ctx.home,
         baseRev,
         // A scenario stands in for the worker, so its `command` steps are worker output and
         // pass the broker when the policy says so (`FACTORY_PRIVILEGED_BROKERING=on`).
         privilegedBrokering: ctx.policy.privilegedBrokering,
+        decisions: recorded.decisions,
+        activeKeys: activeOperatorKeys(ctx.env, ctx.paths),
+        decisionRegistry: ports.registry,
+        decisionSink: ports.sink,
         ...(pidFile === '' ? {} : { pidFile }),
         log: {
           info: (fields: Record<string, unknown>, message?: string) =>
@@ -229,7 +308,8 @@ export async function launchAttempt(
         'FACTORY_PROXY_BASE_URL and FACTORY_MODEL_ID must be set for a launch; no proxy means no worker',
     };
   }
-  if (ctx.executor.binPath === null)
+  // A container launch runs the *image's* `dsh`; only a host launch needs one on this machine.
+  if (ctx.executor.binPath === null && ctx.executor.isolation.container === null)
     return { ok: false, code: 'EXECUTOR_UNAVAILABLE', detail: 'no dsh binary' };
 
   const adapter = await import('@factory/dsh-adapter').catch(() => null);
@@ -248,11 +328,26 @@ export async function launchAttempt(
   let credential: AttemptCredential | null = null;
   if (liveConsent) {
     const lease = ctx.store.getLiveLease(launch.unitId);
+    // The attempt's remaining authority: what the signed envelope leaves after everything
+    // already reserved and measured for this unit. The proxy enforces *observed* spend against
+    // it by revoking (ND3); the dispatch-time gate above still refuses an exhausted envelope,
+    // because minting a credential that is already over its ceiling would be theatre.
+    const envelope = ctx.store.currentEnvelope('per-unit')?.amountUsd ?? DEFAULT_PER_UNIT_USD;
+    const spend = ctx.store.spendForUnit(launch.unitId);
+    const remainingUsd = envelope - Math.max(0, spend.reservedUsd) - Math.max(0, spend.recordedUsd);
+    const price = priceTableOf(ctx.env);
     const opened = await openAttemptCredential({
       env: ctx.env,
       nowIso: ctx.nowIso,
       attemptId: launch.attemptId,
       leaseExpiresAt: lease === null ? null : lease.expiresAt,
+      ...(remainingUsd > 0 ? { spendCeilingUsd: remainingUsd } : {}),
+      ...(price === undefined ? {} : { priceTable: price }),
+      onCeilingReached: (input) => {
+        ctx.ui.err(
+          `BUDGET CEILING crossed: observed $${input.spendUsd.toFixed(4)} of $${input.ceilingUsd.toFixed(2)} — the attempt token is revoked, so the worker cannot spend further`,
+        );
+      },
     });
     if (!opened.ok) return { ok: false, code: opened.code, detail: opened.detail };
     credential = opened.credential;
@@ -262,6 +357,11 @@ export async function launchAttempt(
   try {
     const executor = adapter.createDshExecutor({
       dshBin: ctx.executor.binPath,
+      // Where the turn runs, decided by the probe before anything was reserved. `null` is a host
+      // child; a plan means the adapter wraps the turn in `docker run` and reaps it afterwards.
+      ...(ctx.executor.isolation.container === null
+        ? {}
+        : { container: ctx.executor.isolation.container }),
       factoryHome: ctx.home,
       proxyBaseUrl,
       modelId,
@@ -309,6 +409,10 @@ export async function launchAttempt(
     // factory had already recorded the attempt as over. `settle()` is idempotent and runs on
     // the failure path too: a launch that threw must not leave a live token behind.
     if (credential !== null) {
+      // Record what the gateway said *before* the token dies and before the verdict exists:
+      // the usage row is the ledger's claim about spend, and a claim written after the
+      // credential was revoked is a claim with nothing left to check it against.
+      recordUsageForAttempt(ctx, launch, credential);
       await credential.settle();
       // The door is bookkeeping and the token is the property, but neither should outlive the
       // attempt: the proxy is per-invocation and this is the last moment it can be of use.

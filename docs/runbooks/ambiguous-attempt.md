@@ -58,7 +58,7 @@ expired and `factory recover` reconciled it rather than guessing.
 ## Commands, in this order
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"   # node 26.12.1
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"   # node 26.12.1
 
 # 1. Re-read the facts (read-only, safe to repeat).
 factory status U-ea3e3e8672da --attempt A-0001
@@ -85,8 +85,12 @@ A unit is not "reopened"; a new revision is a new unit.
 
 ## What "fixed" looks like
 
-- `factory status` shows `0 need you · 0 unknown (not a pass)` and the unit in a terminal state
-  (`verified`, `aborted`, `failed`).
+- `factory status <unitId>` exits `0` and shows the unit in a terminal state (`verified`, `aborted`,
+  `failed`), and `factory status` no longer lists it under `need you`.
+- **The factory-wide `factory status` may still exit `5` after your unit is resolved**, and that is
+  correct rather than a failure: every `verified` unit awaiting its first promotion is its own human
+  gate. Read the per-unit command when you want to know whether _this_ incident is closed; the
+  process-wide code answers "is anything waiting on a person", which is a different question.
 - `factory recover` reports `0 attempt(s) found without a terminal event` and prints no `AMBIGUOUS`
   block.
 - The ledger holds one `attempt.ambiguous` event and one operator-attributed decision (abort or

@@ -250,7 +250,7 @@ These are the phase's `unknown` entries. They are not failures, and they are not
 ## 9. Reproduce
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 bash scripts/verify.sh                    # writes docs/verification/<runId>/{verify.log,summary.json}
 pnpm run test:e2e                         # process e2e only
 pnpm run test:e2e:panel                   # needs chromium 1248 (§3)

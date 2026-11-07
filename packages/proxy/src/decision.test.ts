@@ -14,6 +14,7 @@ import {
   DecisionError,
   decisionFault,
   decisionPayload,
+  liveDecisionFor,
   parseDecision,
   signatureFault,
   toArtifact,
@@ -257,5 +258,89 @@ describe('the two persistable forms', () => {
     // The artifact is readable by a person without a database, and does not hand the
     // next reader a phrase they could reuse to mint a decision.
     expect(artifact['operationSha']).toBe(decision.operationSha);
+  });
+});
+
+describe('liveDecisionFor: which record, if any, authorises an argv', () => {
+  const lookup = (
+    argv: readonly string[],
+    decisions: readonly PrivilegedDecision[],
+    nowIso: string = ISSUED_AT,
+    activeKeys: ReadonlyMap<string, string> = ACTIVE_KEYS,
+  ) => liveDecisionFor(argv, { home: HOME, nowIso, activeKeys, decisions });
+
+  it('returns the record covering exactly this operation, with the phrase it committed to', () => {
+    const { decision } = decisionFor(['sudo', 'ls']);
+    const found = lookup(['sudo', 'ls'], [decision]);
+    expect(found?.decisionId).toBe(decision.decisionId);
+    // The phrase is handed back only because the record already passed verification: it is a
+    // field of the signed content, not a string taken from the caller.
+    expect(found?.phrase).toBe(decision.phrase);
+    expect(lookup(['sudo', 'rm', '-rf', '/'], [decision])).toBeNull();
+  });
+
+  it('matches the classified operation, not the raw strings', () => {
+    const { decision } = decisionFor(['sudo', 'ls']);
+    // The classifier normalises a path-qualified binary and unwraps env; a decision names the
+    // operation, so both of these are the same one it authorises.
+    expect(lookup(['/usr/bin/sudo', 'ls'], [decision])?.decisionId).toBe(decision.decisionId);
+    expect(lookup(['env', 'A=1', 'sudo', 'ls'], [decision])?.decisionId).toBe(decision.decisionId);
+    // ... and a decision for one shape must not authorise a different operation that happens to
+    // share a prefix.
+    const install = decisionFor(['sudo', 'install', 'build-tool']).decision;
+    expect(lookup(['sudo', 'install', 'build-tool', '--upgrade'], [install])).toBeNull();
+  });
+
+  it('presents nothing for an unprivileged argv or one the classifier cannot resolve', () => {
+    const { decision } = decisionFor(['sudo', 'ls']);
+    // Unprivileged: there is nothing to authorise, so presenting a decision would be noise.
+    expect(lookup(['node', '--test'], [decision])).toBeNull();
+    // Ambiguous: the broker refuses whatever is presented (L3), so the honest answer is nothing.
+    expect(lookup(['$(which sudo)', 'ls'], [decision])).toBeNull();
+  });
+
+  it('treats a deny as a refusal, never as an allow with a different phrase', () => {
+    const denied = decisionFor(['sudo', 'ls'], {}, { outcome: 'deny' }).decision;
+    expect(denied.outcome).toBe('deny');
+    expect(lookup(['sudo', 'ls'], [denied])).toBeNull();
+  });
+
+  it('refuses an expired record against the injected clock', () => {
+    const { decision } = decisionFor(['sudo', 'ls']);
+    expect(lookup(['sudo', 'ls'], [decision], EXPIRES_AT)).toBeNull();
+    expect(lookup(['sudo', 'ls'], [decision], '2026-11-01T12:59:59.999Z')?.decisionId).toBe(
+      decision.decisionId,
+    );
+  });
+
+  it('refuses a record whose key is no longer published — rotation is retirement', () => {
+    const { decision } = decisionFor(['sudo', 'ls']);
+    expect(lookup(['sudo', 'ls'], [decision], ISSUED_AT, new Map())).toBeNull();
+    const retired = new Map([[keyId(operatorKey().publicKeyPem), operatorKey().publicKeyPem]]);
+    expect(lookup(['sudo', 'ls'], [decision], ISSUED_AT, retired)).toBeNull();
+  });
+
+  it('prefers the operator’s most recent word when two records cover one operation', () => {
+    // Minted, not edited: `issuedAt` is inside the signed content, so a post-hoc rewrite would be
+    // refused as tampering — which is the property the previous spec pins.
+    const classification = classify(['sudo', 'ls'], { home: HOME });
+    const mint = (issuedAt: string): PrivilegedDecision =>
+      buildDecision(
+        {
+          taskId: 'U-7f3a9c',
+          phrase: PHRASE,
+          issuedAt,
+          expiresAt: EXPIRES_AT,
+          outcome: 'allow',
+          classification,
+          privateKeyPem: OPERATOR.privateKeyPem,
+          publicKeyPem: OPERATOR.publicKeyPem,
+        },
+        operationSha(classification),
+      );
+    const older = mint('2026-11-01T11:00:00.000Z');
+    const newer = mint('2026-11-01T12:30:00.000Z');
+    expect(lookup(['sudo', 'ls'], [older, newer])?.decisionId).toBe(newer.decisionId);
+    expect(lookup(['sudo', 'ls'], [newer, older])?.decisionId).toBe(newer.decisionId);
   });
 });

@@ -13,8 +13,10 @@
  */
 import { contentHash, FactoryError } from '@factory/contracts';
 import type { LedgerEvent } from '@factory/contracts';
+import { legacyPolicyVersions } from '@factory/qualifier';
+import { certificatesRecency, judgedCertificate, type CertificateRecency } from '@factory/wall';
 
-import { UsageError } from '../exit.ts';
+import { EXIT, UsageError } from '../exit.ts';
 import { field } from '../render/format.ts';
 import { boolOption, numberOption, textOption, type VerbInput, type VerbSpec } from './types.ts';
 
@@ -53,9 +55,196 @@ function eventSummary(event: LedgerEvent): string {
   return parts.join('  ');
 }
 
+/** The certificate as the audit needs it: the store's row, narrowed to what is judged. */
+interface StoredCertificateView {
+  readonly taskClass: string;
+  readonly outcome: 'certified' | 'not-certified' | 'insufficient';
+  readonly samples: number;
+  readonly m: number;
+  readonly alpha: number;
+  readonly policyVersion: string;
+  readonly modelId: string | null;
+  /**
+   * The corpus the certificate names, `null` when the row predates corpus attribution (schema v5).
+   * Carried, not derived: the audit must print the same corpus the judgement compared.
+   */
+  readonly holdoutRevision: string | null;
+  readonly recordedAt: string;
+}
+
+/**
+ * Read the certificates and judge each class against the *running* policy and model.
+ *
+ * Two surfaces, because a store can be wrong in two directions:
+ *
+ *  - classes with a certificate — current or stale;
+ *  - verified/promoted units whose verdict carried **no** certificate — a pass with no class
+ *    judgement behind it. Reporting only the rows that exist would make that absence invisible,
+ *    which is the exact failure L3 names.
+ */
+function certificateReport(ctx: VerbInput['ctx']): {
+  readonly judgements: readonly CertificateRecency[];
+  readonly uncertifiedUnits: readonly string[];
+  readonly basis: { readonly policyVersion: string; readonly modelId: string | null };
+  readonly projectionPresent: boolean;
+  readonly certificatesByClass: ReadonlyMap<string, readonly StoredCertificateView[]>;
+} {
+  const rows = ctx.store.classCertificates?.();
+  const groups = new Map<string, StoredCertificateView[]>();
+  for (const row of rows ?? []) {
+    const bucket = groups.get(row.taskClass) ?? [];
+    bucket.push({
+      taskClass: row.taskClass,
+      outcome: row.outcome,
+      samples: row.samples,
+      m: row.m,
+      alpha: row.alpha,
+      policyVersion: row.policyVersion,
+      modelId: row.modelId,
+      holdoutRevision: row.holdoutRevision,
+      recordedAt: row.recordedAt,
+    });
+    groups.set(row.taskClass, bucket);
+  }
+  const running = {
+    policyVersion: ctx.policyVersion,
+    modelId: (ctx.env['FACTORY_MODEL_ID'] ?? '').trim() || null,
+    // A certificate recorded before the dispatch ceilings were moved out of the policy carries a
+    // digest over the same rules plus those ceilings; recognise it as the same rules, not a change.
+    acceptedPolicyVersions: legacyPolicyVersions(ctx.policy),
+  };
+  // The projection is the only place a certificate exists. `mapVerdict` deliberately strips
+  // `certification`/`modelId` from the verdict body (the promotion signature is computed over that
+  // object, so its shape must not grow), which means asking the *verdict* whether it carried a
+  // certificate answered "no" for every unit ever promoted — after an honest certification the
+  // report still said "STALE OR NEVER CERTIFIED 20 of 21 entries" and `audit --certifications`
+  // exited 9 forever. The question is asked of the projection instead: did this verdict leave a
+  // certificate row behind?
+  const certifiedVerdicts = new Set<string>();
+  for (const row of rows ?? []) certifiedVerdicts.add(row.verdictId);
+  const uncertifiedUnits: string[] = [];
+  for (const state of ['verified', 'promoted'] as const) {
+    for (const unit of ctx.store.listUnits({ state })) {
+      const verdict = ctx.store.latestVerdictForUnit(unit.unitId);
+      // No verdict at all is the stronger version of the same fact: a verified unit whose
+      // evidence the store cannot produce has no certificate either.
+      if (verdict === null || !certifiedVerdicts.has(verdict.verdictId)) {
+        uncertifiedUnits.push(unit.unitId);
+      }
+    }
+  }
+  return {
+    judgements: certificatesRecency({ byClass: groups, running }),
+    uncertifiedUnits,
+    basis: running,
+    projectionPresent: rows !== undefined,
+    certificatesByClass: groups,
+  };
+}
+
+/**
+ * How the audit spells a corpus, including its absence.
+ *
+ * `null` is never printed as "any": on a certificate it means the row predates attribution, and on the
+ * newest measurement it means no measurement of this class has ever named one. Two different absences,
+ * two different sentences.
+ */
+function describeCorpus(corpus: string | null, side: 'certificate' | 'measurement'): string {
+  if (corpus !== null) return corpus;
+  return side === 'certificate'
+    ? 'an unnamed corpus (this certificate predates corpus attribution)'
+    : 'no named corpus';
+}
+
 export function runAudit(input: VerbInput): number {
   const { ctx } = input;
   const wantsEscapeRate = boolOption(input.options, 'escapeRate');
+  const wantsCertifications = boolOption(input.options, 'certifications');
+
+  if (wantsCertifications) {
+    if (unitIdFromArgs(input) !== null) {
+      throw new UsageError('USAGE: --certifications audits classes; drop the unit id');
+    }
+    const report = certificateReport(ctx);
+    const stale = report.judgements.filter((judgement) => judgement.state !== 'current');
+    input.emit({
+      kind: 'certifications',
+      policyVersion: report.basis.policyVersion,
+      modelId: report.basis.modelId,
+      projectionPresent: report.projectionPresent,
+      classes: report.judgements.map((judgement) => {
+        // The counts must describe the row the *state* came from. A class can hold an older
+        // `certified` row and a newer `insufficient` one (the attempt after the criteria log
+        // gained its identity starts its count at 1), and printing the newer row's `samples: 1`
+        // beside `state: 'current'` would read as a contradiction the operator cannot resolve.
+        // `judgedCertificate` is the same rule the judgement used, so the two cannot drift.
+        const certificate =
+          judgedCertificate(report.certificatesByClass.get(judgement.taskClass) ?? []) ?? null;
+        return {
+          taskClass: judgement.taskClass,
+          state: judgement.state,
+          outcome: certificate?.outcome ?? null,
+          samples: certificate?.samples ?? null,
+          m: certificate?.m ?? null,
+          alpha: certificate?.alpha ?? null,
+          // `current` and `never-certified` both mean "do not print a re-certify reason": the
+          // former has none, the latter has no certificate to re-certify.
+          reasons: judgement.state === 'stale' ? judgement.reasons : [],
+          // The corpus the certificate names (the fact it was measured under), and — when the
+          // judgement is stale — the corpus the latest measurement names. Both are in the JSON so a
+          // scripted reader can see the disagreement without parsing English out of `reasons`.
+          holdoutRevision: certificate?.holdoutRevision ?? null,
+          latestHoldoutRevision:
+            judgement.state === 'stale'
+              ? judgement.referenceHoldoutRevision
+              : (certificate?.holdoutRevision ?? null),
+        };
+      }),
+      uncertifiedUnits: report.uncertifiedUnits,
+    });
+    ctx.ui.err(
+      `CLASS CERTIFICATIONS  under ${report.basis.policyVersion} (model ${report.basis.modelId ?? 'offline'})`,
+    );
+    if (!report.projectionPresent) {
+      ctx.ui.err('  this store has no class certificates projection; nothing can be certified');
+    }
+    for (const judgement of report.judgements) {
+      ctx.ui.err(`  ${judgement.taskClass}  ${judgement.state}`);
+      for (const reason of judgement.state === 'stale' ? judgement.reasons : []) {
+        ctx.ui.err(`    ${reason}`);
+      }
+      // The evidence line: a re-certify reason names the consequence ("the corpus changed"), this
+      // names the two facts it is drawn from. Printed for every stale class, because "policy
+      // changed" beside an unattributed corpus is what the operator needs to see before deciding
+      // between re-certifying and reading the old measurement as expired.
+      if (judgement.state === 'stale') {
+        ctx.ui.err(
+          `    certified ${judgement.certificate.policyVersion} under ${describeCorpus(judgement.certificate.holdoutRevision ?? null, 'certificate')}; latest measurement under ${describeCorpus(judgement.referenceHoldoutRevision, 'measurement')}`,
+        );
+      }
+    }
+    for (const unitId of report.uncertifiedUnits) {
+      ctx.ui.err(`  ${unitId}  unit verified with no class certificate: never certified`);
+    }
+    // An empty surface is not a clean one. "Nothing has been certified" and "everything is
+    // current" print differently and exit differently, because an audit that passes on an empty
+    // store teaches an operator to read absence as approval.
+    const empty = report.judgements.length === 0 && report.uncertifiedUnits.length === 0;
+    if (empty) {
+      ctx.ui.err('  NO CLASS CERTIFICATES  no class has been certified in this store');
+      ctx.ui.err('  Nothing to audit is not a licence: this is never-certified, not current');
+      return EXIT.integrity;
+    }
+    const bad = stale.length + report.uncertifiedUnits.length + (report.projectionPresent ? 0 : 1);
+    if (bad === 0) {
+      ctx.ui.err(`  ${report.judgements.length} of ${report.judgements.length} classes current`);
+      return EXIT.ok;
+    }
+    ctx.ui.err(
+      `  STALE OR NEVER CERTIFIED  ${bad.toString()} of ${(report.judgements.length + report.uncertifiedUnits.length).toString()} entries; a stale certificate is expired evidence, not a warning`,
+    );
+    return EXIT.integrity;
+  }
 
   if (wantsEscapeRate) {
     const shipped = ctx.store.listUnits({ state: 'promoted' });
@@ -208,13 +397,18 @@ function unitIdFromArgs(input: VerbInput): string | null {
 export const auditVerb: VerbSpec = {
   name: 'audit',
   verb: 'audit',
-  summary: 'Print the trace of a unit, or sample shipped units for the escape rate',
+  summary:
+    'Print the trace of a unit, sample shipped units for the escape rate, or audit class certificates',
   arguments: ['[unitId]'],
   configure: (command) =>
     command
       .option(
         '--escape-rate',
         'sample shipped units for the escape rate (asks you for re-validation)',
+      )
+      .option(
+        '--certifications',
+        'per class: the operating point it was certified at, and whether that is still current',
       )
       .option('--since <date>', 'escape-rate window, e.g. 2026-10-01')
       .option('--sample <n>', 'how many units to sample (default 5)')

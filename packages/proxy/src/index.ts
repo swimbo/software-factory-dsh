@@ -46,13 +46,17 @@ export {
 } from './operations.ts';
 export {
   buildDecision,
+  decisionIdOf,
   decisionPayload,
   signatureFault,
   decisionFault,
+  gatePhraseOf,
+  liveDecisionFor,
   DecisionError,
   parseDecision,
   toArtifact,
   toEvent,
+  type DecisionContent,
   type DecisionFault,
   type DecisionInput,
   type PrivilegedDecision,

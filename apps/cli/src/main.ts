@@ -30,9 +30,12 @@ import {
 } from './exit.ts';
 import { limitsFor } from './render/limits.ts';
 import { abortVerb } from './verbs/abort.ts';
+import { alertsVerb } from './verbs/alerts.ts';
 import { auditVerb } from './verbs/audit.ts';
+import { ledgerVerb } from './verbs/ledger.ts';
 import { budgetVerb } from './verbs/budget.ts';
 import { credentialVerb } from './verbs/credential.ts';
+import { gateVerb } from './verbs/gate.ts';
 import { intentVerb } from './verbs/intent.ts';
 import { promoteVerb } from './verbs/promote.ts';
 import { qualifyVerb } from './verbs/qualify.ts';
@@ -50,11 +53,14 @@ export const VERB_SPECS: readonly VerbSpec[] = [
   statusVerb,
   receiptsVerb,
   auditVerb,
+  alertsVerb,
   recoverVerb,
   abortVerb,
   promoteVerb,
   budgetVerb,
   credentialVerb,
+  gateVerb,
+  ledgerVerb,
   versionVerb,
 ];
 
@@ -94,6 +100,9 @@ function buildProgram(ui: CliUi, overrides: CliContextOverrides): Command {
       `dsh version this build pins: ${PINNED_DSH_VERSION}`,
       'Exit codes: 0 ok · 1 internal · 2 usage · 3 policy · 4 unknown/ambiguous · 5 gate ·',
       '            6 budget · 7 conflict · 8 environment · 9 integrity',
+      '  8 has two next actions, and the code names which: CONTAINER_UNAVAILABLE means the host is',
+      '  missing something (a daemon, an image) — build it; CONFIGURATION_CONFLICT means two settings',
+      '  cannot both be honoured — unset one (the message says which two).',
       'No gate can be bypassed: -y, --yes, --force, -f and --assume-yes are usage errors (exit 2).',
     ].join('\n'),
   );
@@ -122,10 +131,14 @@ async function executeCommand(
   const command = raw[raw.length - 1] as Command;
   // Commander passes `undefined` for an omitted optional argument; `String()` on it
   // would send the literal text "undefined" to the verb as a unit id.
-  const positional = raw
-    .slice(0, Math.max(raw.length - 2, 0))
-    .filter((value) => value !== undefined && value !== null)
-    .map((value) => String(value));
+  // A variadic argument (`[argv...]`) arrives as one array, not as one string per element; flattening
+  // here is what lets `gate request -- sudo ls` reach the verb as `['sudo', 'ls']` rather than as the
+  // single string "sudo,ls". Every existing verb passes scalars, for which this is a no-op.
+  const positional = raw.slice(0, Math.max(raw.length - 2, 0)).flatMap((value) => {
+    if (value === undefined || value === null) return [];
+    if (Array.isArray(value)) return value.map((item) => String(item));
+    return [String(value)];
+  });
   const options: Record<string, unknown> = {
     ...((raw.length >= 2 ? raw[raw.length - 2] : {}) as Record<string, unknown>),
     ...command.opts(),

@@ -59,6 +59,19 @@ done
 
 stamp="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 run_dir="${out_dir:-docs/verification/$stamp}"
+# Two runs started in the same UTC second would otherwise share a directory and truncate each
+# other's log and stage table — which presents as a format:check ENOENT inside a stage that is
+# actually fine. A defaulted stamp therefore gets a suffix until it is a directory of its own; an
+# explicit --out-dir is taken literally, because there the operator asked for that exact path.
+if [ -z "$out_dir" ]; then
+  candidate="$run_dir"
+  suffix=2
+  while [ -e "$candidate" ]; do
+    candidate="${run_dir}-${suffix}"
+    suffix=$((suffix + 1))
+  done
+  run_dir="$candidate"
+fi
 log_file="$run_dir/verify.log"
 summary_file="$run_dir/summary.json"
 stages_file="$run_dir/.stages.jsonl"

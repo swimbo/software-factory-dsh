@@ -287,7 +287,10 @@ describe('run to verdict to promotion, with the real wall', () => {
 
     const run = runFactory(['run', unitId, '--scenario', scenarioPath, '--json'], {
       home,
-      env: wallEnv(),
+      // The model identity is configured, because the verdict's certificate records it: a
+      // certificate without a model id cannot be proven current after the operator points
+      // FACTORY_MODEL_ID somewhere else, and the audit is supposed to be able to tell.
+      env: wallEnv({ FACTORY_MODEL_ID: 'auto' }),
     });
     const runJson = jsonOf(run);
 
@@ -312,6 +315,32 @@ describe('run to verdict to promotion, with the real wall', () => {
       expect(row?.verdict.delta.baseRate).toBe(0);
       expect(row?.verdict.delta.candidateRate).toBe(1);
       expect(row?.verdict.holdoutRevision).toBe(HOLDOUT_ID);
+      // The wiring this asserts: `FACTORY_MODEL_ID` from the CLI's environment reaches the
+      // wall through `evaluateReceipt`, rather than the certificate recording `null` while the
+      // operator believes the factory knows which model ran (a live operator would then see
+      // `re-certify: model unknown` on a class that is genuinely current).
+      // Note what is asserted where. `run --json` prints the verdict the *store* returns, and the
+      // store reconstructs a verdict from its columns so that the promotion-signature payload is
+      // stable; `certification` and `modelId` therefore live in the `class_certificates` projection
+      // rather than in the reconstructed verdict body. The wiring under test is the same either way:
+      // the model id the CLI was given is the model id the certificate records.
+      const certificate = (store.classCertificates?.() ?? []).find(
+        (candidate) => candidate.verdictId === row?.verdictId,
+      );
+      expect(certificate?.modelId).toBe('auto');
+      // The certificate is a *stored* fact, not prose: the class certificate row for this verdict
+      // carries the operating point and the model it was judged under. It is asserted here rather
+      // than through `row.verdict.certification`, because the store's read path reconstructs a
+      // verdict from its columns (for a stable promotion-signature payload) and the certificate
+      // projection is the `class_certificates` table — one fact, one place.
+      expect(certificate?.taskClass).toBe('slug-check');
+      expect(certificate?.m).toBe(20);
+      expect(certificate?.k).toBe(18);
+      expect(certificate?.modelId).toBe('auto');
+      // The certificate names the corpus its verdict was measured against: that is the fact the
+      // wall compares when a class is re-measured under a stricter holdout (schema v4 → v5), and
+      // the row — not the verdict — is what `audit --certifications` reads.
+      expect(certificate?.holdoutRevision).toBe(HOLDOUT_ID);
       // Every scenario the wall ran passed, and there is at least one of each kind.
       const sources = new Set(row?.verdict.scenarios.map((scenario) => scenario.source));
       expect(sources.has('holdout')).toBe(true);

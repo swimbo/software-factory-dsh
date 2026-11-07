@@ -605,6 +605,11 @@ export function sampleStatus(sample: SampleOptions = {}): StatusV1 {
       policyVersion: POLICY,
       wallVersion: WALL_VERSION,
       holdoutRevision: HOLDOUT,
+      topology: {
+        kind: 'single-uid',
+        reason: 'darwin has no second uid for the factory',
+        claim: 'single-uid: the wall is a separate process, not a separate principal',
+      },
     },
     waitingOnPerson,
     units,

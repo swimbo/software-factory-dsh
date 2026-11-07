@@ -8,11 +8,12 @@
  * unit would re-score for no reason. Both directions are tested here.
  */
 import { describe, expect, it } from 'vitest';
-import { SIGNAL_NAMES } from '@factory/contracts';
+import { SIGNAL_NAMES, contentHash } from '@factory/contracts';
 import {
   DEFAULT_POLICY,
   assertPolicy,
   currentPolicyVersion,
+  legacyPolicyVersions,
   type QualifierPolicy,
 } from './policy.ts';
 
@@ -143,8 +144,6 @@ describe('currentPolicyVersion', () => {
       minSamples: 10,
       allowColdStart: false,
       privilegedBrokering: 'off',
-      maxConcurrentAttempts: 1,
-      maxConcurrentWalls: 1,
       darkThreshold: 90,
     };
     // Same content, different literal order: the version must not move, or every
@@ -177,5 +176,37 @@ describe('currentPolicyVersion', () => {
 
   it('refuses to version an invalid policy', () => {
     expect(() => currentPolicyVersion({ ...DEFAULT_POLICY, darkThreshold: -1 })).toThrow();
+  });
+});
+
+describe('dispatch ceilings are not policy (the pre-split recognition)', () => {
+  // Defect A: the ceilings used to live on `QualifierPolicy`, so `currentPolicyVersion` moved
+  // when an operator changed `FACTORY_MAX_CONCURRENT_ATTEMPTS` — a certificate minted under one
+  // ceiling read as `stale` under the default, forever. The fields are gone now; `legacyPolicyVersions`
+  // is the bridge that lets evidence recorded *before* the split keep comparing as "the same rules".
+
+  const legacyDigest = (rules: QualifierPolicy, attempts: number, walls: number): string =>
+    contentHash({ ...rules, maxConcurrentAttempts: attempts, maxConcurrentWalls: walls });
+
+  it('recognises a pre-split digest of the same rules under a different ceiling', () => {
+    // The exact case that broke: the loop ran at MAX_CONCURRENT_ATTEMPTS=4, walls=1.
+    const recorded = legacyDigest(DEFAULT_POLICY, 4, 1);
+    expect(recorded).not.toBe(currentPolicyVersion());
+    expect(legacyPolicyVersions(DEFAULT_POLICY).has(recorded)).toBe(true);
+  });
+
+  it('does not recognise the new rules-only digest as a legacy alias', () => {
+    expect(legacyPolicyVersions(DEFAULT_POLICY).has(currentPolicyVersion())).toBe(false);
+  });
+
+  it('does not recognise the digest of a different rule set', () => {
+    const tightened: QualifierPolicy = { ...DEFAULT_POLICY, darkThreshold: 95 };
+    const recorded = legacyDigest(tightened, 4, 1);
+    expect(legacyPolicyVersions(tightened).has(recorded)).toBe(true);
+    expect(legacyPolicyVersions(DEFAULT_POLICY).has(recorded)).toBe(false);
+  });
+
+  it('scans exactly the bounded ceiling range', () => {
+    expect(legacyPolicyVersions(DEFAULT_POLICY, 3).size).toBe(9);
   });
 });

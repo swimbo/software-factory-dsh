@@ -1,0 +1,2 @@
+preflight: node 26.12.1 ok
+preflight: dsh 0.2.1-rc.5 at /Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh

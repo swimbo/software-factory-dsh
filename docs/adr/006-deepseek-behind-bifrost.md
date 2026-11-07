@@ -1,6 +1,6 @@
 # ADR-006 — DeepSeek only, behind Bifrost, and no paid call in any test
 
-**Status:** accepted (Phase 9b/9d); amended 2026-11-01 for the live-model path; the credential proxy half is **not built**
+**Status:** accepted (Phase 9b/9d); amended 2026-11-01 for the live-model path and **again 2026-11-02** — the proxy exists now, so the 2026-11-01 amendment's central concession ("the worker receives the key when live mode is on") is superseded by [ADR-007](007-scoped-credential-proxy.md), not retracted. Statements below marked _superseded_ are kept as written so the record of what was believed on 2026-11-01 survives; the 2026-11-02 amendment is what is true at `HEAD`.
 **Context:** [architecture.md](../planning/dark-factory-dsh/architecture.md) §9, [consensus-plan.md](../planning/dark-factory-dsh/consensus-plan.md) constraint C5
 **Proven by:** `packages/dsh-adapter` (overlay + executor tests), `docs/verification/*/summary.json` (`modelKeys: {BIFROST_API_KEY: false, DEEPSEEK_API_KEY: false}`)
 
@@ -28,10 +28,11 @@ promise, and it is checked on every verification run, not just at review time.
   _broker_ is the gate that would hand a worker a scoped, expiring credential
   (`factory credential`); the gateway key is meant to live in a proxy the worker cannot read.
 - **No paid call in any test.** The vitest suite and `bash scripts/verify.sh` run offline. Live-model
-  specs (`e2e/cli/live/*`) are placeholders that do not call a model — they are skipped without a
-  key (`@live`), and their bodies are `expect.unreachable()` so a future implementation must be
-  written deliberately. The verification summary records the key state next to the results, so a
-  run that did have a key would be visible in the artifact.
+  specs (`e2e/cli/live/*`) are skipped unless `BIFROST_API_KEY` **and** `DSH_BIN` are set, and the gate
+  stage that runs them is opt-in (`FACTORY_VERIFY_LIVE=1`) because each run spends. _Superseded
+  (2026-11-02): they are no longer `expect.unreachable()` placeholders — both `@live` specs make a real
+  turn through the proxy, and the verification summary records which keys were present, so a run that
+  did have a key is visible in the artifact._
 
 ## Amendment (2026-11-01) — the live path, and the one credential it must forward
 
@@ -57,8 +58,36 @@ first real run proved the model path — which forced one honest exception rathe
 
 What this amendment does **not** buy: the worker still receives a credential when live mode is on, so
 "the worker never receives the key" is true of every offline and container path and **false** of the
-live path until the proxy exists. That is stated in `README.md` next to the limitation, because a
-security claim that silently changes scope is worse than one that is narrower than advertised.
+live path until the proxy exists. _Superseded (2026-11-02): the proxy exists; the worker receives a
+scoped token, never the key. See the amendment below._
+
+## Amendment (2026-11-02) — the proxy exists, and the exception is gone
+
+The 2026-11-01 amendment recorded a real concession because `packages/credential-proxy` did not exist.
+It does now ([ADR-007](007-scoped-credential-proxy.md), commit `bfd0ca5` and the specs named there), and
+every sentence above that depended on its absence is superseded rather than edited away:
+
+- **The key is no longer forwarded.** A per-attempt proxy on `127.0.0.1:<ephemeral>` holds
+  `BIFROST_API_KEY`; the `dsh` child gets `FACTORY_PROXY_TOKEN` — one token, minted per attempt, bound
+  to that socket, that lease and one upstream path prefix, revoked before the verdict is written.
+  `forwardedCredentials()` copies **no** credential-shaped name from the parent, under
+  `FACTORY_LIVE_MODEL=1` or otherwise (`packages/dsh-adapter/src/launch-record.ts`); the spec that
+  asserts the child's env has no `BIFROST_API_KEY` is `packages/dsh-adapter/tests/launch-record.test.ts`.
+- **`launch.json` says what happened**, not what was intended: `credentialsForwarded: []` and
+  `credentialProxy: { token: 'scoped', expiresAt }` — the token's _existence_, never its value.
+- **`FACTORY_LIVE_MODEL=1` is now only a consent switch** ("this run may spend"). It no longer changes
+  the child's environment, and the by-category refusal of `*_KEY` names never moved.
+- **`packages/proxy` exists too**, and it is a different thing: the privileged-operation broker R5
+  asked for (post-expansion classifier, brokered-operation table, signed one-operation decision). The
+  "Not built" paragraph below is therefore wrong about both packages. What is genuinely still missing
+  is narrower and is stated in `README.md`: no verb mints a decision and neither call site passes a
+  `DecisionSink`, so the allow path has no end-to-end proof, and a real `dsh` turn's own tool calls are
+  an agent-reported artefact that never reaches the broker.
+
+What remains true from the 2026-11-01 amendment: C5 is unchanged as a gate (the offline suite and
+`verify.sh` pass with no key at all, and the summary records the key state), the live stage is opt-in
+because it spends, and the credential is a program key kept on `hermes-control` at `0600`, read per
+command and never written into this repository, a launch record or a receipt.
 
 ## Alternatives rejected
 
@@ -73,9 +102,12 @@ security claim that silently changes scope is worse than one that is narrower th
   the fake executor is legitimate for pipeline tests, but the DSH-facing integration is proven by
   adapter tests plus one recorded probe (`evidence/phase-9b-dsh-integration-probe.md`), and the
   docs say so rather than implying continuous live coverage.
-- **Ship the credential proxy in v1 (a real HTTP proxy holding the key).** Not rejected on merit —
-  it is simply not built. `packages/proxy` does not exist (`phase-13-audit.md` GAP-003), so
-  privileged work is _refused_ rather than brokered.
+- **Ship the credential proxy in v1 (a real HTTP proxy holding the key).** _Superseded (2026-11-02):
+  it shipped._ Both halves exist — `packages/credential-proxy` for the credential
+  ([ADR-007](007-scoped-credential-proxy.md)) and `packages/proxy` for privileged operations — and they
+  are deliberately two processes, because a proxy in front of its own supervisor can deadlock
+  (ADR-007, "Why this is not `packages/proxy`"). When this bullet was written they did not exist, and
+  privileged work was _refused_ rather than brokered.
 
 ## Consequences
 
@@ -90,7 +122,11 @@ The real DeepSeek turn is exercised by a recorded probe, not by CI. The proxy ga
 credential story is narrower than the plan's R5: `factory credential` mints a scoped credential and a
 worker token, but the "opaque proxy token" the help text describes has no proxy behind it in v1.
 
-**Not built.** `packages/proxy` (credential proxy), the normalised destructive-command classifier,
-and proxy-side spend metering are all absent — see `phase-13-audit.md` GAP-003 and ND3 (proxy metering
-semantics is an open human decision, `docs/handover.md`). Budget ceilings therefore **refuse**
-dispatch but do not **enforce** spend.
+**Not built.** _Superseded (2026-11-02) — every clause here was true at `c363900` and is false at
+`HEAD`._ `packages/credential-proxy` holds the key and meters the gateway per attempt
+(revoking the token at the ceiling); `packages/proxy` is the post-expansion classifier and
+brokered-operation table; ND1–ND4 were ratified on 2026-11-01 (`findings.md` § DECIDED), so proxy
+metering semantics is a decision, not an open question. What is still not built is narrower:
+billing-grade accounting (`budget reconcile` reports `unknown`, exit 6, rather than guessing) and an
+end-to-end allow path through `packages/proxy` (no verb mints a decision, no `DecisionSink` at either
+call site).

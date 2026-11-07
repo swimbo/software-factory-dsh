@@ -15,10 +15,15 @@
  * name and by value. The record is the same one the real executor writes, so what is proven
  * here is the allowlist and the record — not the container.
  *
- * Clause counted `UNKNOWN` here: the **container's** filesystem isolation (a worker inside the
- * image cannot open the host's holdout directory even if it guesses the path). That needs the
- * wall image, which v1 does not ship; `@docker` E2E-45 owns it. This spec proves the path never
- * reaches the worker, not that the mount hides it.
+ * Clause that was `UNKNOWN` here: the **worker container's** filesystem isolation (a candidate
+ * inside the image cannot open the host's holdout directory even if it guesses the path). It is
+ * measured now, in `@docker` `e2e/cli/docker/08-worker-container.test.ts`: the turn runs inside
+ * `factory-env`, the candidate's own process tries `<factoryHome>/holdout/corpus.txt` and
+ * `<factoryHome>/keys/evaluator.key` from three levels above its clone and can open neither, the
+ * host reads both (the positive control), and `launch.json` records both as `mountsDenied`.
+ * E2E-45, the kill spec, lives in the same file. The *wall's* container isolation is separate and
+ * measured by `@docker` E2E-44 (b). This spec still proves the path never *reaches* the worker;
+ * the container spec proves that a mount hides it.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

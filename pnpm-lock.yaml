@@ -44,6 +44,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@factory/anchor':
+        specifier: workspace:*
+        version: link:../../packages/anchor
       '@factory/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -98,6 +101,12 @@ importers:
       '@factory/wall':
         specifier: workspace:*
         version: link:../../packages/wall
+
+  packages/anchor:
+    dependencies:
+      '@factory/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/contracts: {}
 

@@ -128,6 +128,8 @@ export interface Store {
 
   // --- ledger
   appendEvent(event: LedgerEvent['payload'], options: AppendOptions): LedgerEvent;
+  /** Additive migrations this open applied. Empty when the store was already current. */
+  migrationsApplied(): { from: number; to: number; note: string }[];
   eventsSince(seq: number, limit?: number): LedgerEvent[];
   eventCount(): number;
   /** Rebuilds aggregates from the ledger and reports divergence instead of hiding it. */
@@ -237,6 +239,65 @@ export interface Store {
   }): void;
   spendForUnit(unitId: string): { reservedUsd: number; recordedUsd: number; unknownRows: number };
 
+  // --- metered usage (ND3: the gateway's own numbers, not an estimate)
+  /**
+   * Append one usage fact. The store computes `recordSha` from the row it writes, so the table
+   * and the `usage.recorded` ledger event cannot disagree without a visible edit.
+   */
+  recordUsage(row: {
+    usageId: string;
+    unitId: string;
+    attemptId: string;
+    tokensIn: number;
+    tokensOut: number;
+    /** `null` when the gateway reported tokens but no price: unknown, never a zero. */
+    costUsd: number | null;
+    gatewayRequestId: string | null;
+    signedAt: string;
+    ceilingCrossed: boolean;
+  }): UsageRow;
+  usageForAttempt(attemptId: string): readonly UsageRow[];
+  // --- class certificates (ND1 half two)
+  /**
+   * Every stored certificate, newest first. Read-only and projection-only: the write happens inside
+   * `insertVerdict`, so a certificate cannot exist for a verdict the store does not hold.
+   *
+   * Optional on the port so a fake store that predates ND1 stays structurally valid; a caller that
+   * finds it absent has *no* evidence of certification and must say `never-certified`, not skip the
+   * question (L3).
+   */
+  classCertificates?(): readonly ClassCertificateRow[];
+  certificatesForClass?(taskClass: string): readonly ClassCertificateRow[];
+  listUsage(): readonly UsageRow[];
+  usageForUnit(unitId: string): {
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
+    unpricedRows: number;
+    rows: number;
+    ceilingCrossed: boolean;
+  };
+
+  // --- privileged decisions (R5: one decision, one operation, across processes)
+  /**
+   * Whether this decision has already been spent. Read-only, and *not* the enforcement: the
+   * enforcement is `recordDecisionConsumed`, whose primary-key insert is the atomic check. This
+   * exists for `gate list`/`gate show` and for rendering "already used", never as a pre-flight a
+   * caller may trust.
+   */
+  isDecisionConsumed(decisionId: string): boolean;
+  /**
+   * Consume one decision and say whether *this* caller won, as one conditional insert
+   * (`INSERT … ON CONFLICT DO NOTHING`, `changes === 1`) inside one transaction.
+   *
+   * `false` means another caller inserted the marker first — the decision is spent and the
+   * operation must be refused. The decision's own `privileged.decided` event is written when the
+   * decision is minted (`factory gate decide`); this method records the separate *consumption*
+   * fact. A read-then-write would let two processes both see "unused" and both run the operation,
+   * which is why the verdict here is the insert's own `changes` and nothing else.
+   */
+  recordDecisionConsumed(decisionId: string, options: AppendOptions): boolean;
+
   // --- envelopes
   currentEnvelope(scope: 'per-unit' | 'daily'): { envelopeId: string; amountUsd: number } | null;
   raiseEnvelope(row: {
@@ -289,4 +350,55 @@ export interface Store {
     at: string,
     counts: { orphanedAttempts: number; ambiguous: number },
   ): void;
+}
+
+/**
+ * One metered usage fact, as observed by the credential proxy from the gateway's response.
+ *
+ * `costUsd: null` means "tokens were reported, no price was": unknown, never a zero. The
+ * `recordSha` is the digest of the row as written, so the table and its ledger event can be
+ * shown to be the same fact; it is **not** a signature over a claim the gateway made — that
+ * comparison is `factory budget reconcile`, against the gateway's own export.
+ */
+/**
+ * One class certificate, as stored. Append-only: a certificate is a fact about a verdict, so it is
+ * never updated in place — a re-certification adds a row. `modelId` is `null` when the attempt did
+ * not record one, which reads as "unknown", never as "unchanged since".
+ *
+ * `holdoutRevision` names the corpus the certificate was measured against. `null` means the row was
+ * written before the store attributed corpora (schema v5), which the wall judges **stale** with a
+ * reason that says so — a null corpus is "cannot prove which evidence this describes", never "any
+ * corpus". There is no upgrade that fills it in: the certificate did not record it, and inventing one
+ * from a later measurement would be the silent attribution this column exists to prevent.
+ */
+export interface ClassCertificateRow {
+  readonly certificateId: string;
+  readonly verdictId: string;
+  readonly unitId: string;
+  readonly taskClass: string;
+  readonly m: number;
+  readonly k: number;
+  readonly p0: number;
+  readonly alpha: number;
+  readonly samples: number;
+  readonly passes: number;
+  readonly outcome: 'certified' | 'not-certified' | 'insufficient';
+  readonly policyVersion: string;
+  readonly modelId: string | null;
+  readonly holdoutRevision: string | null;
+  readonly recordedAt: string;
+  readonly certificateSha: string;
+}
+
+export interface UsageRow {
+  readonly usageId: string;
+  readonly unitId: string;
+  readonly attemptId: string;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly costUsd: number | null;
+  readonly gatewayRequestId: string | null;
+  readonly signedAt: string;
+  readonly recordSha: string;
+  readonly ceilingCrossed: boolean;
 }

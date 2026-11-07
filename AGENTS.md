@@ -9,7 +9,7 @@ for what is real.
 ## Runtime: pin node in every shell
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"   # 26.12.1
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"   # 26.12.1
 ```
 
 Each `bash` invocation starts a fresh shell, so this line goes at the **top of every command**, not

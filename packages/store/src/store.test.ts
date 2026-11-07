@@ -21,8 +21,9 @@ import type {
   WorkerReceiptType,
 } from '@factory/contracts';
 import { openSqlite } from './driver.ts';
+import { migrationPath, SCHEMA_VERSION } from './schema.ts';
 import { openStore } from './store.ts';
-import type { AppendOptions, Store, UnitRow } from './types.ts';
+import type { AppendOptions, ClassCertificateRow, Store, UnitRow } from './types.ts';
 
 // --------------------------------------------------------------------- fixtures
 
@@ -218,6 +219,24 @@ function passVerdict(unitId: string, attemptId: string, receiptSha: string): Ver
   };
 }
 
+/** The optional port methods, asserted present: this suite tests the real store, not a fake. */
+function certificatesOfStore(): readonly ClassCertificateRow[] {
+  const read = store.classCertificates;
+  if (read === undefined) throw new Error('the real store must expose classCertificates()');
+  return read.call(store);
+}
+
+function certificatesOfClass(taskClass: string): readonly ClassCertificateRow[] {
+  const read = store.certificatesForClass;
+  if (read === undefined) throw new Error('the real store must expose certificatesForClass()');
+  return read.call(store, taskClass);
+}
+
+/** `insufficient` means fewer than m attempts: 3 of 20 is three attempts, not twenty. */
+function passCount(passes: number): number {
+  return passes < 18 ? passes : 20;
+}
+
 function expectFactoryError(fn: () => unknown, code: string): FactoryError {
   try {
     fn();
@@ -293,7 +312,7 @@ describe('durability pragmas', () => {
     expect(store.pragmas['journal_mode']).toBe('wal');
     expect(store.pragmas['synchronous']).toBe('FULL');
     expect(store.pragmas['foreign_keys']).toBe('ON');
-    expect(store.schemaVersion).toBe(1);
+    expect(store.schemaVersion).toBe(SCHEMA_VERSION);
     expect(store.location).toBe(dbPath);
   });
 
@@ -305,7 +324,7 @@ describe('durability pragmas', () => {
       checksum: string;
     }>();
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.version).toBe(1);
+    expect(rows[0]?.version).toBe(SCHEMA_VERSION);
     expect(typeof rows[0]?.checksum).toBe('string');
 
     // Re-opening the same directory is fine: the checksum matches.
@@ -316,6 +335,74 @@ describe('durability pragmas', () => {
     raw.prepare("UPDATE schema_migration SET checksum = 'deadbeef'").run();
     raw.close();
     expect(() => openStore({ dir, now: clock })).toThrow(/schema drift/);
+  });
+
+  it('opens a v1 store by applying every declared additive step, one ledger event each', () => {
+    // Put a store back to v1 the way an operator's store actually is: the tables the migrations add
+    // are gone, and the recorded version is the older one. This is the only test that can exist
+    // without shipping an old binary.
+    //
+    // Why this spec changed (ND1 half two): it used to assert `toHaveLength(1)` for the applied
+    // migration events, which baked in "there happens to be exactly one step". Adding v2 → v3 made
+    // that assertion false without anything being wrong. The invariant was never "one event" — it
+    // is "one event per declared step, and a reopen adds none", so the counts now come from
+    // `migrationPath(1)` instead of a literal. Strictly more is checked, not less.
+    store.close();
+    const steps = migrationPath(1);
+    expect(steps).not.toBeNull();
+    const declared = steps ?? [];
+    expect(declared.length).toBeGreaterThan(1);
+    const raw = openSqlite({ path: dbPath });
+    raw.prepare('DROP TABLE class_certificates').run();
+    raw.prepare('DROP TABLE usage_records').run();
+    raw.prepare('DROP TABLE privileged_decisions').run();
+    for (const step of declared) {
+      raw.prepare('DELETE FROM schema_migration WHERE version = ?').run(step.to);
+    }
+    raw
+      .prepare(
+        "INSERT INTO schema_migration (version, applied_at, checksum) VALUES (1, '2026-10-31T00:00:00.000Z', 'v1')",
+      )
+      .run();
+    raw.close();
+
+    const migrated = openStore({ dir, now: clock });
+    const applied = migrated.eventsSince(0).filter((event) => event.type === 'store.migrated');
+    expect(applied).toHaveLength(declared.length);
+    expect(
+      applied.map((event) => {
+        const payload = event.payload as { from?: unknown; to?: unknown };
+        return [payload.from, payload.to];
+      }),
+    ).toEqual(declared.map((step) => [step.from, step.to]));
+    const raw2 = openSqlite({ path: dbPath });
+    const versions = raw2
+      .prepare('SELECT version FROM schema_migration ORDER BY version')
+      .all<{ version: number }>()
+      .map((row) => row.version);
+    // The v1 row stays: history is not rewritten by a migration, it is appended to.
+    expect(versions).toEqual([1, ...declared.map((step) => step.to)]);
+    raw2.close();
+
+    // Reopening a migrated store must not migrate it again: the version row is now current, so the
+    // ledger still carries exactly one `store.migrated` event per step when the next process opens
+    // it.
+    migrated.close();
+    const reopened = openStore({ dir, now: clock });
+    const again = reopened.eventsSince(0).filter((event) => event.type === 'store.migrated');
+    expect(again).toHaveLength(declared.length);
+    expect(reopened.migrationsApplied()).toEqual([]);
+    // Teardown closes whatever `store` points at, so hand it the live handle rather than leaving it
+    // holding a closed one.
+    store = reopened;
+  });
+
+  it('still refuses a version it has no declared path from', () => {
+    // Tampered from a second connection while this store is open, so teardown still has a live handle.
+    const raw = openSqlite({ path: dbPath });
+    raw.prepare('UPDATE schema_migration SET version = 7').run();
+    raw.close();
+    expect(() => openStore({ dir, now: clock })).toThrow(/declares no migration/u);
   });
 });
 
@@ -795,6 +882,322 @@ describe('verdicts: unknown is not pass', () => {
     const event = store.eventsSince(before).at(0);
     expect(event?.type).toBe('unit.verified');
     expect(event?.payload).toMatchObject({ unitId: 'U-7f3a9c', verdictId: 'V-1', outcome: 'pass' });
+  });
+
+  it('records the class certificate the verdict carried, with a digest the ledger agrees with', () => {
+    const { receiptSha } = receiptedUnit();
+    const verdict: VerdictType = {
+      ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+      modelId: 'auto',
+      certification: {
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        p0: 0.95,
+        alpha: 0.07548367378849634,
+        samples: 20,
+        passes: 18,
+        outcome: 'certified',
+      },
+    };
+    const before = store.eventCount();
+    store.insertVerdict(verdictRow(verdict, 'R-1'), options('tr-verify'));
+
+    const [certificate] = certificatesOfStore();
+    expect(certificate).toMatchObject({
+      verdictId: 'V-1',
+      unitId: 'U-7f3a9c',
+      taskClass: 'refactor-extract-helper',
+      m: 20,
+      k: 18,
+      p0: 0.95,
+      alpha: 0.07548367378849634,
+      samples: 20,
+      passes: 18,
+      outcome: 'certified',
+      policyVersion: 'policy/2026-11-01',
+      modelId: 'auto',
+      // The corpus the certificate was measured under, carried from its verdict. A certificate that
+      // cannot name this cannot be re-judged when the holdout moves (v4 → v5 added the column).
+      holdoutRevision: 'holdout/7',
+      recordedAt: AT,
+    });
+    expect(certificate?.certificateId).toBe('cert:V-1');
+    expect(certificate?.certificateSha).toMatch(/^sha256:[0-9a-f]{64}$/u);
+
+    // The ledger event and the table row are the same fact, digest included: a reader who trusts
+    // only the ledger can still prove what was certified.
+    const events = store.eventsSince(before);
+    const certified = events.find((event) => event.type === 'wall.class_certified');
+    expect(certified?.actor).toBe('wall');
+    expect(certified?.payload).toMatchObject({
+      certificateId: certificate?.certificateId,
+      verdictId: 'V-1',
+      taskClass: 'refactor-extract-helper',
+      outcome: 'certified',
+      samples: 20,
+      passes: 18,
+      alpha: 0.07548367378849634,
+      policyVersion: 'policy/2026-11-01',
+      modelId: 'auto',
+      certificateSha: certificate?.certificateSha,
+      // A ledger-only reader must be able to prove which corpus made the judgement true, and
+      // reproduce the risk from the counts: the row carries both, so the event must too.
+      holdoutRevision: 'holdout/7',
+      p0: 0.95,
+    });
+  });
+
+  it('recovers the corpus and p0 from the ledger alone, without reading the certificate table', () => {
+    const { receiptSha } = receiptedUnit();
+    const verdict: VerdictType = {
+      ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+      modelId: 'auto',
+      certification: {
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        p0: 0.95,
+        alpha: 0.07548367378849634,
+        samples: 20,
+        passes: 18,
+        outcome: 'certified',
+      },
+    };
+    const before = store.eventCount();
+    store.insertVerdict(verdictRow(verdict, 'R-1'), options('tr-verify'));
+    // Deliberately no call to certificatesOfStore(): the ledger is the only input.
+    const certified = store
+      .eventsSince(before)
+      .filter((event) => event.type === 'wall.class_certified')
+      .at(-1);
+    expect(certified?.payload).toMatchObject({ holdoutRevision: 'holdout/7', p0: 0.95 });
+
+    const payload = certified?.payload as {
+      samples: number;
+      passes: number;
+      m: number;
+      k: number;
+      p0: number;
+    };
+    // The risk is reproducible from the event: alpha = 1 - P(Bin(m, p0) >= k).
+    expect(payload.samples).toBeGreaterThanOrEqual(payload.m);
+    expect(payload.passes).toBeGreaterThanOrEqual(payload.k);
+    expect(payload.p0).toBe(0.95);
+  });
+
+  it('stores 17 of 20 as not-certified and 3 of 20 as insufficient, never as a certificate', () => {
+    const { receiptSha } = receiptedUnit();
+    const base = passVerdict('U-7f3a9c', 'A-1', receiptSha);
+    for (const [passes, outcome] of [
+      [17, 'not-certified'],
+      [3, 'insufficient'],
+    ] as const) {
+      store.insertVerdict(
+        {
+          ...verdictRow(
+            {
+              ...base,
+              certification: {
+                taskClass: `class-${passes.toString()}`,
+                m: 20,
+                k: 18,
+                p0: 0.95,
+                alpha: 0.07548367378849634,
+                samples: passCount(passes),
+                passes,
+                outcome,
+              },
+            },
+            'R-1',
+          ),
+          verdictId: `V-${passes.toString()}`,
+        },
+        options(),
+      );
+      const stored = certificatesOfClass(`class-${passes.toString()}`);
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.outcome).toBe(outcome);
+      expect(stored[0]?.passes).toBe(passes);
+    }
+  });
+
+  it('takes the corpus from the verdict body when the row itself left the column unknown', () => {
+    // Two records of the same fact: the `verdicts.holdout_revision` column and the verdict body the
+    // wall signed. The certificate reads the body — the thing the wall measured — and uses the row's
+    // column only as the first choice. This is not a hypothetical: `audit --certifications` seeds
+    // verdicts exactly like this.
+    const { receiptSha } = receiptedUnit();
+    const verdict: VerdictType = {
+      ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+      modelId: 'auto',
+      certification: {
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        p0: 0.95,
+        alpha: 0.07548367378849634,
+        samples: 20,
+        passes: 19,
+        outcome: 'certified',
+      },
+    };
+    const row = { ...verdictRow(verdict, 'R-1'), holdoutRevision: null };
+    store.insertVerdict(row, options('tr-verify'));
+
+    const [certificate] = certificatesOfStore();
+    expect(certificate).toMatchObject({ outcome: 'certified', holdoutRevision: 'holdout/7' });
+  });
+
+  it('backfills a v4 store from the verdict each certificate names, and leaves the rest NULL', () => {
+    // The state every operator's store is in: `class_certificates` without `holdout_revision`, schema
+    // version 4. The column was missing, not the fact — a certificate is derived from exactly one
+    // verdict (`verdict_id` is a foreign key), and that verdict records the corpus — so the migration
+    // fills each row from *its own* verdict. Three rows, three answers:
+    //
+    //   cert:V-1       its verdict names a corpus      -> filled
+    //   cert:V-legacy  its verdict names none          -> stays NULL, even though another certificate
+    //                                                     of the same class names a corpus
+    //   cert:dangling  no such verdict at all          -> stays NULL
+    //
+    // The second and third rows are what make this a backfill and not an attribution: the store copies
+    // a fact that was already recorded next to the row, and invents nothing. Both are written by hand
+    // because the store's own write path cannot produce them (the insert resolves a non-empty corpus,
+    // and the foreign key forbids a dangling certificate); they are the shapes a pre-v5 store can hold.
+    const { receiptSha } = receiptedUnit();
+    const verdict: VerdictType = {
+      ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+      modelId: 'auto',
+      certification: {
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        p0: 0.95,
+        alpha: 0.07548367378849634,
+        samples: 20,
+        passes: 19,
+        outcome: 'certified',
+      },
+    };
+    store.insertVerdict(verdictRow(verdict, 'R-1'), options('tr-verify'));
+    expect(certificatesOfStore()[0]?.holdoutRevision).toBe('holdout/7');
+    store.close();
+
+    const raw = openSqlite({ path: dbPath });
+    // Rewind to v4: the column goes away, with the values it holds — a pre-v5 row never had one.
+    raw.prepare('ALTER TABLE class_certificates DROP COLUMN holdout_revision').run();
+    // A verdict written before attribution: the column is null, which the DDL has always allowed for
+    // a non-pass outcome, and which the current insert path no longer produces.
+    raw
+      .prepare(
+        `INSERT INTO verdicts (verdict_id, unit_id, attempt_id, receipt_id, receipt_sha,
+           holdout_revision, policy_version, wall_version, outcome, delta_checked, delta_observed,
+           reasons_json, scenarios_json, delta_json, evaluated_at)
+           VALUES ('V-legacy', 'U-7f3a9c', 'A-1', 'R-1', ?, NULL, 'policy/2026-11-01',
+             ?, 'unknown', 0, NULL, '["holdout_unavailable"]', '[]',
+             '{"checked":false,"baseRate":0,"candidateRate":0,"threshold":0,"observed":null,"holdoutRevision":""}',
+             ?)`,
+      )
+      .run(receiptSha, WALL_VERSION, AT);
+    raw
+      .prepare(
+        `INSERT INTO class_certificates (certificate_id, verdict_id, unit_id, task_class, m, k, p0,
+           alpha, samples, passes, outcome, policy_version, model_id, recorded_at, certificate_sha)
+           VALUES ('cert:V-legacy', 'V-legacy', 'U-7f3a9c', 'refactor-extract-helper', 20, 18, 0.95,
+             0.07548367378849634, 3, 1, 'insufficient', 'policy/2026-11-01', 'auto', ?, ?)`,
+      )
+      .run(AT, SHA);
+    // A certificate whose verdict is not in the table at all. `PRAGMA foreign_keys = OFF` is the only
+    // way to build a row the store's own path refuses to write; the point of the row is that the
+    // backfill's join must not fill it — a "use the class's newest verdict" implementation would.
+    raw.exec('PRAGMA foreign_keys = OFF');
+    raw
+      .prepare(
+        `INSERT INTO class_certificates (certificate_id, verdict_id, unit_id, task_class, m, k, p0,
+           alpha, samples, passes, outcome, policy_version, model_id, recorded_at, certificate_sha)
+           VALUES ('cert:dangling', 'V-missing', 'U-7f3a9c', 'refactor-extract-helper', 20, 18, 0.95,
+             0.07548367378849634, 20, 19, 'certified', 'policy/2026-11-01', 'auto', ?, ?)`,
+      )
+      .run(AT, SHA);
+    raw.exec('PRAGMA foreign_keys = ON');
+    raw.prepare('DELETE FROM schema_migration WHERE version = 5').run();
+    raw
+      .prepare(
+        "INSERT INTO schema_migration (version, applied_at, checksum) VALUES (4, '2026-11-01T00:00:00.000Z', 'v4')",
+      )
+      .run();
+    raw.close();
+
+    const migrated = openStore({ dir, now: clock });
+    store = migrated;
+    expect(migrated.migrationsApplied()).toEqual([expect.objectContaining({ from: 4, to: 5 })]);
+    const byId = new Map(certificatesOfStore().map((row) => [row.certificateId, row]));
+    // Filled from its own verdict: the fact was always there, the column was not.
+    expect(byId.get('cert:V-1')?.holdoutRevision).toBe('holdout/7');
+    // Its verdict names nothing, so the row stays NULL — and stays NULL even though the class's other
+    // certificate names a corpus. Filling it from the class would be the silent attribution the wall
+    // exists to judge.
+    expect(byId.get('cert:V-legacy')?.holdoutRevision).toBeNull();
+    // No verdict at all: nothing to copy, nothing invented.
+    expect(byId.get('cert:dangling')?.holdoutRevision).toBeNull();
+
+    // Reopening does not re-run the step, and the column is still there for new rows.
+    migrated.close();
+    const reopened = openStore({ dir, now: clock });
+    store = reopened;
+    expect(reopened.migrationsApplied()).toEqual([]);
+    const columns = openSqlite({ path: dbPath })
+      .prepare('PRAGMA table_info(class_certificates)')
+      .all<{ name: string }>()
+      .map((column) => column.name);
+    expect(columns).toContain('holdout_revision');
+  });
+
+  it('refuses a certificate that claims certified on evidence below its own operating point', () => {
+    const { receiptSha } = receiptedUnit();
+    const error = expectFactoryError(
+      () =>
+        store.insertVerdict(
+          {
+            ...verdictRow(
+              {
+                ...passVerdict('U-7f3a9c', 'A-1', receiptSha),
+                certification: {
+                  taskClass: 'tiny-class',
+                  m: 20,
+                  k: 18,
+                  p0: 0.95,
+                  alpha: 0.07548367378849634,
+                  samples: 3,
+                  passes: 3,
+                  outcome: 'certified',
+                },
+              },
+              'R-1',
+            ),
+            verdictId: 'V-liar',
+          },
+          options(),
+        ),
+      'INTERNAL',
+    );
+    expect(error.message).toContain('cannot be stored as certified');
+    expect(certificatesOfClass('tiny-class')).toEqual([]);
+  });
+
+  it('writes no certificate for a verdict that carried none, and one per verdict on reopen', () => {
+    const { receiptSha } = receiptedUnit();
+    // No `certification` field: a cold start measured no class. Absence must not become a row.
+    store.insertVerdict(verdictRow(passVerdict('U-7f3a9c', 'A-1', receiptSha), 'R-1'), options());
+    expect(certificatesOfStore()).toEqual([]);
+
+    // Reopening the store must not duplicate or re-derive anything: the projection is written once,
+    // inside the verdict's transaction.
+    const before = certificatesOfStore().length;
+    store.close();
+    store = openStore({ dir, now: clock });
+    expect(certificatesOfStore()).toHaveLength(before);
+    expect(store.migrationsApplied()).toEqual([]);
   });
 
   it('records an unknown verdict without inventing a pass', () => {
@@ -1297,6 +1700,56 @@ describe('atomic', () => {
   });
 });
 
+describe('privileged decisions (R5: one decision, one operation)', () => {
+  const DECISION = 'gd_0c5e1436dfffe8fa57b0e9e2';
+
+  it('records the marker for the caller whose insert created it, and only for that caller', () => {
+    expect(store.isDecisionConsumed(DECISION)).toBe(false);
+    expect(store.recordDecisionConsumed(DECISION, options())).toBe(true);
+    expect(store.isDecisionConsumed(DECISION)).toBe(true);
+    // The same caller asking twice loses the second time. A replay is indistinguishable
+    // from a race here on purpose: both are "somebody already spent it".
+    expect(store.recordDecisionConsumed(DECISION, options())).toBe(false);
+    // The marker is a row, not an event: `decide` wrote the event when the decision was made,
+    // and consuming is a separate fact. Anything else would read as two decisions.
+    expect(store.eventCount()).toBe(0);
+  });
+
+  it('lets exactly one of two independent connections win, which is what two processes see', () => {
+    // Two independent handles over the same file, i.e. the state two processes share. This is the
+    // regression that R5 exists for: a per-invocation registry (the memory double, or a Map built
+    // inside `launchAttempt`) returns `true` to *both* callers here, because each handle has its
+    // own idea of "unused". The marker lives in the database, so the second caller loses.
+    const other = openStore({ dir, now: clock });
+    try {
+      expect(other.isDecisionConsumed(DECISION)).toBe(false);
+      expect(store.isDecisionConsumed(DECISION)).toBe(false);
+
+      const first = store.recordDecisionConsumed(DECISION, options('tr-a'));
+      const second = other.recordDecisionConsumed(DECISION, options('tr-b'));
+
+      expect([first, second].filter((won) => won)).toHaveLength(1);
+      expect(other.isDecisionConsumed(DECISION)).toBe(true);
+      expect(store.isDecisionConsumed(DECISION)).toBe(true);
+    } finally {
+      other.close();
+    }
+  });
+
+  it('stays consumed after a reopen: the marker is durable, not per-invocation', () => {
+    expect(store.recordDecisionConsumed(DECISION, options())).toBe(true);
+    store.close();
+    store = openStore({ dir, now: clock });
+    expect(store.isDecisionConsumed(DECISION)).toBe(true);
+    expect(store.recordDecisionConsumed(DECISION, options())).toBe(false);
+  });
+
+  it('refuses an empty decision id rather than writing a marker that consumes nothing', () => {
+    expect(() => store.recordDecisionConsumed('   ', options())).toThrow(FactoryError);
+    expect(store.eventCount()).toBe(0);
+  });
+});
+
 describe('recovery runs', () => {
   it('records a run and its completion event', () => {
     store.insertRecoveryRun({ recoveryRunId: 'RR-1', startedAt: AT });
@@ -1311,6 +1764,110 @@ describe('recovery runs', () => {
     expectFactoryError(
       () => store.completeRecoveryRun('RR-missing', AT, { orphanedAttempts: 0, ambiguous: 0 }),
       'INTERNAL',
+    );
+  });
+});
+
+describe('metered usage (ND3)', () => {
+  // Appended here rather than in a new file because the setup helpers above build the
+  // unit/lease/attempt chain an attempt-scoped usage row needs; duplicating them would be a
+  // second definition of "a dispatched unit" that could drift from the first.
+
+  it('records a usage fact, and the ledger event carries the same digest as the row', () => {
+    dispatchedUnit();
+    const before = store.eventCount();
+    const row = store.recordUsage({
+      usageId: 'usg-1',
+      unitId: 'U-7f3a9c',
+      attemptId: 'A-1',
+      tokensIn: 1200,
+      tokensOut: 340,
+      costUsd: 0.021,
+      gatewayRequestId: 'req_1',
+      signedAt: AT,
+      ceilingCrossed: false,
+    });
+    expect(row.recordSha).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    // The digest is over the row as stored, so a reader can recompute it from the table alone.
+    expect(store.eventCount()).toBe(before + 1);
+    const appended = store.eventsSince(before).at(-1);
+    expect(appended?.type).toBe('usage.recorded');
+    expect((appended?.payload as { recordSha?: string }).recordSha).toBe(row.recordSha);
+    expect(store.usageForAttempt('A-1')).toEqual([row]);
+  });
+
+  it('keeps an unpriced call unknown instead of storing a zero', () => {
+    dispatchedUnit();
+    const row = store.recordUsage({
+      usageId: 'usg-2',
+      unitId: 'U-7f3a9c',
+      attemptId: 'A-1',
+      tokensIn: 10,
+      tokensOut: 2,
+      // The gateway reported tokens and no price. This is the case that must never become
+      // `$0.00 measured`: the budget would read healthier the less the gateway said.
+      costUsd: null,
+      gatewayRequestId: null,
+      signedAt: AT,
+      ceilingCrossed: false,
+    });
+    expect(row.costUsd).toBeNull();
+    expect(store.usageForUnit('U-7f3a9c')).toMatchObject({
+      tokensIn: 10,
+      tokensOut: 2,
+      costUsd: 0,
+      unpricedRows: 1,
+      rows: 1,
+    });
+  });
+
+  it('sums per unit, flags a crossing, and refuses a usage row for an unknown attempt', () => {
+    dispatchedUnit();
+    store.recordUsage({
+      usageId: 'usg-3',
+      unitId: 'U-7f3a9c',
+      attemptId: 'A-1',
+      tokensIn: 100,
+      tokensOut: 20,
+      costUsd: 0.004,
+      gatewayRequestId: 'req_a',
+      signedAt: AT,
+      ceilingCrossed: false,
+    });
+    store.recordUsage({
+      usageId: 'usg-4',
+      unitId: 'U-7f3a9c',
+      attemptId: 'A-1',
+      tokensIn: 50,
+      tokensOut: 10,
+      costUsd: 0.002,
+      gatewayRequestId: 'req_b',
+      signedAt: '2026-11-01T00:00:01.000Z',
+      ceilingCrossed: true,
+    });
+    expect(store.usageForUnit('U-7f3a9c')).toMatchObject({
+      tokensIn: 150,
+      tokensOut: 30,
+      costUsd: 0.006,
+      unpricedRows: 0,
+      rows: 2,
+      ceilingCrossed: true,
+    });
+    expect(store.listUsage()).toHaveLength(2);
+    expectFactoryError(
+      () =>
+        store.recordUsage({
+          usageId: 'usg-bad',
+          unitId: 'U-7f3a9c',
+          attemptId: 'A-missing',
+          tokensIn: 1,
+          tokensOut: 1,
+          costUsd: null,
+          gatewayRequestId: null,
+          signedAt: AT,
+          ceilingCrossed: false,
+        }),
+      'ATTEMPT_NOT_FOUND',
     );
   });
 });

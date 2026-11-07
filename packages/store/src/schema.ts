@@ -8,7 +8,217 @@
  * enforced at this layer rather than in code.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 5;
+
+/**
+ * Declared migrations. A store one version behind is opened only when a migration here says how to
+ * get from its version to this one — never by guessing, and never by rewriting a ledger.
+ *
+ * v1 → v2 is **additive**: ND3 added `usage_records` (and its two indexes) so spend could be recorded
+ * as the gateway reported it. Nothing existing changed, which is why the migration is exactly the new
+ * table's DDL. It is written out here rather than "just run SCHEMA_SQL", because a migration that runs
+ * the current schema is a migration whose effect depends on what the current schema happens to be
+ * today — the next person to add a table would silently change this one.
+ *
+ * A destructive change (dropping or reshaping a column) must never appear here: an operator's ledger
+ * is evidence, and there is no `--force` in this CLI.
+ *
+ * v4 → v5 adds a **column** for the first time, and SQLite has no `ADD COLUMN IF NOT EXISTS`. The
+ * statement is therefore declared in `addColumns` rather than `statements`: the store runs it only
+ * when the table exists and the column does not. That matters for an old store opened by this
+ * binary, because `SCHEMA_SQL` runs before the declared steps and recreates a *missing* table in its
+ * current shape — the v1 → v5 path would otherwise reach `ADD COLUMN` with the column already there
+ * and refuse to open a ledger it could read.
+ */
+export interface Migration {
+  readonly from: number;
+  readonly to: number;
+  readonly note: string;
+  readonly statements: readonly string[];
+  /**
+   * `ALTER TABLE … ADD COLUMN` statements, with the table and column each one adds. Idempotent by
+   * inspection instead of by swallowing a duplicate-column error: the store skips one whose column
+   * is already there.
+   *
+   * Applied **before** `statements`, because a step may add a column and then fill it.
+   */
+  readonly addColumns?: readonly AddColumn[];
+}
+
+export interface AddColumn {
+  readonly table: string;
+  readonly column: string;
+  readonly statement: string;
+}
+
+const USAGE_RECORDS_DDL = `CREATE TABLE IF NOT EXISTS usage_records (
+  usage_id            TEXT PRIMARY KEY,
+  unit_id             TEXT NOT NULL REFERENCES units(unit_id),
+  attempt_id          TEXT NOT NULL REFERENCES attempts(attempt_id),
+  tokens_in           INTEGER NOT NULL CHECK (tokens_in >= 0),
+  tokens_out          INTEGER NOT NULL CHECK (tokens_out >= 0),
+  cost_usd            REAL CHECK (cost_usd IS NULL OR cost_usd >= 0),
+  gateway_request_id  TEXT,
+  signed_at           TEXT NOT NULL,
+  record_sha          TEXT NOT NULL,
+  ceiling_crossed     INTEGER NOT NULL DEFAULT 0 CHECK (ceiling_crossed IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS usage_attempt ON usage_records(attempt_id);
+CREATE INDEX IF NOT EXISTS usage_unit ON usage_records(unit_id);`;
+
+/**
+ * v2 → v3 (ND1 half two): `class_certificates`, the append-only projection of the wall's class
+ * judgement. Additive: nothing existing changed, and the DDL is written out here rather than
+ * re-running `SCHEMA_SQL` for the reason the header gives — a migration that executes "the current
+ * schema" silently changes whenever someone adds a table.
+ *
+ * One row per verdict that carries a certificate. The primary key is derived from the verdict id, so
+ * "one certificate per verdict" is a schema fact rather than a promise the insert path keeps.
+ *
+ * `holdout_revision` was added in v4 → v5 and is part of this DDL as well as of that step: a store
+ * that predates the table entirely gets the current shape from this `CREATE` while the step's
+ * `ADD COLUMN` is skipped by inspection, and a store that already has the old table gets the column
+ * from the step. `NULL` means "recorded before the column existed", which the wall judges stale;
+ * `certificate_sha` stays the digest of the judgement it always was, so old rows still verify.
+ */
+const CLASS_CERTIFICATES_DDL = `CREATE TABLE IF NOT EXISTS class_certificates (
+  certificate_id      TEXT PRIMARY KEY,
+  verdict_id          TEXT NOT NULL REFERENCES verdicts(verdict_id),
+  unit_id             TEXT NOT NULL REFERENCES units(unit_id),
+  task_class          TEXT NOT NULL,
+  m                   INTEGER NOT NULL CHECK (m > 0),
+  k                   INTEGER NOT NULL CHECK (k > 0 AND k <= m),
+  p0                  REAL NOT NULL CHECK (p0 >= 0 AND p0 <= 1),
+  alpha               REAL NOT NULL CHECK (alpha >= 0 AND alpha <= 1),
+  samples             INTEGER NOT NULL CHECK (samples >= 0),
+  passes              INTEGER NOT NULL CHECK (passes >= 0 AND passes <= samples),
+  outcome             TEXT NOT NULL CHECK (outcome IN ('certified','not-certified','insufficient')),
+  policy_version      TEXT NOT NULL,
+  model_id            TEXT,
+  holdout_revision    TEXT,
+  recorded_at         TEXT NOT NULL,
+  certificate_sha     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS certificates_class ON class_certificates(task_class, recorded_at);
+CREATE INDEX IF NOT EXISTS certificates_verdict ON class_certificates(verdict_id);`;
+
+/**
+ * v3 → v4 (R5's allow path): `privileged_decisions`, the one-use marker behind "a decision is not a
+ * session". Additive: nothing existing changed.
+ *
+ * A row exists iff that decision has been used. The primary key is the decision id, so replay
+ * protection is the schema's job rather than a rule the caller has to remember: the whole check is
+ * `INSERT … ON CONFLICT (decision_id) DO NOTHING`, and `changes === 1` is "this caller won the race".
+ * A read followed by a write would let two processes both see "unused" and both run the operation.
+ *
+ * The decision's own `privileged.decided` event is written once, when the decision is minted
+ * (`factory gate decide`); this table is the *consumption* fact, a separate one, written atomically
+ * when the operation is allowed. Keeping the marker as one statement (not a read-then-write) is what
+ * makes a second process lose the race instead of running the same operation a second time.
+ *
+ * A DELETE trigger makes "un-consume a decision" an edit SQLite refuses. There is no update trigger
+ * because the only non-key column is the timestamp, and nothing rewrites it.
+ */
+const PRIVILEGED_DECISIONS_DDL = `CREATE TABLE IF NOT EXISTS privileged_decisions (
+  decision_id   TEXT PRIMARY KEY,
+  consumed_at   TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS privileged_decisions_no_delete BEFORE DELETE ON privileged_decisions
+BEGIN SELECT RAISE(ABORT, 'privileged_decisions is append-only'); END;`;
+
+/**
+ * v4 → v5 (corpus attribution): `class_certificates.holdout_revision`, the corpus the certificate's
+ * verdict was measured against.
+ *
+ * Additive and nullable, then **backfilled from the verdict each certificate names**. The column was
+ * missing, not the fact: every certificate was derived from exactly one verdict (`certificate_id` is
+ * `cert:` + that verdict's id, and `verdict_id` is a foreign key), and that verdict records the corpus
+ * it was measured under. So the backfill is an exact, deterministic join onto the row that produced
+ * the certificate — the same category as re-deriving a legacy policy digest: a bounded bridge to
+ * evidence that already exists, not a claim invented now.
+ *
+ * The bound matters more than the fill. It reads the corpus of **the verdict the certificate names**,
+ * never of the class's newest verdict, and never a default: if that verdict is missing, or names no
+ * corpus, the row stays `NULL` and the wall reads it as stale ("this certificate predates corpus
+ * attribution"). Filling from anything else would be the store attributing evidence it was never
+ * given — the silent-attribution defect this column exists to stop.
+ *
+ * **Delete this statement** once no readable row predates v5 (the column is then either written at
+ * insert time or genuinely unknown); it is a bridge for evidence written before the column existed,
+ * exactly like `legacyPolicyVersions()` in the qualifier.
+ *
+ * Why a column at all, rather than a join at read time: the certificate is the thing the audit prints,
+ * and a display that has to join to name its own evidence is a display that can be pointed at the
+ * wrong row. The verdict stays the deeper record; this is the projection saying what it measured.
+ */
+const CLASS_CERTIFICATES_CORPUS_DDL: AddColumn = {
+  table: 'class_certificates',
+  column: 'holdout_revision',
+  statement: 'ALTER TABLE class_certificates ADD COLUMN holdout_revision TEXT;',
+};
+
+/**
+ * The v4 → v5 backfill. Runs *after* the column exists (the store applies a step's `addColumns` before
+ * its `statements`), and is idempotent: it only touches rows whose corpus is still `NULL`.
+ *
+ * `EXISTS` rather than a bare scalar subquery so that a certificate whose verdict is missing, or whose
+ * verdict names an empty corpus, is left alone instead of being "filled" with `NULL` — the same value,
+ * but a different claim, and one this statement refuses to make.
+ */
+const CLASS_CERTIFICATES_CORPUS_BACKFILL = `UPDATE class_certificates
+   SET holdout_revision = (
+     SELECT v.holdout_revision FROM verdicts v WHERE v.verdict_id = class_certificates.verdict_id
+   )
+ WHERE holdout_revision IS NULL
+   AND EXISTS (
+     SELECT 1 FROM verdicts v
+      WHERE v.verdict_id = class_certificates.verdict_id
+        AND v.holdout_revision IS NOT NULL
+        AND trim(v.holdout_revision) <> ''
+   );`;
+
+export const MIGRATIONS: readonly Migration[] = [
+  {
+    from: 1,
+    to: 2,
+    note: 'ND3: append-only usage_records, so spend is recorded as the gateway reported it',
+    statements: [USAGE_RECORDS_DDL],
+  },
+  {
+    from: 2,
+    to: 3,
+    note: 'ND1 half two: append-only class_certificates, so a class judgement can be re-checked',
+    statements: [CLASS_CERTIFICATES_DDL],
+  },
+  {
+    from: 3,
+    to: 4,
+    note: 'R5: privileged_decisions, the one-use marker that makes a decision single-operation across processes',
+    statements: [PRIVILEGED_DECISIONS_DDL],
+  },
+  {
+    from: 4,
+    to: 5,
+    note: 'corpus attribution: class_certificates.holdout_revision, backfilled from the verdict each certificate names',
+    statements: [CLASS_CERTIFICATES_CORPUS_BACKFILL],
+    addColumns: [CLASS_CERTIFICATES_CORPUS_DDL],
+  },
+];
+
+/** A one-way path from `from` to `SCHEMA_VERSION`, or `null` when there is none. */
+export function migrationPath(from: number): readonly Migration[] | null {
+  if (from >= SCHEMA_VERSION) return from === SCHEMA_VERSION ? [] : null;
+  const path: Migration[] = [];
+  let version = from;
+  for (;;) {
+    const step = MIGRATIONS.find((candidate) => candidate.from === version);
+    if (step === undefined) return null;
+    path.push(step);
+    version = step.to;
+    if (version === SCHEMA_VERSION) return path;
+    if (version > SCHEMA_VERSION) return null;
+  }
+}
 
 /** Pragmas that are mandatory, not advisory (`tech-guide.md` §10). */
 export const REQUIRED_PRAGMAS: ReadonlyArray<readonly [string, string]> = [
@@ -218,6 +428,26 @@ CREATE TABLE IF NOT EXISTS spend_ledger (
   CHECK (kind <> 'reserved' OR amount_usd IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS spend_unit ON spend_ledger(unit_id);
+
+-- Metered usage, observed by the credential proxy from the gateway's own response.
+-- Append-only like the ledger: a usage row is a fact about one upstream call, so a second row
+-- for the same call would be a second call, never an update. A NULL cost_usd is 'unknown'
+-- (tokens were reported, no price was), which is why the column is nullable and the check does
+-- not default it to zero.
+${USAGE_RECORDS_DDL}
+
+-- --------------------------------------------------------- class certificates
+-- ND1 half two: the wall's per-class judgement as an append-only projection. One row
+-- per verdict that carried one; the digest lets a reader prove the row and the
+-- wall.class_certified event are the same fact.
+${CLASS_CERTIFICATES_DDL}
+
+-- -------------------------------------------------------- privileged decisions
+-- R5: one row per decision that has been used. The primary key is the decision id, so the
+-- one-use rule is enforced by SQLite rather than by a caller remembering to check first.
+-- The decision's own privileged.decided event is written when it is minted; this table is
+-- the separate *consumption* fact, written atomically on the allow path.
+${PRIVILEGED_DECISIONS_DDL}
 
 CREATE TABLE IF NOT EXISTS envelopes (
   envelope_id     TEXT PRIMARY KEY,

@@ -3,13 +3,29 @@
  *
  * What it may do: perform a **launch effect that is still pending** (the process never
  * started, so there is nothing to duplicate), find attempts whose lease no longer
- * vouches for them and mark them `ambiguous`, release expired leases, and report. What it
- * may **not** do: re-dispatch, retry a *measurement*, delete or "fix" anything
- * (`ux-plan.md` §3.9). A duplicate side effect is unrecoverable; a lost attempt is not.
+ * vouches for them and mark them `ambiguous`, release expired leases, sweep a leaked
+ * worker container, and report. What it may **not** do: re-dispatch, retry a
+ * *measurement*, delete or "fix" anything else (`ux-plan.md` §3.9). A duplicate side
+ * effect is unrecoverable; a lost attempt is not.
+ *
+ * ## The one thing it removes: a leaked worker container
+ *
+ * A `SIGKILL`ed control plane executes none of its exit paths, so the `docker run` client
+ * that would have reaped `factory-worker-<attemptId>` is orphaned and the container
+ * outlives the attempt. `recover` therefore sweeps the containers of the attempts **this
+ * invocation** reconciled to `ambiguous` — and only those. It reads that attempt's
+ * `launch.json`, and only when the record says the worker ran in a container does it
+ * remove containers labelled `org.factory.attempt=<attemptId>`, by that id and nothing
+ * else (never by image, never by a bare label). A live lease, a host child, a missing or
+ * malformed record, and a docker that cannot be reached are all reported as
+ * `skipped`/`failed` with the reason: "swept 0" is only ever said when the daemon
+ * answered. A failed sweep is visible in text and `--json` but never changes the exit
+ * code, because it is not a fact about the attempt an operator is being asked to
+ * observe. The argument lives in `recover-sweep.ts`.
  *
  * ## Why a pending launch is retried, and why the lease is the guard
  *
- * `engine.runUnit` commits the intent to launch and does not perform it, so a crash
+ * `engine.runUnit` commits the intent to launch and does not launch it, so a crash
  * between commit and launch is exactly the case the outbox exists for. The evidence that
  * nothing is running is the *lease*: while a lease is live, some process may own this
  * attempt and a second launch could double-perform it. So a retry requires
@@ -27,13 +43,20 @@
  * Exit codes: `8` when the store is quarantined (nothing may be written), `4` when
  * reconciliation produced an ambiguous attempt — an ambiguous fact is a measurement gap
  * and the operator is being asked to observe (§3.4: "exit 4 for every invocation that
- * returns an ambiguous state") — otherwise `0`.
+ * returns an ambiguous state") — otherwise `0`. A sweep that failed does not move these
+ * codes: the ambiguity did, the leak check is reported beside it.
  */
 import { FactoryError } from '@factory/contracts';
 
 import { LEASE_TTL_MS } from '../context.ts';
 import { MAX_LAUNCH_ATTEMPTS, pendingLaunches, settleApplied, settleFailure } from '../effects.ts';
 import { cloneAttempt, launchAttempt } from '../launch.ts';
+import {
+  resolveSweepAdapter,
+  sweepReconciledAttempts,
+  type AttemptSweepReport,
+  type ReconciledAttempt,
+} from '../recover-sweep.ts';
 
 import { field } from '../render/format.ts';
 import { renderAmbiguity, buildStatus } from '../render/status.ts';
@@ -44,6 +67,52 @@ interface RelaunchReport {
   readonly applied: string[];
   readonly refused: string[];
   readonly deferred: string[];
+}
+
+/**
+ * The sweep, as lines an operator can read — including the case where it did not run.
+ *
+ * The `FAILED` branch is deliberately louder than the others: it is the one state where the
+ * factory does not know whether a container is still out there, and the line carries the exact
+ * `docker ps` command that answers the question. Nothing here is allowed to read as a clean
+ * sweep; `swept` with no ids is the only clean sentence, and it is only reachable when docker
+ * answered.
+ */
+function renderSweeps(sweeps: readonly AttemptSweepReport[]): string[] {
+  if (sweeps.length === 0) return [];
+  const lines: string[] = [
+    '',
+    '  container sweep (recovery-side; the reconciled attempt id is the only filter):',
+  ];
+  for (const sweep of sweeps) {
+    switch (sweep.status) {
+      case 'swept':
+        if (sweep.removed.length === 0) {
+          lines.push(
+            `    ${sweep.attemptId}  clean: docker answered, and no container carries label ` +
+              `org.factory.attempt=${sweep.attemptId}`,
+          );
+        } else {
+          lines.push(
+            `    ${sweep.attemptId}  swept: removed ${sweep.removed.join(', ')}` +
+              `${sweep.image === null ? '' : ` (leaked from ${sweep.image})`}`,
+          );
+        }
+        break;
+      case 'skipped':
+        lines.push(`    ${sweep.attemptId}  skipped: ${sweep.reason ?? 'nothing to sweep'}`);
+        break;
+      case 'failed':
+        lines.push(`    ${sweep.attemptId}  FAILED: ${sweep.reason ?? 'the sweep did not finish'}`);
+        if (sweep.checkCommand !== null) {
+          lines.push(
+            `            a container may still be running for this attempt; check with: ${sweep.checkCommand}`,
+          );
+        }
+        break;
+    }
+  }
+  return lines;
 }
 
 /**
@@ -279,7 +348,30 @@ export async function runRecover(input: VerbInput): Promise<number> {
   // and marking it ambiguous first would ask a person about work nobody started.
   const relaunch = await relaunchPendingEffects(ctx);
 
+  // The engine reports counts, not ids, and the sweep must name the attempts *this* invocation
+  // reconciled. Recovery is one synchronous transaction against a local store, so "active
+  // before, ambiguous after" is exactly that set — and it deliberately excludes attempts that
+  // were already ambiguous, whose containers a person may be inspecting.
+  const activeBefore = ctx.store.listActiveAttempts();
   const result = ctx.engine.recover({ leaseTtlMs: LEASE_TTL_MS });
+  const reconciled: ReconciledAttempt[] = [];
+  for (const attempt of activeBefore) {
+    const after = ctx.store.getAttempt(attempt.attemptId);
+    if (after !== null && after.state === 'ambiguous') {
+      reconciled.push({ attemptId: after.attemptId, unitId: after.unitId });
+    }
+  }
+  // The adapter is resolved lazily, and only when there is something to sweep: `recover` must
+  // work on a host where the harness package is absent, and the common recovery has no
+  // container to look for at all.
+  const sweeps = sweepReconciledAttempts({
+    home: ctx.home,
+    env: ctx.env,
+    attempts: reconciled,
+    liveLease: (unitId) => ctx.store.getLiveLease(unitId),
+    adapter: reconciled.length === 0 ? null : await resolveSweepAdapter(),
+  });
+
   const ambiguousAttempts = ctx.store
     .listUnits()
     .flatMap((unit) => ctx.store.listAttemptsForUnit(unit.unitId))
@@ -306,6 +398,19 @@ export async function runRecover(input: VerbInput): Promise<number> {
       state: attempt.state,
       startedAt: attempt.startedAt,
     })),
+    // The sweep as a value, not a sentence: a caller can tell "nothing was there" from "the
+    // daemon was not reached" without parsing English. A failed sweep never changes the exit
+    // code — the ambiguity does — but it must be impossible to miss.
+    sweeps: sweeps.map((sweep) => ({
+      attemptId: sweep.attemptId,
+      unitId: sweep.unitId,
+      status: sweep.status,
+      image: sweep.image,
+      removed: [...sweep.removed],
+      remaining: [...sweep.remaining],
+      reason: sweep.reason,
+      checkCommand: sweep.checkCommand,
+    })),
     traceId: ctx.traceId,
   });
 
@@ -327,6 +432,7 @@ export async function runRecover(input: VerbInput): Promise<number> {
     lines.push(`  ${attempt.attemptId}  ${attempt.unitId}  ${attempt.state}  -> AMBIGUOUS`);
     lines.push(`        observe: factory status ${attempt.unitId} --attempt ${attempt.attemptId}`);
   }
+  lines.push(...renderSweeps(sweeps));
   if (result.ambiguous > 0) {
     const model = buildStatus(ctx);
     for (const unit of model.units.filter((candidate) => candidate.state === 'ambiguous')) {

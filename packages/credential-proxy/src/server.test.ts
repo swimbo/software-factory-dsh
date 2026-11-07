@@ -15,7 +15,13 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { startCredentialProxy, pathWithinPrefix, type CredentialProxy } from './server.ts';
+import {
+  DEFAULT_BIND_ADDRESS,
+  startCredentialProxy,
+  pathWithinPrefix,
+  type CredentialProxy,
+  type ProxyEvent,
+} from './server.ts';
 
 const GATEWAY_KEY = 'sk-gateway-do-not-leak';
 
@@ -64,14 +70,16 @@ function fixedClock(start: string): { now: () => string; set: (iso: string) => v
   return { now: () => current, set: (iso) => (current = iso) };
 }
 
-let gateway: FakeGateway | null = null;
+// A permanently-defined value, so a scripted upstream (which has no `seen` log) can stand in
+// without every call site having to prove non-nullness. `close` is a no-op when not listening.
+let gateway: FakeGateway = { url: '', seen: [], close: async () => {} };
 let proxy: CredentialProxy | null = null;
 
 afterEach(async () => {
   await proxy?.close();
   proxy = null;
-  await gateway?.close();
-  gateway = null;
+  await gateway.close();
+  gateway = { url: '', seen: [], close: async () => {} };
 });
 
 async function start(options: { maxBodyBytes?: number; now?: () => string } = {}): Promise<{
@@ -129,15 +137,77 @@ async function call(
 const reasonOf = (body: string): string =>
   (JSON.parse(body) as { error: { reason: string } }).error.reason;
 
+/**
+ * Where the door is: the loopback default is a compatibility promise, and a configured bind is a
+ * promise that the report is the kernel's answer rather than an echo of the request.
+ *
+ * This is the seam a worker in a container needs. It is spec'd here, on the package that owns the
+ * listener, because whether a container can *reach* a given bind is a fact about the container
+ * runtime — `e2e/cli/docker/10-internal-bridge.test.ts` measures that separately and does not
+ * pretend this spec proves it.
+ */
+describe('the bind address: loopback by default, configuration when asked', () => {
+  it('binds loopback by default, reports it, and the reported base URL is the door clients use', async () => {
+    const started = await start();
+    expect(DEFAULT_BIND_ADDRESS).toBe('127.0.0.1');
+    expect(started.proxy.boundAddress).toBe('127.0.0.1');
+    // Byte-for-byte what every caller got before `bindAddress` existed.
+    expect(started.proxy.baseUrl).toBe(`http://127.0.0.1:${String(started.proxy.port)}/openai/v1`);
+    expect((await call(started, {})).status).toBe(200);
+  });
+
+  it('binds a configured address and reports the address the kernel bound', async () => {
+    // The wildcard, because it is bindable on every host this suite runs on: the assertion is
+    // about the option being applied, not about this machine's interface list. (A specific
+    // non-loopback address would make the spec a property of the developer's LAN.)
+    gateway = await fakeGateway();
+    const started = await startCredentialProxy({
+      upstream: { baseUrl: gateway.url, apiKey: GATEWAY_KEY },
+      now: () => '2026-11-01T12:00:00.000Z',
+      bindAddress: '0.0.0.0',
+    });
+    proxy = started;
+    expect(started.boundAddress).toBe('0.0.0.0');
+    expect(started.baseUrl).toBe(`http://0.0.0.0:${String(started.port)}/openai/v1`);
+
+    // Bound on the wildcard means bound on loopback too: a door reported but not opened is the
+    // failure mode a "boundAddress === requested" assertion alone would not catch.
+    const minted = started.tokens.mint({
+      attemptId: 'A-wildcard',
+      issuedAt: '2026-11-01T11:55:00.000Z',
+      expiresAt: '2026-11-01T12:40:00.000Z',
+    });
+    const response = await call({
+      baseUrl: `http://127.0.0.1:${String(started.port)}/openai/v1`,
+      token: minted.token,
+    });
+    expect(response.status).toBe(200);
+    expect(gateway.seen[0]?.authorization).toBe(`Bearer ${GATEWAY_KEY}`);
+  });
+
+  it('refuses an address this host does not own, naming the address and the kernel reason', async () => {
+    // TEST-NET-1 (RFC 5737): never assigned to a local interface, on any host.
+    await expect(
+      startCredentialProxy({
+        upstream: { baseUrl: 'http://127.0.0.1:9/openai/v1', apiKey: GATEWAY_KEY },
+        now: () => '2026-11-01T12:00:00.000Z',
+        bindAddress: '192.0.2.1',
+      }),
+    ).rejects.toThrow(/192\.0\.2\.1.*EADDRNOTAVAIL/u);
+    // Nothing was left listening: the rejection happened before the handle existed.
+    proxy = null;
+  });
+});
+
 describe('the key is injected by the proxy and never by the worker', () => {
   it('forwards the request with the gateway key, not the token', async () => {
     const started = await start();
     const response = await call(started, {});
     expect(response.status).toBe(200);
-    expect(gateway?.seen).toHaveLength(1);
-    expect(gateway?.seen[0]?.authorization).toBe(`Bearer ${GATEWAY_KEY}`);
+    expect(gateway.seen).toHaveLength(1);
+    expect(gateway.seen[0]?.authorization).toBe(`Bearer ${GATEWAY_KEY}`);
     // The worker's token never reached the gateway, and the key never reaches the worker.
-    expect(gateway?.seen[0]?.authorization).not.toContain(started.token);
+    expect(gateway.seen[0]?.authorization).not.toContain(started.token);
     expect(response.body).not.toContain(GATEWAY_KEY);
     expect(response.headers['authorization']).toBeUndefined();
   });
@@ -147,8 +217,8 @@ describe('the key is injected by the proxy and never by the worker', () => {
     const body = '{"model":"auto","messages":[]}';
     const response = await call(started, { path: '/chat/completions', body });
     expect(response.status).toBe(200);
-    expect(gateway?.seen[0]?.path).toBe('/openai/v1/chat/completions');
-    expect(gateway?.seen[0]?.body).toBe(body);
+    expect(gateway.seen[0]?.path).toBe('/openai/v1/chat/completions');
+    expect(gateway.seen[0]?.body).toBe(body);
     expect(JSON.parse(response.body)).toEqual({ ok: true, path: '/openai/v1/chat/completions' });
   });
 
@@ -174,7 +244,7 @@ describe('the five refusals, each with its own reason', () => {
     expect(reasonOf(response.body)).toBe('unknown-token');
     // A guessed token is not echoed back into a body another log will copy.
     expect(response.body).not.toContain('not-a-token');
-    expect(gateway?.seen).toHaveLength(0);
+    expect(gateway.seen).toHaveLength(0);
   });
 
   it('refuses a missing token with 401 rather than treating the request as anonymous', async () => {
@@ -194,7 +264,7 @@ describe('the five refusals, each with its own reason', () => {
     const expired = await call(started, {});
     expect(expired.status).toBe(401);
     expect(reasonOf(expired.body)).toBe('token-expired');
-    expect(gateway?.seen).toHaveLength(1);
+    expect(gateway.seen).toHaveLength(1);
   });
 
   it('refuses a revoked token with 401 — this is what settling an attempt does', async () => {
@@ -204,7 +274,7 @@ describe('the five refusals, each with its own reason', () => {
     const revoked = await call(started, {});
     expect(revoked.status).toBe(401);
     expect(reasonOf(revoked.body)).toBe('token-revoked');
-    expect(gateway?.seen).toHaveLength(1);
+    expect(gateway.seen).toHaveLength(1);
     // Idempotent: settling twice is not an error.
     expect(started.proxy.tokens.revoke(started.token)).toBe(false);
   });
@@ -227,7 +297,7 @@ describe('the five refusals, each with its own reason', () => {
       },
     );
     expect(traversal.status).toBe(403);
-    expect(gateway?.seen).toHaveLength(0);
+    expect(gateway.seen).toHaveLength(0);
   });
 
   it('refuses a method outside the allowlist with 405', async () => {
@@ -235,7 +305,7 @@ describe('the five refusals, each with its own reason', () => {
     const deleted = await call(started, { method: 'DELETE' });
     expect(deleted.status).toBe(405);
     expect(reasonOf(deleted.body)).toBe('method-not-allowed');
-    expect(gateway?.seen).toHaveLength(0);
+    expect(gateway.seen).toHaveLength(0);
     // GET is allowed: a model listing is a legitimate call.
     expect((await call(started, { method: 'GET', path: '/models' })).status).toBe(200);
   });
@@ -247,7 +317,7 @@ describe('the five refusals, each with its own reason', () => {
     expect(response.status).toBe(413);
     expect(reasonOf(response.body)).toBe('body-too-large');
     // The oversized bytes never reached the gateway: the cap is enforced while reading.
-    expect(gateway?.seen).toHaveLength(0);
+    expect(gateway.seen).toHaveLength(0);
   });
 });
 
@@ -390,5 +460,228 @@ describe('path confinement is segment-wise, not a string prefix', () => {
     await started.proxy.close();
     proxy = null;
     expect(started.proxy.tokens.census()).toEqual({ live: 0, revoked: 1 });
+  });
+});
+
+/**
+ * Metering and enforcement (ND3) — the numbers come from the gateway, and a crossing revokes.
+ *
+ * A scripted upstream stands in for the gateway: each request gets the next queued response, so
+ * a spec can say "the gateway priced this call at $0.60" without a paid call, and can stream an
+ * SSE body to prove the final chunk is read.
+ */
+interface QueuedResponse {
+  readonly status?: number;
+  readonly headers?: Record<string, string>;
+  readonly body: string;
+}
+
+async function scriptedGateway(queue: QueuedResponse[]): Promise<FakeGateway> {
+  let index = 0;
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      const next = queue[Math.min(index, queue.length - 1)];
+      index += 1;
+      if (next === undefined) {
+        res.writeHead(500).end();
+        return;
+      }
+      res.writeHead(next.status ?? 200, next.headers ?? { 'content-type': 'application/json' });
+      res.end(next.body);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('no port');
+  return {
+    url: `http://127.0.0.1:${String(address.port)}/openai/v1`,
+    // The scripted upstream answers from a queue rather than recording: the spec already knows
+    // what it sent, so a `seen` log would be a second copy of the same fact.
+    seen: [],
+    async close() {
+      if (!server.listening) return;
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error === undefined ? resolve() : reject(error))),
+      );
+    },
+  };
+}
+
+describe('usage is read off the response, never estimated', () => {
+  it('reads a JSON completion in the OpenAI spelling', async () => {
+    gateway = await scriptedGateway([
+      {
+        headers: { 'content-type': 'application/json', 'x-request-id': 'req_abc123' },
+        body: JSON.stringify({
+          id: 'chatcmpl-1',
+          usage: { prompt_tokens: 120, completion_tokens: 34, total_tokens: 154 },
+        }),
+      },
+    ]);
+    proxy = await startCredentialProxy({
+      upstream: { baseUrl: gateway.url, apiKey: GATEWAY_KEY },
+      now: () => '2026-11-01T12:00:00.000Z',
+    });
+    const minted = proxy.tokens.mint({
+      attemptId: 'A-1',
+      issuedAt: '2026-11-01T11:55:00.000Z',
+      expiresAt: '2026-11-01T12:40:00.000Z',
+    });
+    const response = await call({ baseUrl: proxy.baseUrl, token: minted.token }, {});
+    expect(response.status).toBe(200);
+    const totals = proxy.usageFor(minted.token);
+    expect(totals).toMatchObject({
+      tokensIn: 120,
+      tokensOut: 34,
+      requests: 1,
+      unpricedRequests: 1,
+      gatewayRequestIds: ['req_abc123'],
+      ceilingCrossed: false,
+    });
+    // No price was reported and no price table was given: unknown, not zero.
+    expect(totals?.costUsd).toBeNull();
+  });
+
+  it('reads a streamed completion from its SSE usage chunks', async () => {
+    const sse = [
+      'data: {"id":"m1","usage":{"input_tokens":200,"output_tokens":0}}',
+      '',
+      'data: {"delta":{"text":"hel"},"usage":null}',
+      '',
+      'data: {"usage":{"output_tokens":48}}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n');
+    gateway = await scriptedGateway([
+      { headers: { 'content-type': 'text/event-stream' }, body: sse },
+    ]);
+    proxy = await startCredentialProxy({
+      upstream: { baseUrl: gateway.url, apiKey: GATEWAY_KEY },
+      now: () => '2026-11-01T12:00:00.000Z',
+    });
+    const minted = proxy.tokens.mint({
+      attemptId: 'A-1',
+      issuedAt: '2026-11-01T11:55:00.000Z',
+      expiresAt: '2026-11-01T12:40:00.000Z',
+    });
+    await call({ baseUrl: proxy.baseUrl, token: minted.token }, {});
+    // Anthropic splits the two numbers across two events; folding them is what makes the
+    // output count real instead of reporting the input-only first chunk.
+    expect(proxy.usageFor(minted.token)).toMatchObject({
+      tokensIn: 200,
+      tokensOut: 48,
+      requests: 1,
+    });
+  });
+
+  it('says unknown rather than zero when the gateway reports no usage at all', async () => {
+    gateway = await scriptedGateway([{ body: JSON.stringify({ choices: [{ text: 'hi' }] }) }]);
+    proxy = await startCredentialProxy({
+      upstream: { baseUrl: gateway.url, apiKey: GATEWAY_KEY },
+      now: () => '2026-11-01T12:00:00.000Z',
+    });
+    const minted = proxy.tokens.mint({
+      attemptId: 'A-1',
+      issuedAt: '2026-11-01T11:55:00.000Z',
+      expiresAt: '2026-11-01T12:40:00.000Z',
+    });
+    await call({ baseUrl: proxy.baseUrl, token: minted.token }, {});
+    const totals = proxy.usageFor(minted.token);
+    // The request happened and we know nothing about its size or price.
+    expect(totals).toMatchObject({ requests: 1, tokensIn: 0, tokensOut: 0, unpricedRequests: 1 });
+    expect(totals?.costUsd).toBeNull();
+  });
+
+  it('prices an unpriced call from the operator table, and says the price is an estimate', async () => {
+    gateway = await scriptedGateway([
+      { body: JSON.stringify({ usage: { prompt_tokens: 1000, completion_tokens: 500 } }) },
+    ]);
+    const events: ProxyEvent[] = [];
+    proxy = await startCredentialProxy({
+      upstream: { baseUrl: gateway.url, apiKey: GATEWAY_KEY },
+      now: () => '2026-11-01T12:00:00.000Z',
+      priceTable: { inPerTokenUsd: 0.000001, outPerTokenUsd: 0.000002 },
+      onEvent: (event) => events.push(event),
+    });
+    const minted = proxy.tokens.mint({
+      attemptId: 'A-1',
+      issuedAt: '2026-11-01T11:55:00.000Z',
+      expiresAt: '2026-11-01T12:40:00.000Z',
+    });
+    await call({ baseUrl: proxy.baseUrl, token: minted.token }, {});
+    const usage = events.find((event) => event.kind === 'usage');
+    // 1000 × 1e-6 + 500 × 2e-6 = 0.002
+    expect(usage?.usage?.costUsd).toBeCloseTo(0.002, 10);
+    expect(usage?.usage?.costSource).toBe('estimated');
+    expect(proxy.usageFor(minted.token)?.costUsd).toBeCloseTo(0.002, 10);
+  });
+});
+
+describe('crossing the ceiling revokes the token', () => {
+  it('serves the crossing request, then answers the next one token-revoked', async () => {
+    // Two priced calls at $0.60 each against a $1.00 ceiling: the first is under, the second
+    // crosses. The second must still be served — the money was already spent — and the third
+    // must be refused, because a refusal of the *attempt* would be too late.
+    gateway = await scriptedGateway([
+      { body: JSON.stringify({ usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.6 } }) },
+      { body: JSON.stringify({ usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.6 } }) },
+      { body: JSON.stringify({ usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.6 } }) },
+    ]);
+    const crossings: { attemptId: string; spendUsd: number; ceilingUsd: number }[] = [];
+    const events: ProxyEvent[] = [];
+    proxy = await startCredentialProxy({
+      upstream: { baseUrl: gateway.url, apiKey: GATEWAY_KEY },
+      now: () => '2026-11-01T12:00:00.000Z',
+      spendCeilingUsd: 1,
+      onCeilingReached: (input) => crossings.push(input),
+      onEvent: (event) => events.push(event),
+    });
+    const minted = proxy.tokens.mint({
+      attemptId: 'A-1',
+      issuedAt: '2026-11-01T11:55:00.000Z',
+      expiresAt: '2026-11-01T12:40:00.000Z',
+    });
+    const target = { baseUrl: proxy.baseUrl, token: minted.token };
+
+    expect((await call(target, {})).status).toBe(200); // $0.60: under
+    expect(crossings).toHaveLength(0);
+    // Still alive one request later: the ceiling is checked after the response, so the token
+    // that is *about* to cross is not revoked before it is used.
+    expect((await call(target, {})).status).toBe(200); // $1.20: crosses
+    expect(crossings).toHaveLength(1);
+    expect(crossings[0]?.attemptId).toBe('A-1');
+    expect(crossings[0]?.spendUsd).toBeCloseTo(1.2, 10);
+    expect(crossings[0]?.ceilingUsd).toBe(1);
+
+    const after = await call(target, {});
+    expect(after.status).toBe(401);
+    expect(JSON.parse(after.body)).toMatchObject({ error: { reason: 'token-revoked' } });
+    // The crossing is on the same event channel as everything else, once.
+    expect(events.filter((event) => event.kind === 'ceiling')).toHaveLength(1);
+    expect(proxy.usageFor(minted.token)?.ceilingCrossed).toBe(true);
+  });
+
+  it('does not fire while the observed spend is still unknown', async () => {
+    gateway = await scriptedGateway([{ body: JSON.stringify({ usage: { prompt_tokens: 5 } }) }]);
+    const crossings: unknown[] = [];
+    proxy = await startCredentialProxy({
+      upstream: { baseUrl: gateway.url, apiKey: GATEWAY_KEY },
+      now: () => '2026-11-01T12:00:00.000Z',
+      spendCeilingUsd: 0.000001,
+      onCeilingReached: (input) => crossings.push(input),
+    });
+    const minted = proxy.tokens.mint({
+      attemptId: 'A-1',
+      issuedAt: '2026-11-01T11:55:00.000Z',
+      expiresAt: '2026-11-01T12:40:00.000Z',
+    });
+    // An unpriced response cannot be compared with a dollar ceiling. It does not cross it, and
+    // the token is not revoked — the honest outcome is "we could not tell", which the usage
+    // record carries, rather than a fabricated crossing.
+    await call({ baseUrl: proxy.baseUrl, token: minted.token }, {});
+    expect(crossings).toHaveLength(0);
+    expect(proxy.usageFor(minted.token)?.costUsd).toBeNull();
   });
 });

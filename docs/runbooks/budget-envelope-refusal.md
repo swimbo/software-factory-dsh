@@ -40,7 +40,7 @@ reservation and no executor start. That is why the remedy is a ceiling change, n
 ## Commands
 
 ```bash
-export PATH="$HOME/.nvm/versions/node/$(cat .nvmrc)/bin:$PATH"
+export PATH="$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin:$PATH"
 
 # 1. See where the ceiling is.
 factory budget
@@ -102,16 +102,27 @@ the triage above leaves a paper trail.
   why the spend was recorded as unknown. Do not edit spend rows to make the number look measured.
 - **The run still refuses at `6` after a per-unit raise.** The daily envelope is binding — check the
   `today $X of $Y` line and raise `--scope day`. If the daily ceiling is already at policy maximum,
-  escalate: that is ND3 territory (whether ceilings enforce or merely refuse is an open human
-  decision).
+  escalate: ND3 is decided, and it did not make the envelope larger — the gateway is the source of
+  truth, dispatch is refused when the reserve would cross the envelope, and on the live path the
+  per-attempt proxy **enforces** the same ceiling by revoking the attempt's token when observed spend
+  crosses it (`packages/credential-proxy/src/server.ts`). A ceiling at policy maximum is a policy
+  question, not a bug to route around.
 - **You raised the ceiling and want the money back.** There is no "spend" verb and no refund path in
-  v1; spend rows are append-only estimates. A ceiling is a permission, not a reservation.
+  v1; spend rows are append-only — an observation of what the gateway reported, or `unknown` when it
+  reported nothing (`usage_records`, written by `apps/cli/src/launch.ts`). A reservation is an
+  estimate; a measured row is not a charge.
 
 **Known blemish.** The `--scope day` gate block prints the line "it does not raise the daily
 envelope; that is a second, separate gate" — the same sentence the per-unit block prints. It is a
 copy-paste in the renderer, not a statement about the raise you just asked for: the `daily envelope
 $20.00 -> $40.00` line above it is the accurate one.
 
-**Known gap.** Budget **refuses** dispatch; it does not **enforce** spend (nothing meters the
-gateway). `phase-13-audit.md` GAP-003 records that `packages/proxy` — the component that would meter
-and enforce — does not exist; ND3 records that the metering semantics are an open decision.
+**Known gap.** Budget refuses dispatch _before_ anything starts, and on the live path it also
+enforces: the per-attempt proxy revokes the token when observed spend crosses the ceiling, so the
+request that crossed is served (the money is already spent) and the next one is answered
+`token-revoked` (`packages/credential-proxy/src/server.ts`,
+`packages/credential-proxy/src/server.test.ts` — "crossing the ceiling revokes the token"). What is
+**not** built is billing-grade accounting: a gateway response with no usage block is recorded as
+`unknown` (never as zero), and `factory budget reconcile` against the gateway's own export is
+best-effort and reports `unknown` (exit `6`) rather than guessing. ND3 records that limit; it is not
+an open decision.

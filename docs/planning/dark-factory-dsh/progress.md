@@ -249,3 +249,389 @@ live gate stage is opt-in (`FACTORY_VERIFY_LIVE=1`) because each run spends.
 **Measured, for the record:** the first genuine unit verified by this factory — `outcome: pass`,
 `reasons: []`, `replayed 5 of 8`, `0 mismatched`, holdout discriminating, CLI exit 0, ~8.5–12.7k tokens
 per run, `wall/0.1.0+local`, `fakeWall: false`.
+
+### Round 7 — the container's orphan, and the repo's own account of itself (2026-11-02)
+
+The previous session landed four commits after `v0.4.0` and then stopped: alerts (`59a18fc`), the ND3
+spend ceiling through the real executor (`3c8e063`), the worker's container (`36e2ddd`), and anchor
+read-failure exit codes (`f362900`). No release, no evidence file, and a runbook citing
+`evidence/phase-15-round.md` — a document that did not exist. This round finished it.
+
+**The gap the last commit named is closed.** `36e2ddd` ended by saying a `SIGKILL`ed control plane can
+orphan its worker container "because the sweep runs in the launcher that died", and that closing it
+needed a `recover`-side sweep. `recover` now sweeps exactly the attempts *it* reconciles to `ambiguous`:
+it reads that attempt's `launch.json`, confirms it names the same attempt, and removes containers
+labelled `org.factory.attempt=<attemptId>` — never by image, never by a bare label, never while the
+lease is live, never for a `container: null` record. `swept` with `removed: []` is only reachable when
+the daemon answered; everything else is `skipped`/`failed` with a reason and a `checkCommand`, in the
+text and as `sweeps[]` in `--json`, and the exit code stays the ambiguity's. `e2e/cli/docker/09-…`
+SIGKILLs a real control plane, asserts the orphan is **still listed** (positive control), then asserts
+it is gone after `recover` exits 4; deleting the sweep call leaves the container behind and reddens it.
+
+**A second honesty defect, found by reading rather than by running.** `E2E-46` was already the
+cgroup-limits spec; the new spec had been filed under that id too. A follow-up commit re-labels it
+E2E-45's **orphan-sweep clause**, which is where the plan's own acceptance column puts it ("orphan
+sweep recorded"), and records the one deliberate difference: a container's identity is the attempt
+label, not the plan's session id / process group.
+
+**Two documents had stopped describing the tree, in opposite directions.** `README.md` claimed
+`packages/proxy` does not exist and privileged work is merely refused — false since the broker landed,
+and contradicted by the same file's ADR-007 paragraph three paragraphs later; it also listed seven
+packages when there are eleven and carried counts two versions old. `docs/handover.md` described a
+v0.4.0-1 tree: panel "deliberately absent" from the gate (it is stage 7 and **fails** without a browser),
+`@docker` suites "always skipped" (they self-gate and run), no credential proxy, no anchor, no worker
+container. Both are now written against the tree, sentence by sentence, with the command that settles
+each. `docs/adr/006`'s stale statements are marked _superseded_ rather than rewritten — the 2026-11-01
+belief survives verbatim, and a 2026-11-02 amendment states what is true — and `docs/adr/008`'s link to
+an ADR that never existed is fixed.
+
+**The gate was red twice before it was green, and both runs are kept.** The previous session's last run
+(`2026-11-01T22-41-51Z`) was red in `test`, `build` and `panel`. This session's first run
+(`2026-11-02T16-16-14Z`) was red **only** in `panel`, because every Playwright browser had been removed
+from the host's cache; `npx playwright install chromium` restored `chromium-1248`. The released tree
+(`edf3b1a`) is `7 passed, 1 skipped, 0 failed` (`2026-11-02T16-44-03Z`), test stage **1395 passed, 7
+skipped (1402) across 99 files**, with the 11 `@docker` specs all running (0 skipped) once
+`factory-env:rc5` was rebuilt. The soak was re-run for the record: 50 units, 6 incidents, all runbook
+steps and invariants held, zero paid calls.
+
+**Not re-run here, and labelled as such:** the paid `@live` layer (no key in this shell) — the last
+recorded live gate is `8 passed, 0 skipped, 0 failed` at `6a398cc`. Full list of what is still not built
+is in `evidence/phase-15-round.md` §8.
+
+### Round 8 — the broker's dead end, and the two refusals that replaced a mystery (2026-11-02)
+
+**R5's allow path exists, and a decision is single-use.** `factory gate request` is read-only and prints
+the operation, its hash, the payload and a `decide` line with **both timestamps pinned** — they are
+inside the signed content, so a payload signed at T and re-dated fails closed (measured: exit 5,
+`…for payload sha256:643d235c…`). `factory gate decide` verifies the operator's signature against the
+promote key lookup order and writes the `gates/<id>.json` artifact plus one `privileged.decided` event;
+the tool never signs, and `--signed-by` is an echo checked against the key id because a name would be a
+string the worker could assert (L1). Schema **v4** adds `privileged_decisions`: consumption is one
+conditional `INSERT … ON CONFLICT DO NOTHING`, so two processes cannot both read "unused" — the
+per-invocation memory registry that shipped before this round allowed exactly that replay.
+`e2e/cli/default/19-gate-decisions.test.ts` proves the three runs (refused → authorised exactly once →
+replay refused) and `docs/runbooks/brokered-operations.md` is the operator's transcript.
+
+**What a decision does not buy is now written down.** The wall is not a consumer: it measures a
+candidate with no decision in hand, so it refuses a privileged argv at replay and the verdict carries
+`privileged_unbrokered`. That code names the replay, not the operation. It was not renamed:
+`WALL_REASON_CODES` is a closed enum, so a rename would make every stored verdict carrying the old
+string unparseable — breaking the evidence it describes. The doc comment, README and
+`evidence/phase-16-round.md` §1 say which claim the code makes; threading decisions into the wall is a
+design change with its own trust surface, listed as next round's item.
+
+**Container isolation by default was withdrawn, then replaced by something better.** The proxy binds
+`127.0.0.1` and the worker container runs `--network none`, so the two cannot be combined; defaulting
+the container would have made the live layer unusable by default, and until this round the combination
+failed *after* the worker started as an unexplained 401. The probe now refuses it before anything is
+reserved: exit 8 **`CONFIGURATION_CONFLICT`**, distinct from `CONTAINER_UNAVAILABLE`, naming both levers
+and both ways forward. Making the container the default now has a named precondition — a transport that
+survives `--network none`.
+
+**`factory alerts --notify` reaches a person, without changing an exit code.** One macOS notification
+via `osascript` (text passed as argv, never interpolated), or exactly one bounded POST of the same
+`alerts.v1` JSON when `FACTORY_ALERTS_WEBHOOK_URL` is set, redirects refused, the URL reported as
+scheme+host only. Off by default; a delivery failure is visible and cannot change `0`/`8`/`9`. Nine
+mutation checks in its suite each turned one named spec red.
+
+**Two specs were killing each other's containers.** The round's first gate run was red in `test` for a
+reason that had nothing to do with the product: E2E-45 found its container by
+`--filter name=factory-worker-` and killed the first match, which under `maxWorkers: 4` was the egress
+spec's. Discovery is now by the launcher's `org.factory.attempt` label with an ownership assertion
+before the kill, and the proof is a deterministic decoy (old filter kills it; new filter leaves it
+`Running`). Both red runs are kept: `2026-11-02T22-57-34Z` and the hand-cleaned green
+`2026-11-02T23-06-42Z`.
+
+**Released tree:** `7 passed, 1 skipped, 0 failed`, test stage **1472 passed | 7 skipped (1479)** across
+99 files, every `@docker` spec run (`docs/verification/2026-11-02T23-20-42Z/`), and the two disclosures
+that matter (the operator's store migrated v3 → v4 by opening the CLI; one runbook transcript
+re-spliced from a single capture because the first version quoted values from more than one run) are in
+`evidence/phase-16-round.md` §6.
+
+### Round 9 — the bridge was measured, and it does not exist here (2026-11-02)
+
+**The container + live-model refusal stopped being an opinion.** `e2e/cli/docker/10-internal-bridge.test.ts`
+measures both directions of the transport that was supposed to fix the conflict — docker `--internal`
+bridge with the credential proxy bound to the gateway — and on this host the answer is no: the daemon
+runs in an OrbStack VM, so the gateway (`192.168.107.1`) is not an address macOS can bind
+(`EADDRNOTAVAIL`, absent from `os.networkInterfaces()`), and the internal network has no default route,
+so every host address is `ENETUNREACH` — asserted as an error *kind*, because "no route" and "the proxy
+refused" are different defects. The controls are there to stop the negative being vacuous: the same
+internet probe from the default bridge `CONNECTED`, container→container on the internal network
+`CONNECTED`, and the loopback proxy answering a real scoped-token request from a normal bridge (`401`
+without a token, `200` with one). The spec's header says plainly that green means docker still behaves
+as the runbook says, not that the combination works.
+
+**The seam shipped without the transport.** `packages/credential-proxy` can bind a chosen address
+(`boundAddress` reports what the kernel bound; an address the host does not own is refused with
+`EADDRNOTAVAIL` in the message), and nothing calls it with a non-default yet — because building the
+caller would have meant either code whose spec skips on the only machine this tree runs on
+(native-Linux bridge) or moving the gateway key into a sidecar container, which is a different
+credential boundary from ADR-007. Both are documented with their prices in
+`docs/runbooks/worker-container.md` instead of being half-built.
+
+**Three smaller things, each with a mutation check.** `privileged_replay_refused` is added to the closed
+reason enum (the old string stays forever so stored verdicts parse; a spec pins a *literal* stored
+verdict so the compatibility claim cannot drift). `postAlerts` and the Discord attempt both stop at
+64 KiB and cancel the stream, naming the truncation, in a job that runs unattended at 04:00. And the
+gateway key can live at `$FACTORY_HOME/secrets/bifrost-key`, read through the same open-then-`fstat`
+rule as the alert webhook.
+
+**A disclosure worth keeping.** While checking whether a key was available for the certification
+round I tested `launchctl getenv … && echo set` — which exits 0 with empty output when unset — believed
+it, wrote a 0-byte key file, and told the operator no key existed. It never was missing: it is on
+`hermes-control`, `0600`, 43 bytes, read per command over SSH, exactly as the phase-9b evidence says.
+Verified afterwards (`models` → 200), the empty file deleted, and the lesson recorded in
+`evidence/phase-17-round.md` §4 rather than smoothed over.
+
+**Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1522 passed | 8 skipped (1530)** across
+102 files, every `@docker` spec run (`docs/verification/2026-11-03T02-47-40Z/`), and the hazard from the
+previous round is now written into the index: the same command reports `0 failed` with the docker
+specs *skipped* when the daemon is not running, so read the skip count.
+
+### Round 10 — the first class certificate, and the four defects it exposed (2026-11-03)
+
+**The class was certified, live.** `docs-typo-fix` reached `samples=20 passes=19 outcome=certified`
+in the operator's store (`cert:V-c81459fcb68a`, policy `sha256:1f052e46…`, model `auto`). Twenty
+attempts ran against a real git repository generated from this project's own markdown — 20 revisions,
+each carrying the class's five defects — with a hidden five-rule holdout corpus the worker never sees.
+Seventeen consecutive passes in one driver invocation, then two more units on base revisions the log
+had not yet judged. The one non-pass is an `unknown` verdict from my own configuration error, kept as
+a non-pass instead of rounded away. Details and the full progression table:
+`evidence/phase-18-certification.md`.
+
+**Three of the four defects made a certificate impossible, and the fourth made one untrustworthy.**
+
+- The CLI built the wall without a `criteriaLog` port, so every verdict counted as the class's *first*
+  sample: twenty paid passes would have produced twenty `samples=1 … insufficient` rows. The package
+  tests passed because they construct the port directly — the seam the CLI never used was the only
+  thing untested.
+- `audit --certifications` asked each verdict's `certification` field whether it had been judged, a
+  field `mapVerdict` strips on purpose, so every verified unit was listed forever and the verb exited
+  9 after an honest certification. It now asks the projection that holds the answer.
+- A dispatch ceiling was a field of `QualifierPolicy` and hashed into the policy identity, so a loop
+  that raised the attempt ceiling minted its certificate under a digest the default environment could
+  never reproduce — `CERT_STALE` every morning for a perfectly current certificate. Ceilings now live
+  in `OperatorLimits` and are hashed into nothing; a bounded recognition bridge keeps the pre-split
+  row `current` without recomputing it.
+- The criteria log recorded no policy or model identity, so one attempt under a new policy could count
+  twenty revisions measured under the old one and mint a `certified` row for a policy that had measured
+  one attempt. Entries now carry both, both counters filter on them, and the 240 pre-identity lines in
+  the live log are `legacyLines` — never counted, and not corrupt.
+
+**The driver measured one unit out of twenty, twice, before it worked.** The loop's stdin is the units
+file, and two children inherited it: the per-run `ssh` key read and the worker itself. Both live
+invocations reported `units-exhausted` with eighteen lines still in the file — a stop reason that reads
+like an exhausted plan and was an eaten one. Fixed with `</dev/null` and the reason in a comment; the
+offline proof could not have caught it, because its stub key command and scripted executor read
+nothing.
+
+**Cost is a token count, not a price.** 23 attempts, 6,419,027 input and 155,692 output tokens; per
+attempt 120k–453k input. `cost_usd` is `null` on every usage row — there is no billing-grade telemetry,
+so "under the $10 cap I set" is not something this store can prove, and the round records the numbers
+it has instead. The old ~12.7k-token-per-unit estimate came from a single short probe and is wrong by
+more than an order of magnitude for real documentation work.
+
+**Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1559 passed | 8 skipped (1567)** across
+110 files (`docs/verification/2026-11-03T04-40-19Z/`).
+
+### Round 11 — the certificate's other side (2026-11-03)
+
+**β stopped being a shrug.** With `m=20, k=18` a class whose true pass rate is `p` is certified iff
+≥ 18 of 20 attempts pass, so β(p) = P(Bin(20,p) ≥ 18) — arithmetic, not a corpus.
+`certificationRisk()` computes it exactly in rational arithmetic beside the α it already published;
+the refused tail at `p0 = 0.95` reproduces the ratified α digit for digit (`0.07548367378849634297`),
+and the runbook's six-row table is the function's own output. It says something uncomfortable: a class
+that truly passes 90% of the time is still certified **0.677** of the time. The operating point is a
+floor on class quality, not a filter against mediocre classes.
+
+**The arithmetic corrected me twice.** I expected `k = m` to give α = 0; it gives
+`1 − 0.95²⁰ = 0.6415…`, because a truly-95% class fails at least one of twenty attempts about two
+times in three — a stricter gate refuses more, it is not a safer one. And the exact printer silently
+rendered a probability below `1e-20` as `0.000…`; it now prints `<1e-20`, so a vanishing risk can never
+read as an impossible one.
+
+**Detection is a count, decomposed by layer.** Five planted single-rule regressions are all refused;
+three of them keep a green visible check *and* a green wall suite and are caught only by the hidden
+holdout — those are the detections the corpus can claim — while two are also caught by the visible
+check, so counting them as holdout evidence would overstate the claim. A two-rule regression is refused
+with two failing rows, and a clean repair still passes. Deleting a rule from the corpus makes that
+rule's regression pass, measured: the count is not vacuous.
+
+**Both doc gaps from the paid run closed.** `FACTORY_MODEL_API=openai-completions` now appears where a
+live run is set up, with its failure mode (wrong wire shape → our own proxy answers `401
+unknown-token` → `unknown` verdict → that revision is a permanent non-pass in `samples`; it cost two
+units). Plus: `samples` counts distinct base revisions judged, and a failed launch leaves the unit
+`dispatched` — `recover` finishes a launch that never started, a person aborts one whose worker died.
+
+**Also corrected in the record:** running `alerts` from a shell without the plist's anchor variables
+reported `ANCHOR_MISSING`, and I read that as the daily job's state. It was not — with the agent's own
+environment the run is `{"anchor":{"state":"fresh","scope":"off-host",…},"alerts":[],…}`, exit 0. Run a
+scheduled job's command with the scheduled job's environment before quoting it.
+
+**Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1575 passed | 8 skipped (1583)** across
+111 files.
+
+### Round 12 — the second class, and the class that bites back (2026-11-03)
+
+**`test-repair` is certified live:** `samples=20 passes=19` at `m=20 k=18`, corpus
+`h-test-repair-real-2026-11-03`. `audit --certifications` → `2 of 2 classes current`. The second class
+was not chosen for its pass rate but because its cheap repairs are *green* — weaken the test, rewrite
+the expectation data, special-case the visible inputs — so its certificate only means something if the
+holdout refuses those, and if the class is hard enough that a failure can occur.
+
+**One attempt was refused, and that is the certificate's best evidence.** Revision 17's `normalisePath`
+repair popped `..` correctly but preserved a *leading* `..`; the visible test never covers that input.
+The corpus refused it on a scenario the worker could not see (`holdout 2 of 3`), and outside the wall the
+same candidate fails 12 of 12 — deterministic, not corpus flakiness. Nineteen of twenty were honest
+repairs; one was a plausible wrong one, and it was caught.
+
+**Cost:** 188,665 tokens for 20 attempts (median 8,896, max 14,100) against 6.4 M for the docs class —
+because the work is small. `cost_usd` stays `null`: there is still no billing-grade telemetry, so the
+honest figure is a token count.
+
+**Two of my own mistakes, recorded:** the first planner run was refused `RESTATE_BACK_MISMATCH`
+(`restateOverlap=0.357` < `0.5`) because my restatement was too generic — rewritten to name the work,
+`0.714`, and the twenty specs renumbered 101–120 so identities stayed unique (one rejected-lane unit
+lost, never a sample). And the driver stopped mid-loop at unit 17 on `credential-unavailable` (the
+per-run `ssh … cat credential` exited 255); the unit was not dispatched, nothing was burnt, the key read
+was verified by hand and the loop resumed on the remaining three.
+
+**Also this round:** the dead `research/existing-state.md` citation (66 links, file deleted deliberately
+in `e538fdf`) now resolves to a tombstone stating that the claims are `UNPROVEN` here rather than
+restoring a description of a system this repository no longer contains. And the residual attack on this
+class is specified rather than smoothed over: a wrong fix correct on all tested inputs still certifies;
+closing it needs a differential rule against the repaired module with inputs generated at measurement
+time — one rule, one file per revision, no model cost, not built.
+
+**Released tree:** 7 passed, 1 skipped, 0 failed; test stage **1596 passed | 8 skipped (1604)** across
+115 files.
+
+### Round 13 — identities, not names (2026-11-04)
+
+**A correction first.** Round 12 called the refused `test-repair` attempt "a plausible wrong repair
+caught by a probe". Re-measured, it was the opposite: the candidate preserved a leading `..` (what POSIX
+`path.normalize` does), the reference drops it, and no visible case told the two apart. The class refused
+a defensible repair for disagreeing with an undiscoverable convention — twice, with the same patch. A
+gate the worker cannot satisfy from visible evidence measures the author's taste, so the fixture now
+refuses to build unless every edge the base revision already answers correctly is a visible case (61
+were invisible); and it is narrow on purpose, because making all 118 edges visible let the `bytes`
+lookup-table cheat certify.
+
+**Three identity defects, all the same shape.** (1) The corpus id was a date, so a rebuild minted
+different rules under the same name while recency compared names — a certificate could read `current`
+while naming evidence it never measured. (2) The certificate itself named no corpus at all (schema v5
+now writes it from the verdict, with a strict backfill from each certificate's own verdict and `NULL`
+reading as stale, never as a wildcard). (3) The generator emitted specs its own qualifier refused
+(`restateOverlap=0.357` vs a `0.500` floor).
+
+**Re-measured: 20 of 20**, `samples=20 passes=20 certified` under
+`h-test-repair-real-2026-11-04-ffa87379`, 186,787 tokens for the loop. Both classes `current`, `alerts`
+empty, anchor fresh. The differential rule compares candidate against the shipped repaired module on
+44–52 seeded inputs per revision and reports them, which is why the claim is "agrees with the reference
+on N inputs" and not "correct".
+
+**Recorded, not built:** the docs class's corpus id is still a label (fix condition written down);
+`wall.class_certified` carries neither corpus nor `p0`; and the corpus comparison can only see a corpus
+move once something measures under it.
+
+### Round 14 — the ledger carries its own evidence (2026-11-04)
+
+**Closed the gap v0.9.1 named.** `wall.class_certified` now carries `holdoutRevision` and `p0`, so a
+reader who trusts only the event log can prove *which corpus* made a class certificate true, and
+re-derive the risk from the counts rather than take `alpha` on faith. Both fields are optional and
+nullable: every ledger written before schema v5 omits them, and an event that refuses to parse is worse
+than one with a documented hole — a missing corpus must read as "unknown, predates attribution", never
+as "the current corpus".
+
+**Proven the only way that counts:** a spec that records a certified verdict and then reads *only* the
+ledger (no call to the certificate table) recovers `holdout/7` and `p0 = 0.95`; plus a literal
+old-shaped event that still parses with both fields absent rather than fabricated. Mutation: deleting
+the two fields from the write site reddens both specs (2 failed | 60 passed), restored green.
+
+**The limitation of the fix, stated plainly:** the live ledger holds 84 `wall.class_certified` events
+written before the field existed, and all 84 still read `corpus=ABSENT, p0=ABSENT`. The ledger is
+append-only, so they will stay that way — this change is forward-looking, not a backfill, and a reader
+of *today's* ledger still cannot attribute those two certificates from events alone (the certificate
+rows can, via the v5 column and its strict backfill). The next certificate written will carry both
+fields.
+
+**Still open:** the docs class's corpus id is a label rather than an identity (fix condition recorded),
+and nothing notices a corpus move until something measures under the new one.
+
+### Round 15 — an alarm that means something (2026-11-05)
+
+**Found in the log, not in a plan.** The 04:00 job on 2026-11-05 paged Discord with `anchor UNREACHABLE`
+— `ssh: connect to host 100.92.236.42 port 22: Operation timed out` — and by 14:00 the same read was
+fresh. One night in four. The alarm path worked perfectly on evidence that turned out to be nothing,
+which is the failure mode that teaches people to ignore alarms.
+
+**Two fixes, both in `commandTransport`.** Every off-host call is now bounded
+(`ConnectTimeout=10`, `ServerAliveInterval=5`, `ServerAliveCountMax=2` — without them the job sat in
+the kernel's TCP timeout for ~2 minutes), and a transport failure is retried up to 3 times before it is
+reported. Only transport failures: a read that succeeds with unparseable content is a fact about the
+file, so it refuses immediately. A persistent outage still pages at exit 8, and the message now says
+`(retried 3 times)` so a flake and an outage are different lines in the log.
+
+**Proven by three mutations:** no retry → both retry specs red; no `ConnectTimeout` → the timeout spec
+red; retry everything → the garbled-anchor spec red (2/1/1 failed respectively), restored 33/33.
+
+### Round 16 — the third class, and the honest answer (2026-11-06)
+
+**Built `type-repair` and certified it 19 of 20.** Base revisions fail `tsc --noEmit` under strict while
+behaving correctly; the cheap repair (cast/`any`/ignore/loosen) is green on the visible signal, which is
+why the class looked like it could finally make the gate refuse a class. It did not: the model fixed
+every measurable revision, at 10× the token cost (1,907,300 vs 186,787; median 59,046/unit vs 8,895).
+The single non-pass was a 2 h 23 min worker hang, recorded `unknown` — infrastructure, not a wrong
+answer.
+
+**So the interesting number did not arrive.** Three classes certified, zero merit-based class refusals,
+and `k = 18` still uncalibrated: β(0.9) = 0.6769 says a truly-90%-reliable class fails to certify about
+a third of the time. Recorded in `evidence/phase-20-type-repair.md` rather than smoothed over.
+
+**Three defects found by running it, not by reading it:** the generator's planner printed the loop
+without submitting (so `units.txt` could not exist — fixed); `env.sh` carries the offline
+`FACTORY_EXECUTOR=fake`, which a live loop must unset; and a missing worker profile leaves a live
+45-minute lease on an attempt that never started, which `recover` will not touch and which stops a
+re-run with `UNIT_ALREADY_TERMINAL`. Also: an `unknown` verdict from a transport failure cannot be
+re-measured after the attempt directory is gone, and `samples` counts that unknown as a sample.
+
+**One flake, recorded:** the first v0.10.0 gate run failed `apps/panel/src/dsh-version.test.ts` on two
+specs that took exactly `PROBE_TIMEOUT_MS` (1,505 ms and 1,502 ms — the timeout, not a wrong answer):
+the probe spawns a real `/bin/sh` script and under full-suite load on this machine it can miss a 1.5 s
+budget. Re-run on an idle machine: 9/9 green, and the whole gate 7 passed / 1 skipped / 0 failed. The
+flake is written down rather than smoothed: the probe cannot distinguish "timed out" from "no version"
+and both are `null` by design, so a loaded machine makes two specs read as the wrong answer.
+
+### Round 17 — the kill that did not end the attempt (2026-11-06)
+
+**Diagnosed from the receipt, not from the symptom.** The `type-repair` loop lost one unit to a 2 h 23 min
+attempt. The receipt settles it: `ceilings.wallClockMs = 8572243`, `ceilings.hit = ['wall-clock']` — the
+15-minute ceiling fired and the group was killed, and then the adapter waited on a `close` event that
+could never arrive, because a `setsid`-style grandchild had escaped the group and kept the pipes open.
+Fixed with a bounded grace period that writes the receipt anyway and records `reapTimedOut: true`.
+
+Also corrected a wrong claim I had written in `evidence/phase-20-type-repair.md`: I said the attempt
+directory had gone missing (which would have made `--verify-only` useless); it had not — my `ls` was one
+directory level off. The file now says what the receipt proves.
+
+**Not built, and named:** a re-dispatch path for an `unknown` verdict, and a `worker_timeout` reason in
+the wall so a timeout reads as one fact instead of five unknowns.
+
+### Round 18 — the third class lands, and a number that was not what it looked like (2026-11-06)
+
+**`type-repair` is the live store's third class.** Twenty units, twenty passes, `3 of 3 classes current`,
+1.94 M tokens (median 95,775/unit, max 189,117). The earlier 19-of-20 in the dedicated store lost its one
+sample to the 2 h 23 min hang, so the class has been measured twice and the wall has never refused a
+class on merit.
+
+**Then the arithmetic disagreed with the verdicts** — all twenty passed, the certificate says
+`samples=20 passes=19` — and chasing that found the round's real defect: the criteria log was written
+beside the corpus and shared by every store, so a certificate counted other stores' measurements. Here it
+lost a pass; a store that ran ten units would have inherited ten more and certified on work it never did.
+v0.11.0 scopes the log to the store (`<storeHome>/certification/audit/`) and adds the spec that would have
+caught it.
+
+**Still open:** `k = 18` uncalibrated (β(0.9) = 0.6769, no class has ever landed near the boundary), no
+merit-based class refusal, a wall reason that names a worker timeout (does not exist), and the live
+store's ~102 units that "need a person" — a backlog nobody has triaged since the docs class.

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ai.factory.alerts — the daily evidence-expiry check.
+
+  Copy to ~/Library/LaunchAgents/ and load it. Replace @REPO@ and @NODE_BIN@ before you do; both are
+  absolute on purpose, because launchd does not read your shell profile and a relative path here would
+  fail at 04:00 and nowhere else.
+
+  What it does: `factory alerts` asks the two expiry questions — is the anchor fresh, is any class
+  certificate still current — and exits 0 (nothing expired), 9 (expired evidence) or 8 (the anchor host
+  could not be reached). It is read-only: it never anchors, never re-certifies, never writes.
+
+  It also passes the `notify` flag: when there is something to report, the run raises one macOS notification
+  on this machine, or POSTs to the webhook URL stored in `$FACTORY_HOME/secrets/alerts-webhook` (mode
+  0600) — a Discord webhook gets a message with one embed per alert and no mentions. Delivery is
+  best-effort — one attempt, at most one retry — and a failed delivery changes neither the exit code
+  nor the log entry. The log remains the record: launchd
+  appends stdout and stderr to the same file, both are line-buffered, and the verb writes one line per
+  alert plus one NOTIFY line, so `tail -n 40 ~/.factory/alerts.log` answers "did anything expire, and
+  was anyone told". Nothing retries a lost notification; the next day's run is the retry.
+
+  Why 04:00: the anchor job runs at 03:00. An alert that runs before the anchor it checks would report
+  yesterday's staleness every morning.
+
+  Why no retry of the job: a scheduled monitor that retries into the same broken transport only fills
+  the log, and a log full of the same line is a log nobody reads. The next day's run is the retry.
+
+  Sleep and wake: the schedule below is `StartCalendarInterval`. Per launchd.plist(5), launchd runs a
+  calendar occurrence missed while the machine was asleep the next time it wakes, and coalesces several
+  missed occurrences into one run — unlike cron, which skips them. `RunAtLoad` is a *different* key: it
+  controls whether the job also runs when the agent is loaded (login/boot), and it is false here. A host
+  that is off for a week, or that never wakes again, delivers nothing at all; that limit is stated in
+  docs/runbooks/evidence-expiry.md rather than papered over here.
+
+  Nothing here sets FACTORY_MODEL_ID on purpose: this job is offline, so certificates are compared on
+  policy version only. When the wall starts stamping certificates with a model id, add it here — a
+  monitor that compares a model id it did not run under would call every class stale.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.factory.alerts</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd @REPO@ &amp;&amp; @NODE_BIN@ apps/cli/src/main.ts alerts --notify</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@NODE_BIN_DIR@:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- The same target `factory ledger verify` uses; an alert that checks a different anchor is
+         a monitor of nothing. -->
+    <key>FACTORY_ANCHOR_SSH</key>
+    <string>hermes-control</string>
+    <key>FACTORY_ANCHOR_PATH</key>
+    <string>$HOME/.factory/anchors/software-factory-dsh.jsonl</string>
+    <!-- The ledger being audited: the operator's real factory home, not a throwaway. -->
+    <key>FACTORY_HOME</key>
+    <string>/Users/bo/.factory</string>
+    <!-- The webhook lives in `$FACTORY_HOME/secrets/alerts-webhook` (mode 0600), NOT here: a launch
+         agent in ~/Library/LaunchAgents is readable by other local users and by anything that
+         snapshots the home directory, so an inline FACTORY_ALERTS_WEBHOOK_URL would put a Discord
+         token in a file that gets backed up. Create it with:
+
+           umask 077 && mkdir -p "$FACTORY_HOME/secrets" && printf '%s' '<url>' > "$FACTORY_HOME/secrets/alerts-webhook"
+
+         The verb refuses that file if it is group- or world-readable, rather than using it. Absent
+         means the local notification only.
+    -->
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- RunAtLoad is *not* how a missed run is recovered, and it is false: this job does not run when
+       the agent is loaded, only at 04:00. A calendar occurrence missed while the machine slept is run
+       on the next wake and coalesced, which is StartCalendarInterval's behaviour (launchd.plist(5)),
+       not this key's. -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/bo/.factory/alerts.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/bo/.factory/alerts.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

@@ -24,6 +24,19 @@
  *
  * If docker or the image is unavailable the suite is skipped **with the reason in its name**
  * and counted `UNKNOWN` in `e2e-tests.md` — never passed.
+ *
+ * ## The ids
+ *
+ * The labels follow `e2e-tests.md`: E2E-43 is the network, E2E-44 is "writes only inside its work
+ * dir" *plus* "cannot see the host's factory home, the holdout or an operator key" (two specs), and
+ * E2E-46 is the cgroup limits. The second E2E-44 spec was labelled E2E-45 here for a while, which is
+ * how a missing spec hides. E2E-45 in `e2e-tests.md` is *killing the worker container mid-attempt ⇒
+ * `ambiguous`, one attempt, no redispatch, `recover` idempotent, orphan sweep recorded*. That is no
+ * longer unmeasured: since `36e2ddd` the worker does run in a container
+ * (`FACTORY_WORKER_ISOLATION=container` dispatches into `docker/factory-env`), and
+ * `e2e/cli/docker/08-worker-container.test.ts` measures the kill/ambiguity half while
+ * `09-recover-sweep.test.ts` measures the orphan-sweep clause it names. Nothing here is
+ * `UNKNOWN` for lack of a worker container any more.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -53,7 +66,14 @@ function buildImage(): string | null {
     { encoding: 'utf8', timeout: 180_000 },
   );
   if (build.status !== 0) {
-    return `docker build failed for ${WALL_IMAGE}: ${(build.stderr ?? '').trim().split('\n').slice(-2).join(' ')}`;
+    // `stderr` is empty on buildkit failures that report on stdout, and a skip whose reason is a
+    // blank tail is a skip nobody can act on: take whichever stream actually carries the error.
+    const detail = (build.stderr?.trim() ? build.stderr : (build.stdout ?? ''))
+      .trim()
+      .split('\n')
+      .slice(-2)
+      .join(' ');
+    return `docker build failed for ${WALL_IMAGE}: ${detail === '' ? 'no output from docker build' : detail}`;
   }
   return null;
 }
@@ -128,18 +148,46 @@ async function runProbe(
 }
 
 /** Containers still running for this suite's label. Should be empty after every spec. */
+/**
+ * Any container this suite left, by **either** handle, running or exited.
+ *
+ * The label was the only handle here once, and that was the bug the worker-container work found:
+ * the wall's timeout spec built its runner without a label, so the leaked container it left behind
+ * (image `node:22-alpine`, `Exited (137)`) matched nothing and outlived the suite. `-a` matters for
+ * the same reason — a container that exited seconds ago is still a container. `--name` is set on
+ * every wall run from the run counter, so it is a handle that exists from the moment the daemon
+ * creates the container, with or without a label and with or without a cidfile.
+ */
 function leftovers(): string[] {
-  const listed = spawnSync(
-    'docker',
-    ['ps', '--quiet', '--filter', `label=org.factory.run=${RUN_TOKEN}`],
-    {
+  const ids = new Set<string>();
+  // Three handles, each scoped to *this* suite: the run label every runner in this file is built
+  // with, and the two names the wall's container runner derives from it (`factory-wall-<label>-<n>`)
+  // or from the building process when a caller passes no label (`factory-wall-<pid>-<n>` — the shape
+  // the timeout spec's leaked container had, which is why the label alone was not enough). The old
+  // broad `name=factory-wall-` glob was the same idea with the scoping left out: under
+  // `maxWorkers: 4` it can match a concurrently running suite's wall container and report a foreign
+  // container as our leak — and, worse, invites a "cleanup" that acts on it.
+  for (const filter of [
+    `label=org.factory.run=${RUN_TOKEN}`,
+    `name=factory-wall-${RUN_TOKEN}-`,
+    `name=factory-wall-${String(process.pid)}-`,
+  ]) {
+    const listed = spawnSync('docker', ['ps', '-aq', '--filter', filter], { encoding: 'utf8' });
+    for (const line of (listed.stdout ?? '').trim().split('\n')) {
+      if (line.length > 0) ids.add(line.trim());
+    }
+  }
+  return [...ids];
+}
+
+/** The name this suite's runs carry, so the leak check can name what it found. */
+function leftoverNames(ids: readonly string[]): string[] {
+  return ids.map((id) => {
+    const named = spawnSync('docker', ['inspect', '--format', '{{.Name}}', id], {
       encoding: 'utf8',
-    },
-  );
-  return (listed.stdout ?? '')
-    .trim()
-    .split('\n')
-    .filter((line) => line.length > 0);
+    });
+    return (named.stdout ?? '').trim();
+  });
 }
 
 const EGRESS_PROBE = `const net=require('net');const s=net.connect({host:'1.1.1.1',port:443});s.setTimeout(5000);
@@ -152,12 +200,32 @@ function hostCanReachInternet(): boolean {
 
 const HOST_EGRESS = dockerReady ? hostCanReachInternet() : false;
 
+/**
+ * E2E-43 without its control is not a measurement.
+ *
+ * The negative half ("the container cannot reach 1.1.1.1") is also true of a host with no egress
+ * at all, so the host-side probe is what makes it about isolation. This used to `console.warn` and
+ * carry on — the mutation proof for it is in the phase-13 audit's Docker section: deleting the
+ * control left the suite **6/6 green**, which is exactly the "deleting the probe makes the suite
+ * greener" failure this file's header forbids. An unmeasured property is not a pass, so the spec
+ * skips with the reason in its name.
+ */
+const NO_EGRESS_CONTROL = dockerReady
+  ? HOST_EGRESS
+    ? null
+    : 'host has no egress to 1.1.1.1, so a container refusal cannot be told apart from a dead network'
+  : null;
+
 describe.skipIf(SKIP_REASON !== null)(suiteName, () => {
-  it('[@docker] E2E-43: the container reaches no network, and the control proves the probe works', async () => {
-    // Negative half: inside the container the connection must fail, and fail as *refused*
-    // (ENETUNREACH), not as a timeout that could be a slow network.
-    const inside = await runProbe(
-      `const net=require('net');
+  it.skipIf(NO_EGRESS_CONTROL !== null)(
+    NO_EGRESS_CONTROL === null
+      ? '[@docker] E2E-43: the container reaches no network, and the control proves the probe works'
+      : `[@docker] E2E-43: SKIPPED — ${NO_EGRESS_CONTROL}`,
+    async () => {
+      // Negative half: inside the container the connection must fail, and fail as *refused*
+      // (ENETUNREACH), not as a timeout that could be a slow network.
+      const inside = await runProbe(
+        `const net=require('net');
 const ifaces=Object.keys(require('os').networkInterfaces());
 if (ifaces.length !== 1 || ifaces[0] !== 'lo') { console.log('IFACES:'+ifaces.join(',')); process.exit(2); }
 const s=net.connect({host:'1.1.1.1',port:443});
@@ -165,27 +233,26 @@ s.setTimeout(3000);
 s.on('connect',()=>process.exit(0));
 s.on('error',(e)=>{ console.log('ERR:'+e.code); process.exit(e.code === 'ENETUNREACH' ? 1 : 2); });
 s.on('timeout',()=>process.exit(2));`,
-    );
+      );
 
-    // 1 = refused with ENETUNREACH (property holds), 0 = connected (property broken),
-    // 2 = probe could not be evaluated (indistinguishable from broken isolation).
-    expect(inside.exitCode, 'container must not reach 1.1.1.1 (0=connected, 2=probe broken)').toBe(
-      1,
-    );
+      // 1 = refused with ENETUNREACH (property holds), 0 = connected (property broken),
+      // 2 = probe could not be evaluated (indistinguishable from broken isolation).
+      expect(
+        inside.exitCode,
+        'container must not reach 1.1.1.1 (0=connected, 2=probe broken)',
+      ).toBe(1);
 
-    // Positive control. If this host has no egress the control cannot exist, and that is
-    // reported rather than asserted vacuously.
-    if (!HOST_EGRESS) {
-      console.warn('[@docker] E2E-43 control skipped: this host has no egress to 1.1.1.1');
-    } else {
+      // Positive control: the same probe, on the host, must succeed. `skipIf` above has already
+      // established that this host has egress, so a failure here is a real broken control.
       const control = spawnSync(process.execPath, ['-e', EGRESS_PROBE], { timeout: 15_000 });
       expect(
         control.status,
         'the host control must reach 1.1.1.1, or the container refusal proves nothing',
       ).toBe(0);
-    }
-    expect(leftovers()).toEqual([]);
-  }, 120_000);
+      expect(leftovers()).toEqual([]);
+    },
+    120_000,
+  );
 
   it('[@docker] E2E-44: the container cannot write outside its work dir, and can write inside', async () => {
     // Negative half: the root filesystem is read-only and /root is not ours. Positive half:
@@ -207,7 +274,7 @@ process.exit(out.root === 'EROFS' && out.home === 'EACCES' && out.workspace === 
     expect(leftovers()).toEqual([]);
   }, 120_000);
 
-  it('[@docker] E2E-45: the container sees neither the host factory home nor an operator key', async () => {
+  it('[@docker] E2E-44 (b): the container sees neither the host factory home, the holdout, nor an operator key', async () => {
     // A real factory home on the host, with a key in it: the control proves the probe can
     // find such things, so "not found" inside the container means something.
     const fakeHome = mkdtempSync(join(tmpdir(), 'factory-home-'));
@@ -340,7 +407,10 @@ const tryOne=()=>new Promise((res)=>{const c=spawn('/bin/sleep',['10'],{stdio:'i
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
       remaining = leftovers();
     }
-    expect(remaining, 'no container from this suite may outlive its run').toEqual([]);
+    expect(
+      remaining,
+      `no container from this suite may outlive its run — found ${leftoverNames(remaining).join(', ')}`,
+    ).toEqual([]);
   }, 120_000);
 
   it('[@docker] the image under test is pinned by content, not by a mutable tag', async () => {

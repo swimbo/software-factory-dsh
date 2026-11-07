@@ -416,3 +416,77 @@ Stated plainly, as requested:
 - The plan assumed **13** phase plans; there are **18** (9a–9e). All 18 are audited above.
 - The plan's tasks that I did **not** perform, because they are the Lead's or need a human in the loop: user sign-off (task 19/31), severity corrections, `wont_fix` designations, and the `progress.md` capture of those.
 - Two plan tasks _were_ absorbed into §3 without a separate heading: "better than planned" deviations (ui-plan's `health` richer than planned, the clone replacing the worktree, the `+local` runner label) and "silent volatile decisions" (three INDEX rows missing, item 8 of §6).
+
+---
+
+## 9. Addendum — 2026-11-01, after the operator ratified ND1–ND4
+
+This section is appended rather than woven into the rows above: an audit is a record of what was true
+when it ran, and editing its verdicts in place would make it impossible to tell which sentences were
+measured and which were later "corrected" by the thing being audited. Everything here names the artifact
+that carries the evidence.
+
+### What changed since the audit
+
+| Item                              | Then                                                                 | Now                                                                                                                                  |
+| --------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| ND1–ND4                           | escalated as `NEEDS_HUMAN_DECISION`, every row "blocked on a human"   | **decided 2026-11-01** (`findings.md` § DECIDED) and implemented — `evidence/phase-13-nd-decisions.md`                                 |
+| Certification                     | no operating point; Δ evidence only                                  | per task class, **m=20 / k=18**, **α = 0.0755** computed in exact rational arithmetic; β stated as unmeasured                        |
+| Spend                             | an estimate reserved, nothing measured                               | gateway-reported usage per attempt, append-only `usage_records`, ceiling **enforced by revoking the token**; `budget reconcile` can say `unknown` |
+| Ledger head                       | nothing outside the host                                             | daily off-host anchor (`packages/anchor`, `factory ledger`), refusal at exit 9 past 48 h; claim is "detectable within 48 h" (ADR-008) |
+| Wall vs worker                    | same principal everywhere                                            | `two-uid` where the platform allows it, reported by `status`; this macOS host reports `single-uid` with the reason                    |
+| Store schema                      | v1, a version change meant a refusal                                 | v2 with **declared additive migrations** and a `store.migrated` ledger event; a version with no declared path is still refused         |
+| `§7 What this audit could not verify` → the panel | `UNPROVEN`: no matching chromium build                           | **resolved**: chromium `1248` is installed and the panel is a gate stage — 41 specs pass in `scripts/verify.sh`                       |
+
+### The current gate (measured, not remembered)
+
+```
+bash scripts/verify.sh   →  7 passed, 1 skipped, 0 failed — OK
+log: docs/verification/2026-11-01T21-04-41Z/
+      1284 tests passed | 6 skipped across 89 files (vitest), 41 panel specs (playwright, chromium 1248)
+```
+
+### Claims this round explicitly did **not** widen
+
+- Re-certification on a policy/model change is **not built**; every verdict carries the point it was
+  measured under, and that is the extent of it.
+- Nothing schedules the anchor and nothing alerts on staleness — the runbook gives the cron/launchd line.
+- The ceiling is proven at the socket (`credential.test.ts`), not through the real executor.
+- ND2's Linux path is proven in a `node:26-bookworm` container, not on the Linux target.
+- The wall is still described as "independent, deterministic where possible, adversarially tested and
+  human-audited" — never "safe".
+## 10. Addendum — 2026-11-01, after the first post-v0.3.0 round
+
+Same rule as §9: the sections above are not rewritten, because an audit's value is partly that you can
+see what it believed at the time. These are the bullets it got wrong, and what replaced them.
+
+- **§7 "the `@docker` specs are placeholders" — wrong, and it was wrong when written.** The file had
+  been rewritten into six real specs in `bb250ca`; `factory-env:e2e` already existed on this host and
+  the suite ran **6/6 green in 5.8 s** before anything in this round changed. Re-measured by running
+  it: `FACTORY_TAGS=docker npx vitest run e2e/cli/docker` → 6 passed, 4.8 s, zero leftover containers.
+- **§7 "`docker build` stalls loading the pinned digest" — wrong diagnosis, real symptom.** The pinned
+  `node:22.19-bookworm-slim@sha256:4a4884e8…` resolves and pulls, digest-verified. What reproduces is a
+  **cold cross-platform** pull (`--platform linux/amd64`: `DeadlineExceeded`, then a >7 min hang), and
+  buildkit prints nothing while pulling — which is what "stalled" looked like. Cached builds take ~20 s.
+- **One real spec defect the audit's framing hid.** E2E-43's host-egress control was a `console.warn`;
+  deleting it left the suite **6/6 green**. It is now `skipIf` with the reason in the test name, so
+  removing the control yields `5 passed, 1 skipped` — an unmeasured property is a skip, never a pass.
+- **The images disagreed with the pins.** The wall image ran `node:22-alpine`; `docker/factory-env` ran
+  node 22 **and** `DSH_VERSION=0.2.1-rc.3` against `PINNED_DSH_VERSION = '0.2.1-rc.5'`. Both now run
+  `node:26.12.1`, and the worker image builds (`EXIT=0`, ~2 min, `dsh --version` → `0.2.1-rc.5`).
+- **What is still genuinely `UNKNOWN`.** E2E-45 (kill the *worker* container mid-attempt) — the worker
+  has no container: `apps/cli/src/wall.ts` wires `createLocalRunner` and the executor launches `dsh` on
+  the host. The `ambiguous`/`recover` invariant is proven at the process level instead (E2E-21/30/31/32).
+  E2E-44's proxy-token clauses, unchanged: no credential-proxy container ships.
+- **The anchor is no longer inert.** §9's "nothing schedules the anchor" is out of date: the launchd job
+  is installed (`deploy/launchd/ai.factory.anchor.plist`, 03:00), two records sit on `hermes-control`,
+  and `factory ledger verify` reads `FRESH · off-host`. Alerting is still not built.
+- **Re-certification is now a query, not a promise.** Certificates are stored rows; `factory audit
+  --certifications` exits 9 on a stale or absent one. Nothing re-runs the measurement automatically —
+  §9's bullet is narrowed, not cleared.
+- **§7's first bullet is closed, so §3.4's "met" is now met for the reason it claimed.** The blocker
+  was a missing browser build; `chromium_headless_shell-1248` is in `~/Library/Caches/ms-playwright`
+  now, and `npx playwright test` runs the panel suite in a real browser: **41 passed in 12.6 s**,
+  including measured contrast, the 320 px rule, 200 % zoom reflow, "no green anywhere in the unknown
+  card", and "parses identically with scripting disabled". This is the first browser-level run in the
+  audit's history; §4.6's "browser layer UNPROVEN" is superseded.

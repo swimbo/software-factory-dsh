@@ -27,12 +27,25 @@ export const WALL_REASON_CODES = [
   'faithfulness_partial',
   'receipt_unavailable',
   /**
-   * A recorded command needed a person's decision and had none. The factory will not
-   * re-run what it cannot broker, so the verdict stays `unknown` -- and the operator
-   * is told which command and which rule, instead of being handed the generic
-   * "could not be re-executed" that hides a gate refusal behind a transport failure.
+   * **Old verdicts only — kept so stored evidence stays readable.** A recorded command needed a
+   * person's decision and had none, so the factory would not re-run what it could not broker, and
+   * the verdict stays `unknown`. The claim is about what happened **at replay**: it never said the
+   * operation was unapproved — the launch may well have held a decision, and the wall is
+   * deliberately not its consumer. New verdicts emit `privileged_replay_refused` below. This string
+   * cannot be removed or renamed: `WALL_REASON_CODES` is a closed zod enum, so doing either would
+   * make every stored verdict that carries it fail to parse, breaking the evidence it describes.
    */
   'privileged_unbrokered',
+  /**
+   * **New verdicts.** The replay was refused because the operation was privileged and the replay
+   * had no decision. The wall re-executes a receipt's claim in order to measure it, and a
+   * measurement must not act on what it measures, so the refusal is about the replay, not about the
+   * operation: this code says "the replay was refused", never "the operation was never approved".
+   *
+   * Additive on purpose. `privileged_unbrokered` above remains the code on verdicts already on
+   * disk; a reader must accept both, and neither is a failure of the candidate.
+   */
+  'privileged_replay_refused',
   'delta_regression',
   'delta_unmeasured',
   'holdout_failed',
@@ -104,6 +117,40 @@ export const Delta = z.object({
 });
 export type Delta = z.infer<typeof Delta>;
 
+/**
+ * The class certificate: the operating point the wall judged a *task class* against, as data
+ * rather than as prose in a scenario line.
+ *
+ * ND1 published α inside the `class-certification` scenario's `observed` text, which made a
+ * re-certification job impossible: there was nothing to compare a stored judgement against. This
+ * object is the record. `taskClass` rides here — and not only on the verdict — because the class,
+ * not the unit, is what gets certified, and a projection keyed by class must be able to read the
+ * key off the evidence itself.
+ *
+ * `alpha` is the published false-refusal risk of the operating point, not a measurement of this
+ * class: it is `P(X <= k-1)` under `p0`, identical for every class at the same point.
+ */
+export const ClassCertificate = z.object({
+  taskClass: z.string().min(1),
+  /** Attempts required before the class can be judged at all. */
+  m: z.number().int().positive(),
+  /** Passes required among those attempts. */
+  k: z.number().int().positive(),
+  /** The true pass rate the certification is calibrated against. */
+  p0: z.number().min(0).max(1),
+  alpha: z.number().min(0).max(1),
+  /** Attempts observed for this class, and how many of them passed. */
+  samples: z.number().int().nonnegative(),
+  passes: z.number().int().nonnegative(),
+  /**
+   * `insufficient` and `never-certified` are not "probably fine": fewer than `m` attempts is
+   * unknown, and unknown never satisfies a gate. A certificate that does not say `certified`
+   * cannot make a class current, whatever a reader wishes it said.
+   */
+  outcome: z.enum(['certified', 'not-certified', 'insufficient']),
+});
+export type ClassCertificate = z.infer<typeof ClassCertificate>;
+
 export const Verdict = z.object({
   unitId: z.string().min(1),
   attemptId: z.string().min(1),
@@ -124,6 +171,18 @@ export const Verdict = z.object({
    * on `fail` or `unknown`.
    */
   promotionRequiresHumanSignature: z.boolean().optional(),
+  /**
+   * The class judgement this verdict carried, when the wall had a holdout to judge against.
+   * Absent for a cold start with no holdout: absence means "no class was measured", never
+   * "the class is fine".
+   */
+  certification: ClassCertificate.optional(),
+  /**
+   * The model id the attempt ran under, when the caller knew it. Optional and nullable on
+   * purpose: an offline attempt has no model, and `null` (unknown) must not be read as "no
+   * change since" — re-certification treats a null as "cannot prove it is current".
+   */
+  modelId: z.string().min(1).nullable().optional(),
   evaluatedAt: z.string().datetime(),
 });
 export type Verdict = z.infer<typeof Verdict>;

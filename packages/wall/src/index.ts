@@ -98,3 +98,23 @@ export {
 } from './selftest.ts';
 
 export { main as cliMain, defaultCorpusDir } from './cli.ts';
+export {
+  certificateRecency,
+  certificatesRecency,
+  judgedCertificate,
+  type CertificateRecency,
+  type RunningCertificationBasis,
+  type StoredCertificate,
+} from './certificate-recency.ts';
+export {
+  binomialCdfAtLeast,
+  binomialCdfAtMost,
+  certificationAlpha,
+  certificationForClass,
+  certificationRisk,
+  DEFAULT_OPERATING_POINT,
+  type CertificationOutcome,
+  type CertificationRisk,
+  type ClassCertification,
+  type OperatingPoint,
+} from './operating-point.ts';

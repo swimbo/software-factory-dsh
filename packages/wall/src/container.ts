@@ -110,6 +110,12 @@ export interface ContainerRunnerOptions {
    * a query rather than a guess.
    */
   readonly label?: string;
+  /**
+   * A fixed container name, so a timed-out scenario can be removed even when its cidfile was
+   * never written. Defaults to `factory-wall-<pid>-<run>`; the suite's label is reused when
+   * present so `docker ps` reads the same way it always did.
+   */
+  readonly name?: string;
 }
 
 const DEFAULT_WORKSPACE = '/workspace';
@@ -196,6 +202,7 @@ export function dockerRunArgv(
     | 'forbidMountsUnder'
     | 'cidFile'
     | 'label'
+    | 'name'
   >,
   mountDir: string,
   argv: readonly string[],
@@ -210,7 +217,12 @@ export function dockerRunArgv(
   return [
     'run',
     '--rm',
-    // Written before the container starts, so a timeout always has a name to kill.
+    // `--rm` is a promise about the *client's* lifetime, so the two things that make an
+    // orphan findable are independent of it: a name (findable while the client is alive or
+    // dead) and a cidfile (written before the container starts). A kill path with only one
+    // of them leaks whenever that one is missing — which is exactly what a SIGKILLed
+    // client leaves behind.
+    ...(options.name === undefined ? [] : ['--name', options.name]),
     ...(options.cidFile === undefined ? [] : ['--cidfile', options.cidFile]),
     ...(options.label === undefined ? [] : ['--label', `org.factory.run=${options.label}`]),
     // No network, no exceptions: a holdout that can call out is a holdout that can be
@@ -303,6 +315,28 @@ function killContainer(dockerBin: string, id: string): void {
 }
 
 /**
+ * Remove any container carrying this run's name, whatever its lifecycle did.
+ *
+ * The cidfile is the precise handle, but it is written by the *client*: a `SIGKILL`ed client
+ * can die between the daemon creating the container and the id reaching disk, and then the id
+ * is gone while the container is not. `--name` is set from the same run counter, so it is the
+ * handle that survives that window. `^/name$` rather than a substring, so `-1` cannot match
+ * `-10`.
+ */
+function removeByName(dockerBin: string, name: string): void {
+  const listed = spawnSync(dockerBin, ['ps', '-aq', '--filter', `name=^/${name}$`], {
+    encoding: 'utf8',
+  });
+  if (listed.status !== 0) return;
+  const ids = listed.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  if (ids.length === 0) return;
+  spawnSync(dockerBin, ['rm', '-f', ...ids], { encoding: 'utf8' });
+}
+
+/**
  * Build the runner.
  *
  * A run that cannot be started at all — no docker binary, no prepared tree, a broken
@@ -330,6 +364,10 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
       const cidFile =
         options.cidFile ?? join(tmpdir(), `factory-cid-${String(process.pid)}-${String(runs)}.txt`);
       const label = options.label;
+      // Deterministic, unique per run, and safe in a docker name (the label is operator text).
+      const name =
+        options.name ??
+        `factory-wall-${(label ?? String(process.pid)).replace(/[^A-Za-z0-9_.-]/gu, '-')}-${String(runs)}`;
       if (copyCheckout) {
         tempDir = mkdtempSync(join(tmpdir(), 'factory-run-'));
         try {
@@ -373,7 +411,7 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
           let args: string[];
           try {
             args = dockerRunArgv(
-              { ...options, ...(label === undefined ? {} : { label }), cidFile },
+              { ...options, ...(label === undefined ? {} : { label }), name, cidFile },
               mountDir,
               input.argv,
             );
@@ -394,6 +432,9 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
               // already classified the run as timed out.
               const id = readContainerId(cidFile);
               if (id !== null) killContainer(dockerBin, id);
+              // Belt and braces for the window above: the name exists from the moment the
+              // daemon creates the container, the cidfile from the moment the client writes it.
+              removeByName(dockerBin, name);
             },
             Math.max(1, input.timeoutMs),
           );
@@ -402,6 +443,9 @@ export function createContainerRunner(options: ContainerRunnerOptions): Scenario
           child.stderr?.on('data', (chunk: Buffer) => chunks.push(chunk));
           child.on('error', () => finish(null));
           child.on('close', (code) => {
+            // A container that outlived its client is a leak whether or not the run timed out
+            // (an unrefused daemon, a wedged entrypoint). Idempotent: a removed container is a no-op.
+            removeByName(dockerBin, name);
             // 125 is Docker's own "the daemon refused" code: the container never ran,
             // so there is no measurement to report.
             finish(code === 125 ? null : code);

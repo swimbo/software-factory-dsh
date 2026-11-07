@@ -97,6 +97,18 @@ const VALID_PAYLOADS: Readonly<Record<EventType, unknown>> = {
     amountUsd: null,
     kind: 'unknown',
   },
+  'usage.recorded': {
+    type: 'usage.recorded',
+    usageId: 'usg_4d2e',
+    unitId: 'U-7f3a9c',
+    attemptId: 'A-01',
+    tokensIn: 1200,
+    tokensOut: 340,
+    costUsd: 0.02,
+    gatewayRequestId: 'req_8812',
+    ceilingCrossed: false,
+    recordSha: sha('b'),
+  },
   'envelope.raised': {
     type: 'envelope.raised',
     envelopeId: 'E-per-unit',
@@ -127,6 +139,30 @@ const VALID_PAYLOADS: Readonly<Record<EventType, unknown>> = {
     reason: 'ledger chain break at event 8812',
     detectedBy: 'control',
   },
+  'store.migrated': {
+    type: 'store.migrated',
+    from: 1,
+    to: 2,
+    note: 'ND3: append-only usage_records',
+  },
+  'wall.class_certified': {
+    type: 'wall.class_certified',
+    certificateId: 'cert:V-1a2b3c',
+    verdictId: 'V-1a2b3c',
+    unitId: 'U-7f3a9c',
+    taskClass: 'refactor-extract-helper',
+    m: 20,
+    k: 18,
+    samples: 20,
+    passes: 18,
+    alpha: 0.07548367378849634,
+    outcome: 'certified',
+    policyVersion: 'policy/2026-11-01',
+    modelId: 'auto',
+    certificateSha: 'sha256:1f4c',
+    holdoutRevision: 'h-refactor-real-2026-11-01',
+    p0: 0.95,
+  },
   'recovery.completed': {
     type: 'recovery.completed',
     recoveryRunId: 'R-91ab',
@@ -149,16 +185,23 @@ const EXPECTED_AGGREGATE: Readonly<Record<EventType, ReturnType<typeof aggregate
   'unit.aborted': 'unit',
   'spend.reserved': 'spend',
   'spend.recorded': 'spend',
+  // Usage is the measured half of spend: the same aggregate, so `audit`'s projection keeps one
+  // case for "what did this unit cost us" rather than two overlapping ones.
+  'usage.recorded': 'spend',
   'envelope.raised': 'envelope',
   // Both are authorization facts; the credential aggregate is reused on purpose so
   // `audit`'s projection switch does not grow a second case for one event type.
   'privileged.decided': 'credential',
   'credential.issued': 'credential',
+  // A wall judgement gets its own aggregate: `audit --certifications` asks "what has the wall
+  // certified", which is not a question about the ledger's own state.
+  'wall.class_certified': 'wall',
   'store.quarantined': 'store',
+  'store.migrated': 'store',
   'recovery.completed': 'store',
 };
 
-describe('each of the 17 event types', () => {
+describe('each of the 20 event types', () => {
   for (const [type, payload] of Object.entries(VALID_PAYLOADS)) {
     it(`accepts a valid ${type} payload`, () => {
       expect(EventPayload.parse(payload).type).toBe(type);
@@ -167,8 +210,13 @@ describe('each of the 17 event types', () => {
 });
 
 describe('EventPayload', () => {
-  it('covers 17 event types', () => {
-    expect(Object.keys(VALID_PAYLOADS)).toHaveLength(17);
+  it('covers 20 event types', () => {
+    // 19 since ND3 added `usage.recorded` (spend as the gateway reported it) and `store.migrated`
+    // (an additive schema migration ran on open); 20 since ND1 half two added
+    // `wall.class_certified` (a class judgement exists as a record, not as prose in a scenario
+    // line). A count that drifts from the union is the point of this spec; the number moves when a
+    // fact becomes worth recording, never to make a suite green.
+    expect(Object.keys(VALID_PAYLOADS)).toHaveLength(20);
   });
 
   it('rejects an unknown event type', () => {
@@ -214,12 +262,49 @@ describe('the ledger envelope', () => {
     }
   });
 
-  it('declares the same 17 types the payload union declares', () => {
+  it('declares the same 19 types the payload union declares', () => {
     // The envelope enum is written out by hand in events.ts; reading the schema
     // is the only way to prove the two lists agree rather than assume it.
     const ledgerTypes = (LedgerEvent.shape.type as unknown as { options: readonly string[] })
       .options;
     expect([...ledgerTypes].sort()).toEqual(Object.keys(VALID_PAYLOADS).sort());
+  });
+
+  it('parses a pre-v5 class certificate event that names no corpus, and says it is unknown', () => {
+    // Written as a literal, not derived from VALID_PAYLOADS: this is the shape every ledger
+    // written before schema v5 contains, and the compatibility claim is about *those* bytes.
+    const legacy = {
+      seq: 7,
+      eventId: 'E-0007',
+      type: 'wall.class_certified',
+      occurredAt: OCCURRED_AT,
+      actor: 'wall',
+      traceId: 'cert:V-1a2b3c',
+      payload: {
+        type: 'wall.class_certified',
+        certificateId: 'cert:V-1a2b3c',
+        verdictId: 'V-1a2b3c',
+        unitId: 'U-7f3a9c',
+        taskClass: 'refactor-extract-helper',
+        m: 20,
+        k: 18,
+        samples: 20,
+        passes: 18,
+        alpha: 0.07548367378849634,
+        outcome: 'certified',
+        policyVersion: 'policy/2026-11-01',
+        modelId: 'auto',
+        certificateSha: 'sha256:1f4c',
+      },
+    };
+    const parsed = LedgerEvent.safeParse(legacy);
+    expect(parsed.success).toBe(true);
+    // Absent, not null and not fabricated: a reader must see "unknown", never "the current corpus".
+    if (parsed.success) {
+      const payload = parsed.data.payload as { holdoutRevision?: unknown; p0?: unknown };
+      expect(payload.holdoutRevision).toBeUndefined();
+      expect(payload.p0).toBeUndefined();
+    }
   });
 
   it('requires a monotonic seq, not a timestamp, for replay order', () => {

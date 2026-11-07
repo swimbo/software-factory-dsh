@@ -13,8 +13,10 @@
  */
 export {
   DEFAULT_POLICY,
+  LEGACY_LIMIT_BOUND,
   assertPolicy,
   currentPolicyVersion,
+  legacyPolicyVersions,
   type QualifierPolicy,
   type SignalWeights,
 } from './policy.ts';

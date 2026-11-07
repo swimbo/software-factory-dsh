@@ -253,7 +253,12 @@ Four decisions the Phase 5 debate could not settle. Each is argued in full — w
 
 All four are **claim-blockers, not ship-blockers**: the code is correct under either answer, and what changes is the sentence the operator is allowed to say. None of them may be closed by an agent.
 
-### Recommended answers (Lead, 2026-11-01 — operator to ratify)
+### DECIDED 2026-11-01 — ratified by the operator
+
+The operator accepted all four recommendations below ("I agree with all your recommendations").
+They are no longer defaults: they are the answers, and the table above them is history rather than
+procedure. Each still says what it does **not** buy, because a decision that quietly widens a claim is
+the failure mode this file exists to prevent.
 
 The operator asked for positions that are **neither maximally cautious nor maximally aggressive**, and
 that is the right instinct for these four: the cautious answer to each is "ship nothing and claim
@@ -263,12 +268,18 @@ true sentence* rather than a broader false one.
 
 **ND1 — certify per task class at m=20, k=18; publish α, never a global pass rate.**
 One trial unit = one **task class**, not the factory and not the product. m=20 attempts, k=18 passes
-(α ≈ 0.882), and the published number is that α with its definition — "the probability a class that
+(**α = 0.0755**), and the published number is that α with its definition — "the probability a class that
 truly passes 95 % of the time fails certification" — not a claim about production success. Re-certify
 when the policy version or the model id changes, because both move the population. **Why middle:** m=6
-(α ≈ 0.687) certifies flukes, and m=48/k=44 costs 2.4× the spend for a marginal α. **Does not buy:**
+(α = 0.2649) certifies flukes, and m=48/k=44 costs 2.4× the spend for a marginal α. **Does not buy:**
 β, the power to detect a regressing class — that needs a known-bad corpus nobody has; say so instead of
-publishing a β that was never measured.
+publishing a β that was never measured. **Correction, 2026-11-01 (when the arithmetic was implemented):**
+this row first carried "α ≈ 0.882" and "m=6, α ≈ 0.687". Under the definition in the same sentence, the
+binomial tail gives **0.0755** at m=20/k=18 and **0.2649** at m=6/k=6 (`packages/wall/src/operating-point.ts`,
+computed in exact rational arithmetic; `docs/planning/dark-factory-dsh/evidence/phase-13-nd-decisions.md`
+carries the term-by-term sum). The old figures were not attainable from this binomial at any k — they were
+survival probabilities from another formulation, i.e. exactly the class of error this file exists to
+prevent, in this file. The decision (m=20, k=18) is unchanged; the published number is now computed.
 
 **ND2 — ship the two-uid topology as the Linux default, keep single-uid on the dev host, and scope the
 claim to the topology actually in use.**
@@ -298,8 +309,9 @@ money and a new dependency; nothing at all means a coordinated local rewrite is 
 the exact attack the anchor exists for. **Does not buy:** real-time tamper evidence — the window is up
 to a day, and the README will say "detectable within 48 h", not "prevented".
 
-Recording these as recommendations, not as decisions: the table above still governs, and an agent
-changing them would be exactly the failure mode this section warns about.
+Ratified → implementation follows the decisions, not the old defaults. Where the code could not yet
+honour one (the two-uid topology needs the Linux target, off-host anchoring needs the anchor job), the
+README says which topology the running instance has, rather than assuming the decision is in force.
 
 ## Contradiction log (resolved 2026-11-01)
 

@@ -258,9 +258,19 @@ export async function runRun(input: VerbInput): Promise<number> {
     );
   }
   if (!ctx.executor.available) {
+    // Three environment faults, three codes, one exit: `EXECUTOR_UNAVAILABLE` means there is no way
+    // to run a turn at all, `CONTAINER_UNAVAILABLE` means the turn could run but not where it was
+    // asked to, and `CONFIGURATION_CONFLICT` means two settings are each valid and cannot both be
+    // honoured. The difference is the operator's next action — install the runtime, build the image,
+    // or unset one lever — so the code comes from the probe, which is the only thing that knows why.
+    const code =
+      ctx.executor.refusalCode ??
+      (ctx.executor.isolation.mode === 'refused'
+        ? 'CONTAINER_UNAVAILABLE'
+        : 'EXECUTOR_UNAVAILABLE');
     throw new FactoryError(
-      'EXECUTOR_UNAVAILABLE',
-      `EXECUTOR_UNAVAILABLE: ${ctx.executor.detail}. Nothing was dispatched and no budget was reserved.`,
+      code,
+      `${code}: ${ctx.executor.detail}. Nothing was dispatched and no budget was reserved.`,
       { unitId },
     );
   }
@@ -283,7 +293,7 @@ export async function runRun(input: VerbInput): Promise<number> {
   // an attempt that never ran. No attempt, no lease, no reservation — the spec asserts it.
   assertAttemptCapacity({
     read: readOccupancy(ctx.store, { excludeUnitId: unitId }),
-    limit: ctx.policy.maxConcurrentAttempts,
+    limit: ctx.limits.maxConcurrentAttempts,
     limitIsDefault: ceilingIsDefault(ctx.env, 'FACTORY_MAX_CONCURRENT_ATTEMPTS'),
     unitId,
   });
@@ -622,7 +632,7 @@ async function evaluateRealWall(
   // so the refusal leaves an attempt with no verdict rather than a verdict nobody measured.
   assertWallCapacity({
     read: readOccupancy(ctx.store, { excludeUnitId: unit.unitId }),
-    limit: ctx.policy.maxConcurrentWalls,
+    limit: ctx.limits.maxConcurrentWalls,
     limitIsDefault: ceilingIsDefault(ctx.env, 'FACTORY_MAX_CONCURRENT_WALLS'),
     unitId: unit.unitId,
   });
@@ -636,6 +646,16 @@ async function evaluateRealWall(
     nowIso: ctx.nowIso(),
     policyVersion: ctx.policyVersion,
     home: ctx.env['HOME'] ?? null,
+    // The store this measurement is evidence for: the criteria log is written under it, so a
+    // certificate counts this store's attempts and not another store's. See `criteriaLogPath`.
+    storeHome: ctx.home,
+    // The certificate records the model the attempt actually ran under, so a later policy or model
+    // change can be detected instead of inferred. Absent is `null`, which the audit treats as
+    // "cannot prove current" rather than "unchanged".
+    ...(() => {
+      const configured = (ctx.env['FACTORY_MODEL_ID'] ?? '').trim();
+      return configured === '' ? {} : { modelId: configured };
+    })(),
   });
   if (!outcome.holdoutLoaded) {
     ctx.ui.err(

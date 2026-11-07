@@ -25,12 +25,25 @@ export {
   startCredentialProxy,
   pathWithinPrefix,
   PROXY_REFUSALS,
+  DEFAULT_BIND_ADDRESS,
   type CredentialProxy,
   type CredentialProxyOptions,
   type ProxyEvent,
   type ProxyRefusal,
   type UpstreamTarget,
 } from './server.ts';
+export {
+  foldUsage,
+  isEventStream,
+  observeUsage,
+  parseSseUsage,
+  usageOf,
+  MAX_PARSE_BYTES,
+  type ParsedUsage,
+  type PriceTable,
+  type UsageObservation,
+  type UsageTotals,
+} from './usage.ts';
 export {
   createTokenRegistry,
   TOKEN_BYTES,
