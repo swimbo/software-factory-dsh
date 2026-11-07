@@ -134,7 +134,7 @@ Mirroring the plan's OUT scope, so a fenced v1 is not mistaken for a finished pr
   `maxConcurrentWalls` (both default 1) make a second dispatch exit 7 with `CONCURRENCY_LIMIT` before
   anything is reserved. There is no queueing, no fairness, no priorities and no human-priority slot —
   a queue would be a promise about _when_ work happens, and there is no scheduler to keep it.
-- **No no-progress detector** (IN #6). The watchdog enforces wall-clock and output-byte ceilings and
+- **No progress-stall detector** (IN #6). The watchdog enforces wall-clock and output-byte ceilings and
   the kill switch, but detecting "the worker is doing nothing" needs step-level signals that DSH
   owns; the e2e id for it is withdrawn rather than left looking unstarted.
 - **Privileged operations are refused or brokered, and the half that is wired can only refuse.**
