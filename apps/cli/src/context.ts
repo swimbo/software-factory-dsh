@@ -24,6 +24,7 @@ import { createRequire } from 'node:module';
 import type { LaneDecision } from '@factory/contracts';
 import { createEngine, type Engine, type QualifyInput } from '@factory/core';
 import { CONFIGURATION_CONFLICT_RUNBOOK, newTraceIdForCli } from './exit.ts';
+import { taskClassFrom } from './task-class.ts';
 import {
   currentPolicyVersion,
   DEFAULT_POLICY,
@@ -665,6 +666,10 @@ export function createContext(ui: CliUi, overrides: ContextOverrides = {}): Fact
       ),
     envelopeUsd,
     traceId: () => traceId,
+    // The class the wall measures under is this composition root's policy setting, and it is what the
+    // dispatch gate reads a class certificate for. The engine cannot invent it: a certificate is filed
+    // under the class the wall was configured with.
+    taskClass: (spec) => taskClassFrom(env, spec),
     // The version identity travels with the decision: it is what makes a
     // cold-start routing distinguishable from a measured one forever after.
     policyVersion: () => policyVersion,

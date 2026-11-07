@@ -168,9 +168,12 @@ That script reads the latest verdict from the store, rebuilds the payload the ga
 factory promote U-052939402fae --signature <sig> --signed-by operator --confirm "sign promotion U-052939402fae"
 ```
 
-The typed phrase is the gate. **No machine ran this**: a signature that an agent can mint is not a human
-gate, and the runbook says so (`docs/runbooks/rotate-operator-key.md`, "The signature cannot be
-synthesized"). Until it runs, the honest status of this phase is: measured and verified, not promoted.
+The typed phrase is the gate. The operator delegated this one invocation explicitly on 2026-11-07
+("I approve your recommendations or for you to use your best judgement for these items: The signature —
+bash ~/.factory/real-intent-2026-11-07/sign-and-promote.sh U-052939402fae"). The key is theirs and the
+approval is theirs; the key operation was performed by the agent under that approval, which is a
+different fact from a synthesized signature and is recorded here so nobody has to guess which it was.
+The runbook's rule stands: the signature cannot be *invented*.
 
 What was checked about that step, because an operator should not discover a broken handoff at the last
 moment: the refusal path runs and writes nothing (`PROMOTION_UNSIGNED`, and
@@ -186,10 +189,39 @@ The keypair was also exercised end to end *without* signing a promotion: a self-
 published public half — `true` — so the handoff cannot fail on an unreadable key or a mismatched pair.
 The signature over the promotion payload itself is the one thing this document does not contain.
 
-What follows after the signature, in the order to do it: the promotion writes
-`$FACTORY_HOME/artifacts/<unit>/…/promotion.yaml` and `change.patch`; apply the patch to a clone of
-`main`, run `pnpm run typecheck && pnpm run lint && pnpm run format:check` on it, and then it is a normal
-one-line docs change to land.
+**It ran, and it wrote the first promotion this store has ever held:**
+
+```
+$ bash ~/.factory/real-intent-2026-11-07/sign-and-promote.sh U-052939402fae
+payload  sha256:a8d31900d5fa8a7866fdaea52150b03d9ceb645046eaa03fb6428a5c47b8aefc
+verdict  sha256:c0bc7807a08586a02487ea0d8b8fb8432456df471afbda817e8ff1f07df99337
+sig      /Users/bo/.factory-operator-keys/promotion-U-052939402fae.sig
+PROMOTION P-e968069a signed · sha256:e968069a… · wrote /Users/bo/.factory/artifacts/U-052939402fae/promotion.yaml
+  apply           git apply /Users/bo/.factory/attempts/U-052939402fae/A-c77c48910bfd/attempt.patch
+  inspect         factory audit U-052939402fae
+  gate            first-promotion-only (this was the first signing of this unit)
+```
+
+The artifact (`promotion.yaml`) carries the promotion format, the unit, the verdict sha and outcome, the
+attempt, the receipt-diff sha, `approved_by: operator`, the signing key id (`ed25519:85b955eb`), the
+signature-payload sha and the signature itself, over a `promotion_sha` — every field above that line is
+covered by the hash. The ledger row is `unit.promoted` (`sha256:a3469de0…`, verdict `V-c40f24ed88ac`),
+and `status` fell from `2 need you` to `1` because the promotion stopped being a chore and became a fact.
+
+**The patch was applied and verified twice, in two different places.** Against a fresh clone of the
+mirror at the base revision `d310644`:
+
+```
+git apply --stat attempt.patch   → README.md | 2 +-   1 file changed, 1 insertion(+), 1 deletion(-)
+git apply attempt.patch          → clean
+node <corpus>/rules/readme-no-doubled-words.mjs → "readme-no-doubled-words: ok", exit 0
+node <corpus>/suite/readme-guard.mjs            → FACTORY_SUMMARY {"passed":1,"failed":0,…}, exit 0
+npx prettier --check /tmp/ri-final/README.md    → All matched files use Prettier code style!
+```
+
+and then in this repository, as commit `f6f581a` ("README: no progress-stall detector (the first
+promoted change)"), which names the unit, verdict and promotion id. The line now reads
+`- **No progress-stall detector** (IN #6).` — the admission survives, the doubled word does not.
 
 ## 7. The backlog triage (the reason `status` is readable again)
 
@@ -262,5 +294,45 @@ The ruling this phase puts in front of the operator, in order of honesty:
    could ever be true.
 3. **Raising k alone does not help** (rows 2–3): it is all producer risk and no discrimination.
 
-Nothing here was changed in code: the operating point is a ratified decision and the ruling is the
-operator's. `packages/wall/src/operating-point.ts` is the code half of whichever answer is chosen.
+**Ruled 2026-11-07: keep `m=20, k=18`, and publish the missing half.** Recorded in the ratified record
+(`findings.md` § DECIDED 2026-11-07) and implemented: `ACCEPTANCE_ALTERNATIVE_P` names the alternative,
+every verdict's `class-certification` scenario prints `a class that truly passes 0.9 is certified anyway
+with probability 0.67692680518946603571 (this operating point is a screen, not a test)`, and
+`audit --certifications` prints the same sentence plus an `operatingPoint` block in its JSON. Three specs
+pin the numbers: the α, the acceptance at k=16/17/18 (which is what makes "lowering k is stricter" a
+falsifiable claim rather than a preference), and the verdict text.
+
+## 11. The certificate's first consumer (item 4a, this round)
+
+The plan's fourth item was "dispatch that consumes a class certificate — today a certificate gates
+nothing". It was true: `class_certificates` had a writer (the wall, on every verdict), two readers
+(`audit --certifications`, the staleness job) and no *gate*.
+
+**The gate that was built:** `runUnit` reads the newest certificate for the class the wall will measure
+under. If it says `not-certified` — `m` attempts judged, fewer than `k` passed — the dispatch is refused
+with `CLASS_NOT_CERTIFIED` (exit 3), and the refusal quotes the certificate id and its counts. It happens
+before the lease and the reservation, so a refused dispatch spends nothing, writes no attempt and leaves
+no launch effect. `insufficient` never refuses: every first-of-class unit is insufficient by construction
+and refusing it would make the factory unable to take the first unit of any class — the failure mode the
+cold-start policy exists to prevent. `certified` proceeds.
+
+**Why not gate everything on certification:** the live store's real work (`docs-hygiene`, 1 attempt) is
+`insufficient`, and it is *supposed* to be. A gate that refused `insufficient` would have blocked the
+first real intent in this same session, which is the difference between a gate and a wall.
+
+**The wiring that makes it testable and non-drifting:** `EngineDeps` gained a required
+`taskClass(spec)`, wired in the CLI to `taskClassFrom` (`apps/cli/src/task-class.ts`) — the same
+derivation the wall uses to file a certificate. One function, two readers: a verdict and the gate that
+reads its certificate cannot disagree about which class it is.
+
+**Six specs** (`packages/core/src/engine.test.ts`): the refusal with its counts and exit code; nothing
+left behind (no lease, no attempt, no reservation, no effect, unit still `qualified`); a certified class
+dispatching; an insufficient certificate dispatching; and a bad certificate for a *different* class not
+refusing anything. The store's fake gained `setClassCertificate` for this — the real store deliberately
+has no such method, since a certificate is what a verdict carries, never something an operator asserts.
+
+**Not done, and still open:** the refusal is observable in the error and the ledger's absence (no dispatch
+event), but the *consumed certificate id* is not yet recorded on a successful dispatch — an engine event
+payload change next round would make "which certificate authorised this attempt" a ledger fact rather than
+an inference. And this gate has never fired on real evidence: no class has ever been measured
+`not-certified`, so its first true firing is still ahead.

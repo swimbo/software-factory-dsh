@@ -35,6 +35,7 @@ import {
 import type {
   AppendOptions,
   AttemptRow,
+  ClassCertificateRow,
   EffectRow,
   MandateRow,
   ReceiptRow,
@@ -141,6 +142,8 @@ export class FakeStore implements Store {
   private readonly verdicts = new Map<string, VerdictRow>();
   private readonly effects = new Map<string, EffectRow>();
   private readonly spend: SpendRow[] = [];
+  /** Class certificates, newest first — the projection the dispatch gate reads. */
+  private readonly certificates: ClassCertificateRow[] = [];
   /** ND3: metered usage facts, appended in order like the real table. */
   private readonly usage: UsageRowLike[] = [];
   private readonly promotions: PromotionRow[] = [];
@@ -1145,6 +1148,48 @@ export class FakeStore implements Store {
     this.assertWritable('recordSpend');
     this.unit(row.unitId);
     this.spend.push(row);
+  }
+
+  /**
+   * Seed a class certificate. The real store has no such method on purpose (a certificate is what a
+   * verdict carries, never something an operator asserts); this fake needs one because the dispatch
+   * gate's refusal can only be exercised with a certificate in front of it.
+   */
+  setClassCertificate(seed: {
+    readonly taskClass: string;
+    readonly outcome: 'certified' | 'not-certified' | 'insufficient';
+    readonly samples?: number;
+    readonly passes?: number;
+    readonly m?: number;
+    readonly k?: number;
+  }): ClassCertificateRow {
+    const m = seed.m ?? 20;
+    const k = seed.k ?? 18;
+    const row: ClassCertificateRow = {
+      certificateId: `C-${String(this.certificates.length + 1)}`,
+      verdictId: `V-${String(this.certificates.length + 1)}`,
+      unitId: 'U-seed',
+      taskClass: seed.taskClass,
+      m,
+      k,
+      p0: 0.95,
+      alpha: 0.07548367378849634,
+      samples: seed.samples ?? m,
+      passes: seed.passes ?? k,
+      outcome: seed.outcome,
+      policyVersion: 'policy/1',
+      modelId: null,
+      holdoutRevision: null,
+      recordedAt: '2026-11-07T00:00:00.000Z',
+      certificateSha: `sha256:${'a'.repeat(64)}`,
+    };
+    this.certificates.unshift(row);
+    return row;
+  }
+
+  certificatesForClass(taskClass: string): readonly ClassCertificateRow[] {
+    this.tick('certificatesForClass');
+    return this.certificates.filter((row) => row.taskClass === taskClass);
   }
 
   spendForUnit(unitId: string): { reservedUsd: number; recordedUsd: number; unknownRows: number } {

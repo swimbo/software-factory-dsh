@@ -32,6 +32,7 @@ const EXPECTED_EXIT_CODES: Readonly<Record<ErrorCode, number>> = {
   ATTEMPT_NOT_FOUND: 3,
   MANDATE_EXPIRED: 3,
   UNIT_ALREADY_TERMINAL: 3,
+  CLASS_NOT_CERTIFIED: 3,
   VERDICT_FAILED: 3,
   // 4 — unknown / ambiguous
   ATTEMPT_AMBIGUOUS: 4,

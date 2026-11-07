@@ -9,7 +9,12 @@
  *       = P(X ≤ k − 1) for X ~ Binomial(m, p0)
  *
  * α is computed here, exactly, rather than quoted from a table — a published probability that
- * nobody can reproduce is a number, not a measurement. The same arithmetic gives β(p), the power to
+ * nobody can reproduce is a number, not a measurement. The *other* half of the risk is published with
+ * it since the 2026-11-07 ruling (`findings.md` § DECIDED 2026-11-07): at this point a class whose true
+ * pass rate is 0.90 is certified anyway with probability 0.6769…, so a certificate is a **screen**, not
+ * a test. That number is what `ACCEPTANCE_ALTERNATIVE_P` names, and the surfaces that read a
+ * certificate print it beside α — 18 was kept over 17 and 16 because lowering `k` makes this number
+ * *worse* while α falls, which reads as strictness and is the opposite. The same arithmetic gives β(p), the power to
  * certify a class whose true pass rate is `p` (`certificationRisk` below); what it cannot give is the
  * probability that a wall refuses a *wrong* patch — that is a property of the corpus, counted rather
  * than computed in `e2e/certification/regressions.ts`. And α says nothing about production success,
@@ -30,6 +35,15 @@ export const DEFAULT_OPERATING_POINT: OperatingPoint = Object.freeze({
   k: 18,
   p0: 0.95,
 });
+
+/**
+ * The alternative pass rate the acceptance half is published at: a class five points below the
+ * design point. `certificationRisk(...).certifiedAt(ACCEPTANCE_ALTERNATIVE_P)` is P(such a class is
+ * certified anyway) — 0.6769 at the ratified point. Chosen as 0.90 because it is the rate an
+ * operator would still call "mostly working", i.e. the weakest class a certificate must not wave
+ * through; it is a *choice of alternative*, not a measurement, and is printed with its value.
+ */
+export const ACCEPTANCE_ALTERNATIVE_P = 0.9;
 
 export type CertificationOutcome = 'certified' | 'not-certified' | 'insufficient';
 

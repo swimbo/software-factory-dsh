@@ -107,6 +107,7 @@ export {
   type StoredCertificate,
 } from './certificate-recency.ts';
 export {
+  ACCEPTANCE_ALTERNATIVE_P,
   binomialCdfAtLeast,
   binomialCdfAtMost,
   certificationAlpha,

@@ -54,6 +54,7 @@ import {
   type ScenarioRunInput,
 } from '@factory/wall';
 import { resolveHome } from './context.ts';
+import { taskClassFrom } from './task-class.ts';
 
 /** Wall knobs that are operator policy, read from the environment once per invocation. */
 export interface WallPolicyEnv {
@@ -99,14 +100,13 @@ export function wallPolicyFrom(
   spec: UnitSpec,
 ): WallPolicyEnv {
   const holdoutRoot = (env.FACTORY_HOLDOUT_ROOT ?? '').trim();
-  const taskClass = (env.FACTORY_HOLDOUT_TASK_CLASS ?? '').trim();
   const testRoot = (env.FACTORY_TEST_ROOT ?? '').trim();
   return {
     holdoutRoot: holdoutRoot === '' ? undefined : holdoutRoot,
-    // A holdout corpus is filed under a task class. The spec has no such field (the
-    // qualifier derives the class from measured history), so the operator names it and
-    // the spec slug is the default: two units of the same kind share a slug family.
-    taskClass: taskClass === '' ? spec.slug : taskClass,
+    // A holdout corpus is filed under a task class, and `taskClassFrom` is the one derivation: the
+    // engine's dispatch gate reads the certificate for that class, so a second copy of this rule here
+    // could file a verdict under a class no gate ever reads.
+    taskClass: taskClassFrom(env, spec),
     testRoot: testRoot === '' ? 'tests' : testRoot,
     pinnedSuite: argvOrNull(env.FACTORY_WALL_SUITE),
     deltaThreshold: numberOr(env.FACTORY_WALL_DELTA_THRESHOLD, 0.2),

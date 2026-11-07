@@ -52,7 +52,12 @@ import type { HoldoutScenario, HoldoutStore } from './holdout.ts';
 import { assessSecurityPaths, SENSITIVE_OPERATION_CLASSES } from './security-path.ts';
 import type { ClassCertificate } from '@factory/contracts';
 
-import { certificationForClass, type ClassCertification } from './operating-point.ts';
+import {
+  ACCEPTANCE_ALTERNATIVE_P,
+  certificationForClass,
+  certificationRisk,
+  type ClassCertification,
+} from './operating-point.ts';
 import { normalisePath, pathIsInScope } from './scope.ts';
 
 export { pathIsInScope } from './scope.ts';
@@ -1779,6 +1784,19 @@ function checkClassCertification(
   const point =
     `m=${certification.m.toString()} k=${certification.k.toString()} ` +
     `alpha=${certification.alphaExact}`;
+  // α alone is quotable as a strength and is half the risk: it is the probability a class that truly
+  // passes p0 is refused. The other half — a class five points worse being certified anyway — is
+  // printed with it since the 2026-11-07 ruling (`findings.md` § DECIDED 2026-11-07), because at
+  // m=20 that number is 0.677 and it is what makes this a screen rather than a test.
+  const screenNote =
+    `; a class that truly passes ${ACCEPTANCE_ALTERNATIVE_P.toString()} is certified anyway with ` +
+    `probability ${
+      certificationRisk({
+        m: certification.m,
+        k: certification.k,
+        p0: certification.p0,
+      }).certifiedAt(ACCEPTANCE_ALTERNATIVE_P).exact
+    } (this operating point is a screen, not a test)`;
   const legacyNote =
     legacyLines > 0
       ? `; ${legacyLines.toString()} log line(s) predate policy/model identity and were not counted`
@@ -1794,7 +1812,6 @@ function checkClassCertification(
         : `${counted.samples.toString()} of ${certification.m.toString()} attempts for this task ` +
           `class: insufficient evidence to certify at ${point} — unknown is not "probably fine", ` +
           `so promotion requires a human signature${legacyNote}`;
-
   // Two different facts, both kept: `minDeltaSamples` is Δ evidence, certification is the
   // binomial operating point. Either one unsatisfied means a person decides.
   const requiresHuman = !deltaCertifiable || certification.outcome !== 'certified';
@@ -1804,7 +1821,9 @@ function checkClassCertification(
 
   return {
     outcome: {
-      scenarios: [result('class-certification', 'policy', 'pass', `${deltaLine}; ${detail}`)],
+      scenarios: [
+        result('class-certification', 'policy', 'pass', `${deltaLine}; ${detail}${screenNote}`),
+      ],
       reasons: [],
     },
     requiresHuman,

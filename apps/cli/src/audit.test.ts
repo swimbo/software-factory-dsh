@@ -157,6 +157,19 @@ describe('factory audit --certifications', () => {
       alpha: 0.07548367378849634,
     });
     expect(result.stderr).toContain('1 of 1 classes current');
+    // The operating point is published with both halves of its risk, and the half α does not cover is
+    // spelled out: at m=20 a class that truly passes 0.90 is certified anyway about two times in three
+    // (2026-11-07 ruling, `findings.md` § DECIDED 2026-11-07). Without this line α reads as a strength.
+    expect(payload['operatingPoint']).toMatchObject({
+      m: 20,
+      k: 18,
+      p0: 0.95,
+      alphaExact: '0.07548367378849634297',
+      acceptanceAt: { p: 0.9, exact: '0.67692680518946603571' },
+    });
+    expect(result.stderr).toContain('OPERATING POINT  m=20 k=18 p0=0.95');
+    expect(result.stderr).toContain('is a screen, not a test');
+    expect(result.stderr).toContain('0.67692680518946603571');
   });
 
   it('exits 9 when the policy version changed, and says which versions', () => {

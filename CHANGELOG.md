@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.12.0 — 2026-11-07
+
+**A class certificate now refuses work.** Until today a certificate was a row nothing read: the wall
+published one per verdict, `audit --certifications` projected it, and a dispatch proceeded whatever it
+said. `runUnit` now reads the certificate for the class the wall will measure under, and a class whose
+latest certificate is `not-certified` (at least `m` attempts judged, fewer than `k` passed) refuses the
+dispatch with `CLASS_NOT_CERTIFIED` (exit 3) **before** the lease and the reservation, so a refused
+dispatch spends nothing and leaves nothing to reconcile. `insufficient` never refuses: every
+first-of-class unit is insufficient by construction — that is what cold start exists for — and refusing
+it would make the factory unable to take the first unit of any class. `certified` proceeds.
+
+The engine needs the class to do this, so `EngineDeps` gained a required `taskClass(spec)`; the CLI
+wires it to the same derivation the wall uses (`taskClassFrom`, new `apps/cli/src/task-class.ts`), so a
+verdict and the gate that reads its certificate cannot disagree about which class it belongs to. Six
+specs: the refusal and its details, nothing-left-behind (no lease, no attempt, no reservation, no launch
+effect), certified and insufficient both dispatching, and a bad certificate for a _different_ class not
+refusing anything.
+
+**And the operating point now publishes both halves of its risk.** The 2026-11-07 ruling kept
+`m=20, k=18`, because lowering `k` does not tighten the gate — it makes it more permissive
+(a class that truly passes 0.90 is certified 86.7 % of the time at k=17 and 95.7 % at k=16, against
+67.7 % at k=18) while α falls, which reads as strictness and is the opposite. What was missing is that
+67.7 %: it now prints beside α in every verdict's `class-certification` scenario and in
+`audit --certifications` (human line and JSON `operatingPoint` block), worded so a certificate cannot be
+read as a test. At m=20 it is a screen; a discriminating test needs ~150 attempts per class.
+
+**Recorded, not shipped:** the first real intent against this repository was measured, verified and
+**promoted** — unit `U-052939402fae`, verdict `V-c40f24ed88ac`, promotion `P-e968069a`, the first
+promotion row this store has ever held. Its patch (a real README defect) applies cleanly to a pristine
+clone of the mirror at the base revision, passes the corpus rules and the guard suite, and is
+`prettier --check` clean. Evidence: `docs/planning/dark-factory-dsh/evidence/phase-21-first-real-intent.md`.
+
+**Verified:** `bash scripts/verify.sh` → 7 passed, 1 skipped, 0 failed.
+
 ## v0.11.1 — 2026-11-07
 
 **A verdict outlived its unit, and `status` kept asking about a unit that was gone.** Both the

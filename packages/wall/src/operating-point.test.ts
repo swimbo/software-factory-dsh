@@ -191,6 +191,27 @@ describe('the two-sided risk of the operating point', () => {
     }
   });
 
+  it('[the 2026-11-07 ruling holds: dropping k makes the gate MORE permissive at the alternative]', () => {
+    // The round list that prompted the ruling assumed 17/16 would be *stricter* than 18. They are the
+    // opposite: k is the minimum passes required, so a lower k is an easier bar, and α (the risk of
+    // refusing a truly-0.95 class) falls precisely because the bar is easier. What grows is the
+    // chance a worse class is certified anyway — the number that was never published. k=18 was kept
+    // because it is the least permissive of the three, and this spec is what keeps that claim from
+    // drifting if someone "tightens" α later.
+    const accept90 = (k: number): string =>
+      certificationRisk({ m: 20, k, p0: 0.95 }).certifiedAt(0.9).exact;
+    expect(accept90(16)).toBe('0.95682550471553661876');
+    expect(accept90(17)).toBe('0.86704667656566492231');
+    expect(accept90(18)).toBe('0.67692680518946603571');
+    // Direction, not just the three constants: lowering k raises the acceptance probability.
+    expect(Number(accept90(17))).toBeGreaterThan(Number(accept90(18)));
+    expect(Number(accept90(16))).toBeGreaterThan(Number(accept90(17)));
+    // And α falls as k falls, which is what made the permissive reading tempting.
+    expect(certificationRisk({ m: 20, k: 17, p0: 0.95 }).alpha).toBeLessThan(
+      certificationRisk({ m: 20, k: 18, p0: 0.95 }).alpha,
+    );
+  });
+
   it('[the six-row β table the runbook quotes is this function output, digit for digit]', () => {
     const risk = certificationRisk();
     // Re-generate: `node --input-type=module -e "…"` — the runbook table is a paste of this, and

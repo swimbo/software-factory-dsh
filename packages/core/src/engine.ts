@@ -56,6 +56,7 @@ import {
 import type {
   AppendOptions,
   AttemptRow,
+  ClassCertificateRow,
   EffectRow,
   MandateRow,
   ReceiptRow,
@@ -123,6 +124,14 @@ export interface EngineDeps {
   readonly policyVersion?: () => string;
   /** Optional richer overlay descriptor; when absent the engine emits the minimal one below. */
   readonly overlay?: (input: OverlayInput) => unknown;
+  /**
+   * The task class the wall will measure this run under. Required, not optional: the dispatch gate
+   * below consumes the class certificate, and a caller that cannot name the class would silently
+   * skip the gate — the exact "a certificate gates nothing" state this field exists to end. On this
+   * host it is the wall policy's configured class (`FACTORY_HOLDOUT_TASK_CLASS`), resolved by the
+   * composition root.
+   */
+  readonly taskClass: (spec: UnitSpec) => string;
 }
 
 export interface SubmitResult {
@@ -349,6 +358,21 @@ function toLaneDecision(row: LaneDecisionType): LaneDecision {
 }
 
 // ---------------------------------------------------------------------- engine
+
+/**
+ * The newest class certificate for a class, or `null` when nothing has been certified or the store
+ * exposes no certificate projection.
+ *
+ * `certificatesForClass` is optional on the store interface (a projection may be absent), so an
+ * absent projection is `null` — "no certificate" — and never "fine". A certificate that is refused
+ * only when it *says* not-certified keeps the honest direction: absence of evidence is not a refusal
+ * here (cold start), but it is never a pass either.
+ */
+function latestClassCertificate(store: Store, taskClass: string): ClassCertificateRow | null {
+  const read = store.certificatesForClass;
+  if (read === undefined) return null;
+  return read.call(store, taskClass)[0] ?? null;
+}
 
 export function createEngine(deps: EngineDeps): Engine {
   const { store } = deps;
@@ -621,6 +645,40 @@ export function createEngine(deps: EngineDeps): Engine {
           'MANDATE_EXPIRED',
           `unit ${unitId} has no mandate to dispatch under`,
           { unitId },
+        );
+      }
+
+      // The class certificate is consumed here, and here only. Before this, a certificate was a
+      // row that no code path read: the wall published one per verdict, `audit --certifications`
+      // projected it, and a dispatch proceeded whatever it said. A class measured at fewer than
+      // `k` of `m` attempts is a class this factory has evidence against, and new dark work in it
+      // is exactly what should stop. `insufficient` never refuses: every first-of-class unit is
+      // insufficient by construction (that is what `--cold-start` exists for), and refusing it
+      // would make the factory unable to take the first unit of any class. `certified` proceeds.
+      //
+      // Refused *before* the lease and the reservation below, so a refused dispatch spends nothing
+      // and leaves nothing to reconcile.
+      const taskClass = deps.taskClass(unit.spec);
+      const classCertificate = latestClassCertificate(store, taskClass);
+      if (classCertificate !== null && classCertificate.outcome === 'not-certified') {
+        throw new FactoryError(
+          'CLASS_NOT_CERTIFIED',
+          `class ${taskClass} is not certified: its latest certificate ` +
+            `${classCertificate.certificateId} records ${String(classCertificate.passes)} of ` +
+            `${String(classCertificate.samples)} attempts passing, below k=` +
+            `${String(classCertificate.k)} at m=${String(classCertificate.m)}. Dispatch of ` +
+            `${unitId} is refused — the refusal is about the class, not this unit. Re-certify the ` +
+            'class (or correct its corpus) before it takes dark work again.',
+          {
+            unitId,
+            taskClass,
+            certificateId: classCertificate.certificateId,
+            outcome: classCertificate.outcome,
+            samples: classCertificate.samples,
+            passes: classCertificate.passes,
+            m: classCertificate.m,
+            k: classCertificate.k,
+          },
         );
       }
       if (approval.reserveUsd === null) {

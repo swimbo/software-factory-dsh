@@ -14,7 +14,14 @@
 import { contentHash, FactoryError } from '@factory/contracts';
 import type { LedgerEvent } from '@factory/contracts';
 import { legacyPolicyVersions } from '@factory/qualifier';
-import { certificatesRecency, judgedCertificate, type CertificateRecency } from '@factory/wall';
+import {
+  ACCEPTANCE_ALTERNATIVE_P,
+  certificatesRecency,
+  certificationRisk,
+  DEFAULT_OPERATING_POINT,
+  judgedCertificate,
+  type CertificateRecency,
+} from '@factory/wall';
 
 import { EXIT, UsageError } from '../exit.ts';
 import { field } from '../render/format.ts';
@@ -156,6 +163,43 @@ function describeCorpus(corpus: string | null, side: 'certificate' | 'measuremen
     : 'no named corpus';
 }
 
+/**
+ * The operating point with both halves of its risk, in the shape the certifications JSON carries.
+ *
+ * `alphaExact` is the ratified published number — P(a class that truly passes p0 fails certification).
+ * `acceptanceAt` is the half that was missing until the 2026-11-07 ruling: P(a class that truly passes
+ * a worse rate is certified anyway). Both are computed here from `certificationRisk` rather than
+ * quoted, so a change to the point cannot leave a stale number printed beside it.
+ */
+function operatingPointBlock(): {
+  readonly m: number;
+  readonly k: number;
+  readonly p0: number;
+  readonly alpha: number;
+  readonly alphaExact: string;
+  readonly acceptanceAt: {
+    readonly p: number;
+    readonly probability: number;
+    readonly exact: string;
+  };
+} {
+  const { m, k, p0 } = DEFAULT_OPERATING_POINT;
+  const risk = certificationRisk({ m, k, p0 });
+  const acceptance = risk.certifiedAt(ACCEPTANCE_ALTERNATIVE_P);
+  return {
+    m,
+    k,
+    p0,
+    alpha: risk.alpha,
+    alphaExact: risk.alphaExact,
+    acceptanceAt: {
+      p: ACCEPTANCE_ALTERNATIVE_P,
+      probability: acceptance.value,
+      exact: acceptance.exact,
+    },
+  };
+}
+
 export function runAudit(input: VerbInput): number {
   const { ctx } = input;
   const wantsEscapeRate = boolOption(input.options, 'escapeRate');
@@ -201,6 +245,10 @@ export function runAudit(input: VerbInput): number {
         };
       }),
       uncertifiedUnits: report.uncertifiedUnits,
+      // The operating point a certificate was judged at, both halves of its risk, and the definition
+      // of the second one. α alone was quotable as a strength; the 2026-11-07 ruling says the screen
+      // half ships wherever α does (`findings.md` § DECIDED 2026-11-07).
+      operatingPoint: operatingPointBlock(),
     });
     ctx.ui.err(
       `CLASS CERTIFICATIONS  under ${report.basis.policyVersion} (model ${report.basis.modelId ?? 'offline'})`,
@@ -223,6 +271,16 @@ export function runAudit(input: VerbInput): number {
         );
       }
     }
+    const point = operatingPointBlock();
+    ctx.ui.err(
+      `  OPERATING POINT  m=${String(point.m)} k=${String(point.k)} p0=${String(point.p0)}  ` +
+        `alpha=${String(point.alphaExact)} is P(a class that truly passes ${String(point.p0)} fails certification)`,
+    );
+    ctx.ui.err(
+      `  a certificate at this point is a screen, not a test: a class that truly passes ` +
+        `${String(point.acceptanceAt.p)} is certified anyway with probability ` +
+        `${String(point.acceptanceAt.exact)}`,
+    );
     for (const unitId of report.uncertifiedUnits) {
       ctx.ui.err(`  ${unitId}  unit verified with no class certificate: never certified`);
     }

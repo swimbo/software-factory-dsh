@@ -509,6 +509,13 @@ describe('A10 — Δ provenance and class certifiability', () => {
     expect(certification?.observed ?? '').toContain('insufficient');
     expect(certification?.observed ?? '').not.toContain('certified at');
     expect(certification?.observed ?? '').toContain('alpha=0.07548367378849634297');
+    // The other half of the risk, printed beside α since the 2026-11-07 ruling: at m=20/k=18 a class
+    // that truly passes 0.90 is certified anyway with probability 0.6769…, so the text must not let α
+    // be read as a test. Delete this assertion and the sentence can silently become a strength again.
+    expect(certification?.observed ?? '').toContain(
+      'a class that truly passes 0.9 is certified anyway with probability 0.67692680518946603571',
+    );
+    expect(certification?.observed ?? '').toContain('screen, not a test');
   });
 
   it('never sets the promotion flag on a verdict that did not verify', async () => {

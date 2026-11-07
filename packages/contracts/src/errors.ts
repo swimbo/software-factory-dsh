@@ -16,6 +16,16 @@ export const ERROR_CODES = [
   'ATTEMPT_NOT_FOUND',
   'MANDATE_EXPIRED',
   'UNIT_ALREADY_TERMINAL',
+  /**
+   * The unit's task class has been measured and refused: its latest class certificate is
+   * `not-certified` (at least `m` attempts were judged and fewer than `k` passed). Exit 3, like
+   * `LANE_NOT_DARK`: the request is well-formed and the class is known — the class is what the
+   * evidence refuses. Distinct from `VERDICT_FAILED` (3) because nothing about *this* attempt
+   * failed: the refusal is a fact about the population it belongs to, and the remedy is a corpus or
+   * an operating-point decision, not a re-run. `insufficient` certificates never refuse — every
+   * first-of-class unit is insufficient by construction, which is what cold start exists for.
+   */
+  'CLASS_NOT_CERTIFIED',
   'VERDICT_FAILED',
   // 4 — unknown / ambiguous: never implies success, never implies failure
   'ATTEMPT_AMBIGUOUS',
@@ -85,6 +95,7 @@ const EXIT: Record<ErrorCode, number> = {
   ATTEMPT_NOT_FOUND: 3,
   MANDATE_EXPIRED: 3,
   UNIT_ALREADY_TERMINAL: 3,
+  CLASS_NOT_CERTIFIED: 3,
   VERDICT_FAILED: 3,
   ATTEMPT_AMBIGUOUS: 4,
   WALL_UNAVAILABLE: 4,

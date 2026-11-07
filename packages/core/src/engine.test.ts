@@ -233,7 +233,12 @@ interface Harness {
 }
 
 function harness(
-  init: { policyVersion?: string; envelopeUsd?: number; stateDir?: string } = {},
+  init: {
+    policyVersion?: string;
+    envelopeUsd?: number;
+    stateDir?: string;
+    taskClass?: string;
+  } = {},
 ): Harness {
   const store = new FakeStore(init.stateDir ?? '/tmp/factory-engine-test');
   const clock = fixedClock();
@@ -253,6 +258,7 @@ function harness(
     },
     envelopeUsd: () => envelopeUsd,
     traceId: () => `trace-${(traces += 1)}`,
+    taskClass: () => init.taskClass ?? 'test-class',
     ...(init.policyVersion === undefined
       ? {}
       : { policyVersion: () => init.policyVersion as string }),
@@ -494,6 +500,82 @@ describe('qualifyUnit', () => {
 
 // ------------------------------------------------------------------------ run
 
+/**
+ * The certificate's first consumer.
+ *
+ * Before this gate, a class certificate was a row nothing read: the wall published one per verdict,
+ * `audit --certifications` projected it, and a dispatch proceeded whatever it said. The gate refuses
+ * a class that evidence has already refused — and only then: `insufficient` is the state of every
+ * first-of-class unit (that is what cold start exists for), so refusing it would make the factory
+ * unable to take the first unit of any class.
+ */
+describe('runUnit consumes the class certificate', () => {
+  it('refuses a dispatch in a not-certified class, before any lease or reservation', () => {
+    const h = harness({ envelopeUsd: 2 });
+    h.store.setClassCertificate({
+      taskClass: 'test-class',
+      outcome: 'not-certified',
+      samples: 20,
+      passes: 12,
+    });
+    const { unit } = h.engine.submitUnit(spec());
+    h.engine.qualifyUnit(unit.unitId);
+
+    const error = expectCode(() => h.engine.runUnit(unit.unitId), 'CLASS_NOT_CERTIFIED');
+    expect(error.exitCode).toBe(3);
+    expect(error.message).toContain('test-class is not certified');
+    expect(error.message).toContain('12 of 20');
+    expect(error.details).toMatchObject({
+      taskClass: 'test-class',
+      outcome: 'not-certified',
+      samples: 20,
+      passes: 12,
+    });
+
+    // A refused dispatch must leave nothing behind to reconcile: no lease, no attempt, no
+    // reservation, no launch effect. "Refused" and "refused after reserving 1.50" are different
+    // facts, and the second one would be money spent on a class the evidence refused.
+    expect(h.store.getLiveLease(unit.unitId)).toBeNull();
+    expect(h.store.spendForUnit(unit.unitId).reservedUsd).toBe(0);
+    expect(h.store.effectsInOrder()).toHaveLength(0);
+    expect(h.store.ledger.filter((event) => event.type === 'unit.dispatched')).toHaveLength(0);
+    expect(h.store.getUnit(unit.unitId)?.state).toBe('qualified');
+  });
+
+  it('dispatches when the class is certified', () => {
+    const h = harness({ envelopeUsd: 2 });
+    h.store.setClassCertificate({ taskClass: 'test-class', outcome: 'certified' });
+    const { unit } = h.engine.submitUnit(spec());
+    h.engine.qualifyUnit(unit.unitId);
+    const run = h.engine.runUnit(unit.unitId);
+    expect(run.unit.state).toBe('dispatched');
+  });
+
+  it('dispatches when the certificate is insufficient — first-of-class work is always insufficient', () => {
+    const h = harness({ envelopeUsd: 2 });
+    h.store.setClassCertificate({
+      taskClass: 'test-class',
+      outcome: 'insufficient',
+      samples: 1,
+      passes: 1,
+    });
+    const { unit } = h.engine.submitUnit(spec());
+    h.engine.qualifyUnit(unit.unitId);
+    const run = h.engine.runUnit(unit.unitId);
+    expect(run.unit.state).toBe('dispatched');
+  });
+
+  it('reads the certificate for the class the wall will measure under, not another class', () => {
+    const h = harness({ envelopeUsd: 2 });
+    // A bad class exists, but the unit's class is a different one: the gate must not refuse by
+    // accident because some certificate is bad somewhere.
+    h.store.setClassCertificate({ taskClass: 'other-class', outcome: 'not-certified' });
+    const { unit } = h.engine.submitUnit(spec());
+    h.engine.qualifyUnit(unit.unitId);
+    expect(h.engine.runUnit(unit.unitId).unit.state).toBe('dispatched');
+  });
+});
+
 describe('runUnit', () => {
   it('dispatches under one lease, one reservation and one launch effect', () => {
     const h = harness({ envelopeUsd: 2 });
@@ -574,6 +656,7 @@ describe('runUnit', () => {
       qualify: (input) => decision(input.unitId, 'dark'),
       envelopeUsd: () => 2,
       traceId: () => 'trace-injected',
+      taskClass: () => 'test-class',
       overlay: (input) => ({ kind: 'overlay/v2', attemptId: input.attemptId }),
     } satisfies EngineDeps);
 

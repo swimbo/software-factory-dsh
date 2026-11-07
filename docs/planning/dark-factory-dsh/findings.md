@@ -309,6 +309,40 @@ money and a new dependency; nothing at all means a coordinated local rewrite is 
 the exact attack the anchor exists for. **Does not buy:** real-time tamper evidence — the window is up
 to a day, and the README will say "detectable within 48 h", not "prevented".
 
+### DECIDED 2026-11-07 — the k = 18 ruling: keep 18, and publish the half of the risk it was missing
+
+ND1 published α and explicitly refused to publish β ("that needs a known-bad corpus nobody has"). That
+refusal was right about *measured* β, and it left a gap: β at a hypothetical alternative pass rate is
+computable from the same binomial, and nobody published it. The operator's round list called `k = 18`
+"strict on paper and untested in practice" and asked for 18, 17 or 16. Computed exactly
+(`packages/wall/src/operating-point.ts`, `certificationRisk`, and now pinned by a spec):
+
+| point | α = P(a truly-0.95 class **fails** certification) | P(a truly-**0.90** class is certified anyway) |
+| --- | --- | --- |
+| **m=20, k=18 (kept)** | 0.07548367378849634297 | **0.67692680518946603571** |
+| m=20, k=17 | 0.01590152601976356163 | 0.86704667656566492231 |
+| m=20, k=16 | 0.00257394033465228160 | 0.95682550471553661876 |
+
+**Ruling: keep m=20, k=18.** Dropping to 17 or 16 does not make the gate *stricter* — the reading the
+round list assumed — it makes it **more permissive at the alternative**: a class that truly passes 90 %
+walks through 86.7 % (k=17) or 95.7 % (k=16) of the time, against 67.7 % at k=18. α falls as `k` falls
+because α measures the risk of refusing a *good* class, and a lower bar refuses fewer good classes. Of
+the three, 18 tolerates the least bad-class acceptance, and it is the only one where a certificate is
+evidence at all.
+
+**The number that was missing now ships with the decision: at this operating point a certificate is a
+*screen*, not a test.** 0.6769 means a class whose true pass rate is 90 % certifies about two times in
+three. So a `current` certificate means *no measurement yet puts this class below ~0.90*; it does **not**
+mean the class passes 95 %. That sentence is now printed where certificates are read
+(`factory audit --certifications`, both the human line and the JSON `operatingPoint` block) and in every
+verdict's `class-certification` scenario, next to α, because the number was previously quotable without
+its other half.
+
+**Does not buy:** a discriminating test. Separating 0.95 from 0.90 at α≈0.05 with β≈0.20 needs roughly
+150 attempts per class; at m=150/k=142 a truly-0.90 class is certified 3 % of the time and a truly-0.97
+class still 96 %. That is the paid path (~1.4 M tokens per fixture class) and it is the only version of
+"the gate refused a class on merit" that could ever be true. Until then the sentence stays "screen".
+
 Ratified → implementation follows the decisions, not the old defaults. Where the code could not yet
 honour one (the two-uid topology needs the Linux target, off-host anchoring needs the anchor job), the
 README says which topology the running instance has, rather than assuming the decision is in force.
