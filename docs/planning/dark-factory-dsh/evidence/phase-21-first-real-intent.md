@@ -543,3 +543,96 @@ refusal at dispatch — still has never fired on real evidence: every dispatch i
 that was already `never-certified` and is now `current`, so the refusal is exercised by specs, not by a
 live refusal. (2) The scheduled re-certification of §12 has not spent: `import-hygiene` is current and not
 due, and `docs-hygiene` is still refused for want of a budget. Both stay recorded as untrue.
+
+## 14. Real intent #2: a corpus authored for the change, and a verdict the operator has to sign
+
+The round list's next step was "file one more real intent in `docs-typo-fix`". That turned out to be
+unavailable, and the reason is worth keeping: **`docs-typo-fix`'s real corpus cannot be satisfied honestly
+by this repository.** Run against the tree it names, it is red on 24 doubled words, 6 unfinished-work
+markers and 1 duplicate heading, and most of them are text the repository means to keep:
+
+```
+$ node ~/.factory/certification/holdout/docs-typo-fix/h-docs-typo-real-2026-11-02/rules/no-doubled-words.mjs
+no-doubled-words: docs/planning/dark-factory-dsh/data-map.md:769: repeated word "Verdict"
+no-doubled-words: docs/runbooks/certify-class.md:198: repeated word "restate"
+… 24 violation(s)
+$ node …/no-todo-markers.mjs
+no-todo-markers: docs/runbooks/certify-class.md:186: unfinished-work marker   … 6 violation(s)
+```
+
+A markdown table row of "Verdict Verdict Verdict" is not a typo, a runbook quoting a rule repeats its
+words on purpose, and `docs/planning/**` carries `TODO` as backlog text. A unit must pass *every* rule, so
+shipping in that class would have meant mangling documents to please a pattern — the "the gate measures
+the author's taste" defect the class rubric names. It was not filed.
+
+**So the class was authored for the change instead.** The genuine defect is the same one the README fix
+addressed, one file over: `docs/handover.md:132` opened a bullet with `**No no-progress detector.**`. A new
+`docs-hygiene` corpus revision measures exactly that file, and nothing else:
+
+```
+$ node --input-type=module -e 'loadHoldout(real-intent-2026-11-07/holdout, "docs-hygiene")'
+accepted h-docs-hygiene-2026-11-07-handover-040ce767 scenarios handover-no-doubled-words
+$ node …/h-docs-hygiene-2026-11-07-handover-040ce767/rules/handover-no-doubled-words.mjs   # at d310644
+handover-no-doubled-words: docs/handover.md:132: repeated word "No"   → exit 1
+$ node …/h-docs-hygiene-2026-11-07-handover-040ce767/suite/handover-guard.mjs              # at d310644
+handover-guard: docs/handover.md:132: repeated word "No"              → exit 1
+FACTORY_SUMMARY {"passed":0,"failed":1,"unknown":0,"exitCode":1}
+```
+
+The suite carries the anti-cheat half as well: the clause `step-level signals DSH owns` must survive, so
+deleting the bullet that admits the gap fails the wall's own gate. The corpus id is a hash of the rule and
+suite sources (`040ce767`); the manifest's `revisionHash` is `sha256:c44865ca…`, computed over the final
+scenario list, and the loader accepts it (revision must equal its directory name, and the hash must
+describe the scenarios actually present — both were checked by the loader refusing my first attempt, whose
+hash had been computed over a placeholder argv).
+
+**The run** (`U-60b581aad79f`, attempt `A-cdd7249093a3`, live model, one attempt):
+
+```
+$ factory run U-60b581aad79f
+verdict      pass  wall wall/0.1.0+local  no reasons
+acceptance:handover-no-doubled-word pass  oracle satisfied (runs=2 pass=2 fail=0 unknown=0)
+suite             pass  the wall's own suite passed (runs=2 pass=2 fail=0 unknown=0)
+holdout:01        pass  scenario passed (runs=2 pass=2 fail=0 unknown=0)
+holdout:quality   pass  1 of 1 holdout scenarios distinguish the change from the base (max non-discriminating 0)
+scope             pass  1 changed path(s), all inside the declared touch paths
+class-certification pass  1 of 20 attempts … insufficient evidence to certify at m=20 k=18
+```
+
+The patch the worker emitted, 1 file, +1/-1:
+
+```diff
+-- **No no-progress detector.** The watchdog enforces wall-clock and output-byte ceilings and the kill
++- **No stalled-progress detector.** The watchdog enforces wall-clock and output-byte ceilings and the kill
+   switch; "the worker is doing nothing" needs step-level signals DSH owns.
+```
+
+**Verified the way the round list asked, outside the tool:** the emitted patch applies to a pristine clone
+of the mirror at the base revision, and the class measures it green there.
+
+```
+$ git clone ~/.factory/real-intent-2026-11-07/mirror.git m && git -C m checkout d310644c
+$ git -C m apply --check …/attempt.patch          → clean at d310644
+$ git -C m apply …/attempt.patch
+$ node …/rules/handover-no-doubled-words.mjs      → handover-no-doubled-words: ok        (exit 0)
+$ node …/suite/handover-guard.mjs                 → FACTORY_SUMMARY {"passed":1,…}       (exit 0)
+```
+
+**Where it stops, by design:** the promotion. `factory promote U-60b581aad79f` without a signature refuses
+and prints the exact bytes it will accept:
+
+```
+PROMOTION_UNSIGNED: promotion requires a human signature over
+sha256:efec3cc78b12d3596674b0df876baa2ced5390d0ec75fc0c822294aa1e582551;
+none was provided and none can be synthesized. No artifact was written.   (exit 5)
+```
+
+That payload is `contentHash({unitId, verdictSha, approvedBy})` — the unit, the verdict body, and
+`signed-by operator`. Only the operator's private key can close it; this host holds
+`~/.factory/keys/operator.pub.pem` and nothing else, and `packages/gates` never sees a private key.
+
+**One more thing this run measured, for free:** the class certificate gate let an `insufficient` class
+(`docs-hygiene`, 1 of 20 samples) dispatch. That is the documented policy — refusing it would make the
+first unit of any class impossible — and it is the reason a real intent can ship through a class that has
+never been certified to `m`.
+

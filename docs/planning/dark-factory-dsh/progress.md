@@ -803,3 +803,34 @@ and the scheduler's first real spend, remain the two unfired controls.
 deleted after `git worktree prune`. What remains is `main` and `feat/dark-factory-dsh`, both at the same
 commit as `origin/main` and `origin/feat/dark-factory-dsh`. Nothing unmerged was deleted — the check was
 `git merge-base --is-ancestor <branch> main`, not "looks old".
+
+### Round 24 — a corpus authored for the change, and a second unit waiting for a signature (2026-11-07)
+
+**Step (1) of the approved sequence, done as far as the tool allows.** The literal instruction — file
+another intent in `docs-typo-fix` — is not available: that class's real corpus is red on this repo for 24
+doubled words, 6 `TODO` markers and 1 duplicate heading, most of them intentional text (table rows,
+quoted rules, backlog markers), so any unit in it would have to mangle documents to pass. That finding is
+recorded in §14 instead of worked around.
+
+**So the corpus was authored for the change.** A new `docs-hygiene` revision
+(`h-docs-hygiene-2026-11-07-handover-040ce767`) measures `docs/handover.md` and nothing else: red at the
+base revision on the bullet that read `**No no-progress detector.**`, green on the repair, with the
+anti-cheat half in the wall's own suite (the clause `step-level signals DSH owns` must survive, so deleting
+the bullet fails). The loader refused the first authoring attempt because the `revisionHash` had been
+computed over a placeholder argv — a good refusal, and the reason the hash is now computed last.
+
+**The run:** `U-60b581aad79f` / `A-cdd7249093a3`, one live attempt, `verdict pass` with every rule green,
+`holdout:quality` distinguishing base from candidate, `class-certification … insufficient` (1 of 20). The
+emitted patch is one line in `docs/handover.md`. Verified outside the tool: it applies cleanly to a
+pristine clone of the mirror at `d310644`, and both the rule and the suite are green in the patched clone.
+
+**Blocked at the one place it should be:** `factory promote` refuses without a human signature and prints
+the payload — `sha256:efec3cc78b12d3596674b0df876baa2ced5390d0ec75fc0c822294aa1e582551`. This host holds
+`operator.pub.pem` only; `packages/gates` never sees a private key, and the signature cannot be
+synthesized. The unit waits at `verified`.
+
+**Incidental measurement, recorded because it corrects a claim:** an `insufficient` class dispatches.
+A probe unit filed against `docs-hygiene` expecting `CLASS_NOT_CERTIFIED` was dispatched and measured
+(~64k tokens) — the gate refuses `not-certified` only, by design (`packages/core/src/engine.ts:655`). The
+probe unit was aborted with that reasoning as its reason.
+
